@@ -46,7 +46,13 @@ full mode for the rest of the connection (second capture had no `0x01` at all).
 Checked on hardware (BT, 2026-11-18): sticks 0-255 at offsets 0-3, face buttons and
 hat at offset 7, L3/R3 at offset 8 bits 6-7, gyro/accel at 15-26, battery nibble at
 52. Offsets 11-12 and 55-62 change every report (counters or timestamps, unused).
-Not yet seen on hardware: L1/R1/L2/R2, trigger analog, touchpad, PS/mic buttons.
+Also checked: L1/R1/L2/R2 at offset 8 bits 0-3, L2/R2 analog 0-255 at 4-5,
+touchpad click at offset 9 bit 1, two touch points (X 0-1919, Y up to ~1000 seen).
+Offset 40 changes with L2 travel (94/130 while pressed); offsets 41-42 read 9 with
+no trigger effect set. Meaning not settled; revisit when effects are written.
+Not yet seen: PS and mic buttons.
+
+One report in 13 304 failed CRC in a normal session: drop reports that fail CRC.
 
 State block (63 bytes, offsets relative to block start):
 
