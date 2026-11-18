@@ -345,7 +345,7 @@ public sealed class HapticStreamer : IDisposable
     }
 }
 
-internal static partial class TimerResolution
+public static partial class TimerResolution
 {
     [LibraryImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
     private static partial uint TimeBeginPeriod(uint period);

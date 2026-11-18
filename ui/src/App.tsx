@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { inHost, type Profile } from "./host";
+import { inHost, type Profile, type Status } from "./host";
 import { deepEqual } from "./model";
 import { Notices } from "./Notices";
 import { Light } from "./pages/Light";
+import { Mapping } from "./pages/Mapping";
 import { Overview } from "./pages/Overview";
 import { Profiles } from "./pages/Profiles";
 import { Settings } from "./pages/Settings";
@@ -16,12 +17,21 @@ const sections = [
   { id: "triggers", label: "Tetikler", keys: ["triggers", "triggerResponse"] },
   { id: "light", label: "Işık", keys: ["lightbar", "playerLeds", "micLed"] },
   { id: "sticks", label: "Analoglar", keys: ["sticks", "gyro"] },
+  { id: "mapping", label: "Tuşlar", keys: ["mapping", "macros"] },
   { id: "profiles", label: "Profiller", keys: [] },
 ] as const satisfies readonly { id: string; label: string; keys: readonly (keyof Profile)[] }[];
 
 type SectionId = (typeof sections)[number]["id"] | "settings";
 
 const linkLabel: Record<string, string> = { Bluetooth: "Bluetooth", Usb: "USB", Simulated: "simülasyon" };
+
+function mappingState(status: Status | null): string {
+  const m = status?.mapping;
+  if (!status?.connected) return "bekliyor";
+  if (m?.paused) return "duraklatıldı";
+  if (m?.blockedBy) return "engellendi";
+  return m?.active ? "açık" : "bekliyor";
+}
 
 function StatusBar() {
   const { status, profiles, activeId } = useApp();
@@ -38,6 +48,12 @@ function StatusBar() {
         <span className="metric">
           <span className="label">profil</span>
           <span className="value">{active.name}</span>
+        </span>
+      )}
+      {active?.mapping.enabled && (
+        <span className="metric" title={status?.mapping?.blockedBy ? `${status.mapping.blockedBy} yönetici olarak çalışıyor` : undefined}>
+          <span className="label">atama</span>
+          <span className={status?.mapping?.blockedBy ? "value warn" : "value"}>{mappingState(status)}</span>
         </span>
       )}
       <span className="metric">
@@ -92,6 +108,7 @@ function Shell() {
           {section === "triggers" && <Triggers />}
           {section === "light" && <Light />}
           {section === "sticks" && <Sticks />}
+          {section === "mapping" && <Mapping />}
           {section === "profiles" && <Profiles />}
           {section === "settings" && <Settings />}
         </section>

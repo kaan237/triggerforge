@@ -21,7 +21,7 @@ internal sealed class MainWindow : Form
         Size = new Size(1240, 780);
         StartPosition = FormStartPosition.CenterScreen;
         Controls.Add(_view);
-        Bridge = new Bridge(core, PostRaw);
+        Bridge = new Bridge(core, this, PostRaw);
         Load += async (_, _) => await InitializeViewAsync();
     }
 

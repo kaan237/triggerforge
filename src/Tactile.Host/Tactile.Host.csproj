@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Tactile.Core\Tactile.Core.csproj" />
+    <ProjectReference Include="..\Tactile.Input.Windows\Tactile.Input.Windows.csproj" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
   </ItemGroup>
   <!-- The WebView2 package also adds its WPF control; this is a WinForms host. -->

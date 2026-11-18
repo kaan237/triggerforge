@@ -30,6 +30,10 @@ public static partial class Validation
             name = name[..MaxNameLength];
         }
 
+        // Macros first: actions may only point at macros that survive.
+        IReadOnlyList<Macro> macros = NormalizeMacros(p.Macros, issues);
+        MappingConfig mapping = NormalizeMapping(p.Mapping, macros.Select(m => m.Id).ToHashSet(StringComparer.Ordinal), issues);
+
         return new Profile
         {
             Version = Profile.CurrentVersion,
@@ -79,6 +83,8 @@ public static partial class Validation
                 InvertY = gyro.InvertY,
             },
             Rumble = new RumbleConfig { Strength = Clamp(rumble.Strength, 0, 2, 1) },
+            Mapping = mapping,
+            Macros = macros,
         };
     }
 

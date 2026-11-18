@@ -7,6 +7,8 @@ const title: Record<Notice["kind"], string> = {
   idleSleep: "Uyku",
   gyroCalibration: "Gyro kalibrasyonu",
   info: "Bilgi",
+  elevated: "Yönetici izni",
+  mapping: "Tuş ataması",
   error: "Hata",
 };
 
@@ -14,7 +16,7 @@ function Item({ n, dismiss }: { n: Notice; dismiss: (id: number) => void }) {
   const running = n.progress !== undefined && n.progress < 1;
   useEffect(() => {
     if (running) return;
-    const t = window.setTimeout(() => dismiss(n.id), n.kind === "error" || n.kind === "brokenFile" ? 9000 : 6000);
+    const t = window.setTimeout(() => dismiss(n.id), n.kind === "error" || n.kind === "brokenFile" || n.kind === "elevated" ? 9000 : 6000);
     return () => window.clearTimeout(t);
   }, [running, n.id, n.kind, n.message, dismiss]);
 

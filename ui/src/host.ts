@@ -64,6 +64,104 @@ export type MicLed = "off" | "on" | "pulse";
 
 export type Pair<T> = { left: T; right: T };
 
+// ---- mapping (docs/contract-phase3.md) ----
+
+export type ButtonName =
+  | "square" | "cross" | "circle" | "triangle"
+  | "l1" | "r1" | "l2" | "r2"
+  | "create" | "options" | "l3" | "r3" | "ps" | "touchpad" | "mic"
+  | "up" | "right" | "down" | "left"
+  | "fn1" | "fn2" | "paddleLeft" | "paddleRight";
+
+// camelCase member of Tactile.Input.Key ("a", "digit1", "leftCtrl"); the full list is in keys.ts.
+export type KeyName = string;
+
+export type ActionKind = "none" | "key" | "mouseButton" | "wheel" | "macro" | "profile" | "run" | "micMute" | "special";
+export type MouseButtonName = "left" | "right" | "middle" | "x1" | "x2";
+export type Direction = "up" | "down" | "left" | "right";
+export type Special = "screenshot" | "gameBar" | "taskView" | "desktop" | "showApp";
+
+// Flat: `kind` picks which fields are used; the host drops the rest.
+export type Action = {
+  kind: ActionKind;
+  keys?: KeyName[];
+  button?: MouseButtonName;
+  direction?: Direction;
+  amount?: number;
+  macroId?: string;
+  profileId?: string; // id | "next" | "previous"
+  path?: string;
+  args?: string;
+  special?: Special;
+};
+
+export type Binding = {
+  press: Action;
+  hold: Action | null;
+  double: Action | null;
+  holdMs: number;
+  doubleMs: number;
+  turbo: boolean;
+  turboHz: number;
+  toggle: boolean;
+};
+
+export type TouchpadMapping = {
+  mode: "off" | "mouse" | "zones";
+  sensitivity: number;
+  acceleration: number;
+  scroll: boolean;
+  scrollSpeed: number;
+  tapToClick: boolean;
+  zoneLayout: "halves" | "quadrants";
+  zones: Binding[];
+  swipes: Record<Direction, Action>;
+};
+
+export type GyroMouse = {
+  mode: "off" | "always" | "whileHeld" | "toggle";
+  button: ButtonName;
+  axis: "yaw" | "roll";
+  sensitivityX: number;
+  sensitivityY: number;
+  invertX: boolean;
+  invertY: boolean;
+  smoothing: number;
+  deadzone: number;
+};
+
+export type StickMapping = {
+  mode: "off" | "keys" | "mouse" | "scroll";
+  keys: Record<Direction, KeyName>; // "none" allowed
+  threshold: number;
+  speed: number;
+};
+
+export type Mapping = {
+  enabled: boolean;
+  layerButton: ButtonName | "none";
+  buttons: Partial<Record<ButtonName, Binding>>;
+  layer: Partial<Record<ButtonName, Binding>>;
+  touchpad: TouchpadMapping;
+  gyroMouse: GyroMouse;
+  sticks: Pair<StickMapping>;
+};
+
+export type MacroStep =
+  | { op: "down" | "up" | "tap"; key: KeyName }
+  | { op: "mouseDown" | "mouseUp" | "click"; button: MouseButtonName }
+  | { op: "wheel"; direction: Direction; amount: number }
+  | { op: "delay"; ms: number };
+
+export type Macro = {
+  id: string;
+  name: string;
+  repeat: "once" | "whileHeld" | "toggle";
+  steps: MacroStep[];
+};
+
+export type MappingStatus = { active: boolean; paused: boolean; blockedBy: string | null };
+
 export type Profile = {
   version: number;
   id: string;
@@ -77,6 +175,8 @@ export type Profile = {
   sticks: Pair<StickConfig>;
   gyro: { sensitivity: number; smoothing: number; invertX: boolean; invertY: boolean };
   rumble: { strength: number };
+  mapping: Mapping;
+  macros: Macro[];
 };
 
 export type AppSettings = {
@@ -105,6 +205,8 @@ export type Status = {
   version: string;
   activeProfileId?: string;
   activeReason?: string; // manual | game:<exe> | controllerDefault | default
+  mapping?: MappingStatus;
+  elevated?: boolean;
 };
 
 export type Input = {
@@ -138,7 +240,7 @@ export type Output = {
   rightTrigger: string;
 };
 
-export type NoticeKind = "lowBattery" | "brokenFile" | "idleSleep" | "gyroCalibration" | "info";
+export type NoticeKind = "lowBattery" | "brokenFile" | "idleSleep" | "gyroCalibration" | "info" | "elevated" | "mapping";
 
 export type HostMessage =
   | Status
@@ -148,6 +250,7 @@ export type HostMessage =
   | { type: "settings"; settings: AppSettings }
   | { type: "export"; id: string; json: string }
   | { type: "foreground"; recent: string[] }
+  | { type: "runPicked"; path: string | null }
   | { type: "notice"; kind: NoticeKind; message: string; progress?: number }
   | { type: "error"; message: string };
 
@@ -164,7 +267,10 @@ export type UiMessage =
   | { type: "trigger.preview"; side: "left" | "right"; config: TriggerConfig | null }
   | { type: "settings.save"; settings: AppSettings }
   | { type: "gyro.calibrate" }
-  | { type: "foreground.pick" };
+  | { type: "foreground.pick" }
+  | { type: "mapping.pause"; paused: boolean }
+  | { type: "run.pick" }
+  | { type: "app.restartElevated" };
 
 type LooseMessage = { type: string; [key: string]: unknown };
 

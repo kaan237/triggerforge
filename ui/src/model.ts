@@ -1,5 +1,14 @@
 import type {
+  Action,
   AppSettings,
+  Binding,
+  ButtonName,
+  GyroMouse,
+  Macro,
+  MacroStep,
+  Mapping,
+  StickMapping,
+  TouchpadMapping,
   Curve,
   CurvePoint,
   LightEffect,
@@ -27,6 +36,51 @@ export const defaultStick = (): StickConfig => ({
   invertY: false,
 });
 
+export const defaultAction = (): Action => ({ kind: "none" });
+export const defaultBinding = (): Binding => ({
+  press: defaultAction(),
+  hold: null,
+  double: null,
+  holdMs: 400,
+  doubleMs: 250,
+  turbo: false,
+  turboHz: 10,
+  toggle: false,
+});
+export const defaultTouchpad = (): TouchpadMapping => ({
+  mode: "off",
+  sensitivity: 1,
+  acceleration: 0.5,
+  scroll: true,
+  scrollSpeed: 1,
+  tapToClick: true,
+  zoneLayout: "halves",
+  zones: [defaultBinding(), defaultBinding()],
+  swipes: { up: defaultAction(), down: defaultAction(), left: defaultAction(), right: defaultAction() },
+});
+export const defaultGyroMouse = (): GyroMouse => ({
+  mode: "off",
+  button: "r1",
+  axis: "yaw",
+  sensitivityX: 1,
+  sensitivityY: 1,
+  invertX: false,
+  invertY: false,
+  smoothing: 0.2,
+  deadzone: 0.5,
+});
+export const defaultStickMapping = (): StickMapping => ({ mode: "off", keys: { up: "w", down: "s", left: "a", right: "d" }, threshold: 0.5, speed: 1 });
+export const defaultMapping = (): Mapping => ({
+  enabled: false,
+  layerButton: "ps",
+  buttons: {},
+  layer: {},
+  touchpad: defaultTouchpad(),
+  gyroMouse: defaultGyroMouse(),
+  sticks: { left: defaultStickMapping(), right: defaultStickMapping() },
+});
+export const defaultMacro = (name: string, id = newId()): Macro => ({ id, name, repeat: "once", steps: [] });
+
 export function newId(): string {
   return crypto.randomUUID().replace(/-/g, "");
 }
@@ -45,6 +99,8 @@ export function defaultProfile(name = "Varsayılan", id = newId()): Profile {
     sticks: { left: defaultStick(), right: defaultStick() },
     gyro: { sensitivity: 1, smoothing: 0.2, invertX: false, invertY: false },
     rumble: { strength: 1 },
+    mapping: defaultMapping(),
+    macros: [],
   };
 }
 
@@ -88,7 +144,53 @@ export function normalizeProfile(p: Partial<Profile> & { id: string }): Profile 
     sticks: { left: { ...defaultStick(), ...p.sticks?.left }, right: { ...defaultStick(), ...p.sticks?.right } },
     gyro: { ...d.gyro, ...p.gyro },
     rumble: { ...d.rumble, ...p.rumble },
+    mapping: normalizeMapping(p.mapping),
+    macros: (p.macros ?? []).map(normalizeMacro),
   };
+}
+
+const normAction = (a?: Partial<Action> | null): Action => (a && a.kind ? { ...a, kind: a.kind } : defaultAction());
+
+export function normalizeBinding(b?: Partial<Binding> | null): Binding {
+  const d = defaultBinding();
+  if (!b) return d;
+  return { ...d, ...b, press: normAction(b.press), hold: b.hold ? normAction(b.hold) : null, double: b.double ? normAction(b.double) : null };
+}
+
+function normalizeBindings(m?: Partial<Record<ButtonName, Binding>>): Partial<Record<ButtonName, Binding>> {
+  const out: Partial<Record<ButtonName, Binding>> = {};
+  for (const [k, v] of Object.entries(m ?? {})) if (v) out[k as ButtonName] = normalizeBinding(v);
+  return out;
+}
+
+export function normalizeMapping(m?: Partial<Mapping>): Mapping {
+  const d = defaultMapping();
+  if (!m) return d;
+  const t: Partial<TouchpadMapping> = m.touchpad ?? {};
+  const layout = t.zoneLayout === "quadrants" ? "quadrants" : "halves";
+  const count = layout === "quadrants" ? 4 : 2;
+  const zones = Array.from({ length: count }, (_, i) => normalizeBinding(t.zones?.[i]));
+  const sw: Partial<TouchpadMapping["swipes"]> = t.swipes ?? {};
+  const stick = (s?: Partial<StickMapping>): StickMapping => ({ ...defaultStickMapping(), ...s, keys: { ...defaultStickMapping().keys, ...s?.keys } });
+  return {
+    ...d,
+    ...m,
+    buttons: normalizeBindings(m.buttons),
+    layer: normalizeBindings(m.layer),
+    touchpad: {
+      ...d.touchpad,
+      ...t,
+      zoneLayout: layout,
+      zones,
+      swipes: { up: normAction(sw.up), down: normAction(sw.down), left: normAction(sw.left), right: normAction(sw.right) },
+    },
+    gyroMouse: { ...d.gyroMouse, ...m.gyroMouse },
+    sticks: { left: stick(m.sticks?.left), right: stick(m.sticks?.right) },
+  };
+}
+
+export function normalizeMacro(m: Partial<Macro>): Macro {
+  return { ...defaultMacro(m.name ?? "Makro", m.id ?? newId()), ...m, steps: (m.steps ?? []).map((s) => ({ ...s }) as MacroStep) };
 }
 
 export function normalizeSettings(s: Partial<AppSettings>): AppSettings {

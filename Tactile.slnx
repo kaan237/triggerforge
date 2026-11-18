@@ -4,6 +4,8 @@
     <Project Path="src/Tactile.Device.DualSense/Tactile.Device.DualSense.csproj" />
     <Project Path="src/Tactile.Device.Hid/Tactile.Device.Hid.csproj" />
     <Project Path="src/Tactile.Host/Tactile.Host.csproj" />
+    <Project Path="src/Tactile.Input/Tactile.Input.csproj" />
+    <Project Path="src/Tactile.Input.Windows/Tactile.Input.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Tactile.Tests/Tactile.Tests.csproj" />

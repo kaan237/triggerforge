@@ -30,6 +30,10 @@ public sealed record Profile
     public StickPair Sticks { get; init; } = new();
     public GyroConfig Gyro { get; init; } = new();
     public RumbleConfig Rumble { get; init; } = new();
+    /// <summary>Keyboard and mouse output (phase 3).</summary>
+    public MappingConfig Mapping { get; init; } = new();
+    /// <summary>At most 50.</summary>
+    public IReadOnlyList<Macro> Macros { get; init; } = [];
 }
 
 public sealed record LightbarConfig

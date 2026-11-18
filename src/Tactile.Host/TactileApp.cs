@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using Tactile.Core;
 using Tactile.Device.DualSense;
+using Tactile.Input.Windows;
 
 namespace Tactile.Host;
 
@@ -9,6 +11,9 @@ namespace Tactile.Host;
 /// </summary>
 internal sealed class TactileApp : ApplicationContext
 {
+    // ERROR_CANCELLED: the user said no at the UAC prompt.
+    private const int ErrorCancelled = 1223;
+
     private readonly AppCore _core;
     private readonly Glyph _smallGlyph = new(SystemInformation.SmallIconSize.Width);
     private readonly Glyph _largeGlyph = new(SystemInformation.IconSize.Width);
@@ -23,7 +28,7 @@ internal sealed class TactileApp : ApplicationContext
 
     public TactileApp(bool startHidden, EventWaitHandle showSignal)
     {
-        _core = new AppCore();
+        _core = new AppCore(platform: WindowsInputPlatform.Create());
         _window = new MainWindow(_core, _largeGlyph.Icon);
         // A handle now, so core events can be marshalled even while the window was never shown.
         _ = _window.Handle;
@@ -41,6 +46,9 @@ internal sealed class TactileApp : ApplicationContext
         _core.Profiles.Changed += OnProfiles;
         _core.Settings.Changed += OnSettings;
         _core.Notice += OnNotice;
+        _core.MappingChanged += OnMappingChanged;
+        _core.ShowAppRequested += OnShowAppRequested;
+        _window.Bridge.RestartElevatedRequested += RestartElevated;
 
         _inputTimer.Tick += (_, _) => FlushInput();
         _inputTimer.Start();
@@ -110,6 +118,36 @@ internal sealed class TactileApp : ApplicationContext
         _window.Bridge.PostProfiles();
         _tray.SetProfiles(_core.Profiles.All, _core.ActiveProfile.Id);
     });
+
+    private void OnMappingChanged() => Ui(_window.Bridge.PostStatus);
+
+    private void OnShowAppRequested() => Ui(ShowWindow);
+
+    private void RestartElevated()
+    {
+        if (_exiting)
+        {
+            return;
+        }
+
+        try
+        {
+            Program.StartElevatedCopy();
+        }
+        catch (Win32Exception e) when (e.NativeErrorCode == ErrorCancelled)
+        {
+            _window.Bridge.PostNotice(new Notice(NoticeKinds.Info, "Yönetici izni verilmedi."));
+            return;
+        }
+        catch (Win32Exception)
+        {
+            _window.Bridge.PostNotice(new Notice(NoticeKinds.Info, "Tactile yönetici olarak yeniden başlatılamadı."));
+            return;
+        }
+
+        // The new copy waits for this process to end before it opens the controller.
+        Exit();
+    }
 
     private void OnSettings() => Ui(_window.Bridge.PostSettings);
 
@@ -192,6 +230,9 @@ internal sealed class TactileApp : ApplicationContext
         _core.Profiles.Changed -= OnProfiles;
         _core.Settings.Changed -= OnSettings;
         _core.Notice -= OnNotice;
+        _core.MappingChanged -= OnMappingChanged;
+        _core.ShowAppRequested -= OnShowAppRequested;
+        _window.Bridge.RestartElevatedRequested -= RestartElevated;
         _tray.Dispose();
 
         // Puts the controller back to neutral.

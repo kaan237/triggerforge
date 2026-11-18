@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Tactile.Core;
 using Tactile.Device.DualSense;
+using Tactile.Input.Windows;
 
 namespace Tactile.Host;
 
@@ -13,21 +14,31 @@ internal sealed class Bridge
     private const int MaxQueued = 50;
 
     private readonly AppCore _core;
+    private readonly Control _owner;
     private readonly Action<string> _postRaw;
     private readonly List<string> _queued = [];
     private OutputState? _lastOutput;
     private bool _ready;
 
-    public Bridge(AppCore core, Action<string> postRaw)
+    public Bridge(AppCore core, Control owner, Action<string> postRaw)
     {
         _core = core;
+        _owner = owner;
         _postRaw = postRaw;
     }
 
     public bool Ready => _ready;
 
+    /// <summary>The UI asked to restart as administrator. Raised on the UI thread, outside any WebView2 event.</summary>
+    public event Action? RestartElevatedRequested;
+
     /// <summary>The page is going away; hold posts until the next hello.</summary>
-    public void Detach() => _ready = false;
+    public void Detach()
+    {
+        _ready = false;
+        // A focused key-capture field cannot unpause any more.
+        _core.MappingPaused = false;
+    }
 
     public void Handle(string json)
     {
@@ -117,8 +128,11 @@ internal sealed class Bridge
 
             case "profile.import":
             {
-                Profile p = _core.Profiles.Import(Str(m, "json"));
-                PostNotice(new Notice(NoticeKinds.Info, $"“{p.Name}” içe aktarıldı."));
+                Profile p = _core.Profiles.Import(Str(m, "json"), out int removed);
+                string message = removed > 0
+                    ? $"“{p.Name}” içe aktarıldı. Güvenlik için {removed} program çalıştırma eylemi kaldırıldı."
+                    : $"“{p.Name}” içe aktarıldı.";
+                PostNotice(new Notice(NoticeKinds.Info, message));
                 break;
             }
 
@@ -155,6 +169,25 @@ internal sealed class Bridge
                 }
 
                 _core.StartGyroCalibration();
+                break;
+
+            case "mapping.pause":
+                _core.MappingPaused = Bool(m, "paused");
+                break;
+
+            // Modal UI must not run inside the WebView2 message event, so these run right after it.
+            case "run.pick":
+                _owner.BeginInvoke(PickRun);
+                break;
+
+            case "app.restartElevated":
+                if (WindowsInputPlatform.IsElevated)
+                {
+                    PostNotice(new Notice(NoticeKinds.Info, "Tactile zaten yönetici olarak çalışıyor."));
+                    break;
+                }
+
+                _owner.BeginInvoke(() => RestartElevatedRequested?.Invoke());
                 break;
 
             case "foreground.pick":
@@ -238,6 +271,20 @@ internal sealed class Bridge
         }
     }
 
+    private void PickRun()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "Çalıştırılacak program",
+            Filter = "Programlar (*.exe)|*.exe",
+            CheckFileExists = true,
+            DereferenceLinks = true,
+            RestoreDirectory = true,
+        };
+        string? path = dialog.ShowDialog(_owner) == DialogResult.OK ? dialog.FileName : null;
+        Post(new { type = "runPicked", path });
+    }
+
     private void SaveSettings(AppSettings s)
     {
         bool before = _core.Settings.Current.StartWithWindows;
@@ -262,6 +309,7 @@ internal sealed class Bridge
     public void PostStatus()
     {
         DualSenseController? c = _core.Controllers.Controller;
+        MappingStatus mapping = _core.Mapping;
         Post(new
         {
             type = "status",
@@ -273,6 +321,8 @@ internal sealed class Bridge
             version = Application.ProductVersion,
             activeProfileId = _core.ActiveProfile.Id,
             activeReason = _core.ActiveReason,
+            mapping = new { active = mapping.Active, paused = mapping.Paused, blockedBy = mapping.BlockedBy },
+            elevated = WindowsInputPlatform.IsElevated,
         });
     }
 

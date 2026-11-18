@@ -236,6 +236,15 @@ Bu faz sanal kontrolcü **gerektirmez**; klavye ve fare `SendInput` ile gönderi
 
 **Risk:** `SendInput` yükseltilmiş (admin) pencerelere ulaşmaz → uygulamaya "yönetici olarak çalıştır" seçeneği. Anti-cheat'li oyunlar sentetik girdiyi engelleyebilir. **Geri alma:** profili kapatmak.
 
+**Faz 3 sonucu (2026-11-18)**
+- Üç alt ajanla yapıldı (çekirdek motoru, Windows katmanı + pencere, arayüz), aynı anda. Sözleşme `docs/contract-phase3.md`; ortak tuş listesi ve arayüzler `src/Tactile.Input`'ta, Windows kodu `src/Tactile.Input.Windows`'ta.
+- Çekirdek: kısa/uzun/çift basma, turbo, aç/kapa, PS katmanı, referans sayımlı tuşlar, her geçişte "hepsini bırak" (profil değişimi, kapatma, duraklatma, kopma); touchpad fare/kaydırma/dokunarak tık/bölgeler/kaydırma hareketleri; gyro fare; analog → tuş/fare/tekerlek; makro çalıştırıcı (bir kez / basılıyken / aç-kapa); program çalıştır, profil değiştir, mikrofon sustur (LED'i izler), Win kısayolları.
+- İçe aktarılan profillerdeki "program çalıştır" eylemleri silinir.
+- Windows: `SendInput` (tarama kodu, medya tuşları sanal tuş), Core Audio ile mikrofon, yükseltilmiş pencere tespiti, "yönetici olarak yeniden başlat".
+- Arayüz: "Tuşlar" bölümü (Tuşlar, Touchpad, Gyro fare, Analoglar, Makrolar), tuş yakalama alanı, makro kaydedici (sayfa içinde, genel klavye kancası yok), masaüstü şablonu.
+- Testler 176/176. İnceleme düzeltmeleri: mikrofon LED'i susturma kalkınca profile dönüyor; yükseltilmiş oyun kontrolü profil geç açılınca da yapılıyor; makrolar çalışırken 1 ms zamanlayıcı.
+- Denenmeyenler: gerçek klavye/fare çıkışı ve oyunlarda davranış, mikrofon susturma, gyro eksen yönleri, WebView2'de kombinasyon kaydı, yönetici olarak yeniden başlatma. Bilinen küçük risk: yeniden başlatmada eski kopya 5 sn'den geç kapanırsa yeni kopya da kapanır.
+
 ---
 
 ### Faz 4 — Sanal kontrolcü ve sürücüler (3-4 hafta) ⚠ kritik faz

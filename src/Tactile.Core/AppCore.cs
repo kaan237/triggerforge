@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Tactile.Device.DualSense;
+using Tactile.Input;
 
 namespace Tactile.Core;
 
@@ -14,6 +15,7 @@ public sealed class AppCore : IDisposable
 
     private const string PreviewLeft = "preview.trigger.left";
     private const string PreviewRight = "preview.trigger.right";
+    private const string MicOverride = "mapping.mic";
 
     private readonly Lock _lock = new();
     // Serialises device writes without holding _lock, so input handling never waits on HID I/O.
@@ -49,15 +51,33 @@ public sealed class AppCore : IDisposable
     private readonly List<Notice> _undelivered = [];
     private Action<Notice>? _notice;
 
-    public AppCore(string? dataDir = null, IForegroundSource? foreground = null)
-        : this(dataDir, foreground, new ControllerService(), TimeProvider.System, runTimer: true)
+    private readonly InputPlatform _platform;
+    private readonly Mapper _mapper;
+    // Serialises mapper configuration and status, apart from _lock so input never waits on it.
+    private readonly Lock _mappingLock = new();
+    private readonly HashSet<string> _elevatedNoticed = new(StringComparer.OrdinalIgnoreCase);
+    private MappingStatus _mappingStatus = MappingStatus.Off;
+    private string? _blockedBy;
+    // Foreground exe the probe last answered for while mapping was active; null = not checked / inactive.
+    private string? _elevationCheckedFor;
+    private volatile bool _mappingPaused;
+
+    /// <param name="platform">Keyboard, mouse, microphone and launcher; null = <see cref="InputPlatform.None"/> (no output).</param>
+    public AppCore(string? dataDir = null, IForegroundSource? foreground = null, InputPlatform? platform = null)
+        : this(dataDir, foreground, new ControllerService(), TimeProvider.System, runTimer: true, platform)
     {
     }
 
-    /// <param name="runTimer">False leaves ticking to the caller (tests call <see cref="Tick(TimeSpan)"/>).</param>
-    internal AppCore(string? dataDir, IForegroundSource? foreground, ControllerService controllers, TimeProvider time, bool runTimer)
+    /// <param name="runTimer">
+    /// False leaves ticking to the caller (tests call <see cref="Tick(TimeSpan)"/>); the mapping
+    /// worker and macros then also run on the calling thread, driven by the same clock.
+    /// </param>
+    internal AppCore(string? dataDir, IForegroundSource? foreground, ControllerService controllers, TimeProvider time, bool runTimer,
+        InputPlatform? platform = null)
     {
         _time = time;
+        _platform = platform ?? InputPlatform.None;
+        _mapper = new Mapper(_platform, new MappingHost(this), Now, threaded: runTimer);
         _startTimestamp = time.GetTimestamp();
         Controllers = controllers;
         Profiles = new ProfileStore(dataDir);
@@ -84,6 +104,7 @@ public sealed class AppCore : IDisposable
         _leftStick = new StickProcessor(_active.Profile.Sticks.Left);
         _rightStick = new StickProcessor(_active.Profile.Sticks.Right);
         ApplyTriggers(_active.Profile);
+        _mapper.Configure(_active.Profile);
 
         _foreground.Changed += OnForeground;
         Profiles.Changed += Refresh;
@@ -160,6 +181,34 @@ public sealed class AppCore : IDisposable
     }
 
     public event Action? ActiveProfileChanged;
+
+    /// <summary>While true the mapper releases everything and ignores input (UI key capture, macro recording).</summary>
+    public bool MappingPaused
+    {
+        get => _mappingPaused;
+        set
+        {
+            _mappingPaused = value;
+            UpdateMapping();
+        }
+    }
+
+    public MappingStatus Mapping
+    {
+        get
+        {
+            lock (_mappingLock)
+            {
+                return _mappingStatus;
+            }
+        }
+    }
+
+    /// <summary>Raised when <see cref="Mapping"/> changes (active, paused, blockedBy).</summary>
+    public event Action? MappingChanged;
+
+    /// <summary>A <c>special: showApp</c> action asked for the main window.</summary>
+    public event Action? ShowAppRequested;
 
     /// <summary>Notices raised before the first handler subscribes are delivered to it on subscribe.</summary>
     public event Action<Notice>? Notice
@@ -303,6 +352,7 @@ public sealed class AppCore : IDisposable
         Settings.Changed -= Refresh;
         Controllers.Input -= OnInput;
         Controllers.ConnectionChanged -= OnConnection;
+        _mapper.Dispose();
         if (_ownsForeground && _foreground is IDisposable d)
         {
             d.Dispose();
@@ -382,12 +432,16 @@ public sealed class AppCore : IDisposable
             _ = Task.Run(() => BluetoothLink.Disconnect(sleepMac));
         }
 
+        UpdateMapping();
+        _mapper.Tick(now);
         Flush();
     }
 
     internal void OnInput(InputState s)
     {
         TimeSpan now = Now();
+        bool firstInput;
+        Vector3 gyro;
         lock (_lock)
         {
             if (_disposed)
@@ -395,7 +449,10 @@ public sealed class AppCore : IDisposable
                 return;
             }
 
+            firstInput = _latestInput is null;
             _latestInput = s;
+            ImuCalibration imu = Controllers.Controller?.Details.Calibration ?? ImuCalibration.Identity;
+            gyro = GyroCalibrationResult.Apply(imu.GyroDegPerSec(s.GyroRaw), _gyroBias);
             _idle.Observe(s, now);
 
             if (_battery.Update(s.Battery, Settings.Current.LowBatteryWarnings) is int threshold)
@@ -413,6 +470,13 @@ public sealed class AppCore : IDisposable
             }
         }
 
+        if (firstInput)
+        {
+            // Input proves a connection; mapping may become active.
+            UpdateMapping();
+        }
+
+        _mapper.OnInput(s, gyro, now);
         Flush();
     }
 
@@ -466,10 +530,133 @@ public sealed class AppCore : IDisposable
     private void OnForeground(string exe)
     {
         _recent.Add(exe);
+        // The tick re-checks elevation for the new foreground app.
         Refresh();
     }
 
-    private void OnConnection(DualSenseController? controller)
+    /// <summary>
+    /// Asks the probe once per (foreground app, mapping active) change, not only on foreground
+    /// changes: mapping often turns on after the game is already in front (auto-profile delay).
+    /// </summary>
+    private void CheckElevation(bool active)
+    {
+        string? exe = _foreground.Current;
+        string? key = active ? exe : null;
+        lock (_mappingLock)
+        {
+            if (string.Equals(key, _elevationCheckedFor, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _elevationCheckedFor = key;
+        }
+
+        bool blocks = false;
+        if (key is not null)
+        {
+            try
+            {
+                blocks = _platform.Elevation.ForegroundBlocksInput();
+            }
+            catch (Exception)
+            {
+                // Probe errors count as "not blocked".
+            }
+        }
+
+        bool first;
+        lock (_mappingLock)
+        {
+            _blockedBy = blocks ? exe : null;
+            first = blocks && _elevatedNoticed.Add(exe!);
+        }
+
+        if (first)
+        {
+            Queue(new Notice(NoticeKinds.Elevated,
+                $"{exe} yönetici olarak çalışıyor; Windows bu pencereye tuş ve fare girdisi gönderilmesini engelliyor. Tactile'ı yönetici olarak yeniden başlatın."));
+        }
+    }
+
+    /// <summary>Pushes the active profile and state to the mapper; raises <see cref="MappingChanged"/> when the status moves.</summary>
+    private void UpdateMapping()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        bool active;
+        bool paused;
+        lock (_mappingLock)
+        {
+            Profile profile;
+            bool connected;
+            lock (_lock)
+            {
+                profile = _active.Profile;
+                connected = Controllers.Controller is not null || _latestInput is not null;
+            }
+
+            paused = _mappingPaused;
+            active = profile.Mapping.Enabled && !paused && connected;
+            _mapper.Configure(profile);
+            _mapper.SetActive(active);
+        }
+
+        // The probe is a few system calls; keep it outside the lock.
+        CheckElevation(active);
+
+        bool changed;
+        lock (_mappingLock)
+        {
+            var status = new MappingStatus(active, paused, active ? _blockedBy : null);
+            changed = status != _mappingStatus;
+            _mappingStatus = status;
+        }
+
+        if (changed)
+        {
+            MappingChanged?.Invoke();
+        }
+    }
+
+    private void SwitchProfile(string target)
+    {
+        IReadOnlyList<Profile> all = Profiles.All;
+        string id = target;
+        if (target is "next" or "previous" && all.Count > 0)
+        {
+            string current = ActiveProfile.Id;
+            int i = Math.Max(0, all.ToList().FindIndex(p => p.Id == current));
+            int step = target == "next" ? 1 : -1;
+            id = all[(i + step + all.Count) % all.Count].Id;
+        }
+
+        if (Profiles.Get(id) is null)
+        {
+            Queue(new Notice(NoticeKinds.Mapping, "Eşlemedeki profil bulunamadı."));
+            return;
+        }
+
+        ActivateProfile(id);
+    }
+
+    private sealed class MappingHost(AppCore core) : IMappingHost
+    {
+        public void SwitchProfile(string target) => core.SwitchProfile(target);
+
+        // Unmuted hands the LED back to the profile's own micLed setting.
+        public void MicMuteChanged(bool muted) =>
+            core.SetOverride(MicOverride, muted ? o => o with { MicLed = MicLed.On } : null);
+
+        public void ShowApp() => core.ShowAppRequested?.Invoke();
+
+        public void Report(string message) => core.Queue(new Notice(NoticeKinds.Mapping, message));
+    }
+
+    internal void OnConnection(DualSenseController? controller)
     {
         lock (_lock)
         {

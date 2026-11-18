@@ -1,9 +1,10 @@
 // Browser-only stand-in for the host. Keeps profiles and settings in memory and fakes
 // a controller so every screen can be used without hardware.
 
-import type { AppSettings, HostMessage, Output, Profile, TriggerConfig } from "./host";
+import type { Action, AppSettings, Binding, HostMessage, Output, Profile, TriggerConfig } from "./host";
 import {
   clone,
+  defaultBinding,
   defaultProfile,
   defaultSettings,
   effectColor,
@@ -35,6 +36,19 @@ function sampleProfiles(): Profile[] {
   race.triggers.right = { mode: "zones", params: {}, zones: [1, 1, 2, 2, 2, 3, 3, 3, 4, 4], frequency: 0 };
   race.triggerResponse.right = { deadzone: 8, max: 240, curve: "exponential", exponent: 1.4, points: null };
   race.sticks.left = { ...race.sticks.left, innerDeadzone: 0.03, shape: "square" };
+  race.macros = [
+    {
+      id: "5e1d7c3a9b2f4e60a8c4d2b1f0e9a736",
+      name: "Fotoğraf modu",
+      repeat: "once",
+      steps: [
+        { op: "tap", key: "p" },
+        { op: "delay", ms: 250 },
+        { op: "tap", key: "f12" },
+      ],
+    },
+  ];
+  race.mapping.buttons.create = { ...defaultBinding(), press: { kind: "macro", macroId: race.macros[0].id } };
 
   return [base, ghost, race];
 }
@@ -62,6 +76,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   let reports = 0;
   let tick = 0;
   let battery = 85;
+  let mappingPaused = false;
 
   const active = () => profiles.find((p) => p.id === activeId) ?? profiles[0];
 
@@ -88,6 +103,8 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       version: "dev",
       activeProfileId: activeId,
       activeReason,
+      mapping: { active: active().mapping.enabled && !mappingPaused, paused: mappingPaused, blockedBy: null },
+      elevated: false,
     });
   const sendProfiles = () => emit({ type: "profiles", list: clone(profiles), activeId });
 
@@ -194,6 +211,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         if (i >= 0) profiles[i] = p;
         else profiles = [...profiles, p];
         sendProfiles();
+        if (p.id === activeId) status();
         pushOutput();
         return;
       }
@@ -219,9 +237,18 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         try {
           const parsed = JSON.parse(String(m.json)) as Partial<Profile>;
           if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error();
-          profiles = [...profiles, normalizeProfile({ ...parsed, id: newId(), name: parsed.name || "İçe aktarılan" })];
+          const p = normalizeProfile({ ...parsed, id: newId(), name: parsed.name || "İçe aktarılan" });
+          // Shared profiles must not start programs.
+          let removed = 0;
+          const strip = (a: Action | null): Action | null => (a && a.kind === "run" ? (removed++, { kind: "none" }) : a);
+          const stripBinding = (b: Binding): Binding => ({ ...b, press: strip(b.press)!, hold: strip(b.hold), double: strip(b.double) });
+          for (const map of [p.mapping.buttons, p.mapping.layer]) for (const k of Object.keys(map) as (keyof typeof map)[]) map[k] = stripBinding(map[k]!);
+          p.mapping.touchpad.zones = p.mapping.touchpad.zones.map(stripBinding);
+          for (const d of ["up", "down", "left", "right"] as const) p.mapping.touchpad.swipes[d] = strip(p.mapping.touchpad.swipes[d])!;
+          profiles = [...profiles, p];
           sendProfiles();
-          emit({ type: "notice", kind: "info", message: `“${parsed.name || "İçe aktarılan"}” içe aktarıldı.` });
+          const note = removed > 0 ? ` ${removed} program çalıştırma eylemi kaldırıldı.` : "";
+          emit({ type: "notice", kind: "info", message: `“${p.name}” içe aktarıldı.${note}` });
         } catch {
           emit({ type: "error", message: "JSON okunamadı. Dosyanın bir Tactile profili olduğundan emin ol." });
         }
@@ -245,6 +272,16 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         return;
       case "foreground.pick":
         emit({ type: "foreground", recent: [...recentExes] });
+        return;
+      case "mapping.pause":
+        mappingPaused = m.paused === true;
+        status();
+        return;
+      case "run.pick":
+        window.setTimeout(() => emit({ type: "runPicked", path: String.raw`C:\Program Files\Example\example.exe` }), 200);
+        return;
+      case "app.restartElevated":
+        emit({ type: "notice", kind: "info", message: "Önizlemede yeniden başlatma yok. Uygulamada yönetici izni istenir." });
         return;
 
       // Phase 1 live overrides

@@ -61,7 +61,9 @@ internal static class Inputs
         byte r2 = 0,
         Vector3 gyro = default,
         int battery = 80,
-        ChargeState charge = ChargeState.Discharging) =>
+        ChargeState charge = ChargeState.Discharging,
+        TouchPoint touch1 = default,
+        TouchPoint touch2 = default) =>
         new(buttons, left ?? new Stick(128, 128), right ?? new Stick(128, 128), l2, r2, gyro, default, 0,
-            default, default, new Battery(battery, charge), false, false, false);
+            touch1, touch2, new Battery(battery, charge), false, false, false);
 }

@@ -101,7 +101,12 @@ public sealed class ProfileStore
     }
 
     /// <exception cref="ArgumentException">The text is not a profile.</exception>
-    public Profile Import(string json)
+    public Profile Import(string json) => Import(json, out _);
+
+    /// <summary>Like <see cref="Import(string)"/>, but every <c>run</c> action becomes <c>none</c>: a shared profile must not start programs.</summary>
+    /// <param name="removedRunActions">How many run actions were replaced.</param>
+    /// <exception cref="ArgumentException">The text is not a profile.</exception>
+    public Profile Import(string json, out int removedRunActions)
     {
         Profile? p;
         try
@@ -118,7 +123,8 @@ public sealed class ProfileStore
             throw new ArgumentException("Geçersiz profil dosyası.", nameof(json));
         }
 
-        return Save(p with { Id = Validation.NewId() });
+        Profile cleaned = Validation.StripRunActions(Validation.Normalize(p with { Id = Validation.NewId() }), out removedRunActions);
+        return Save(cleaned);
     }
 
     public string Export(string id)
