@@ -5,7 +5,7 @@ Fill in when the controller is connected. `tactile-capture list` prints link and
 | Item | Value |
 |---|---|
 | Controller | DualSense / DualSense Edge |
-| Firmware | (from feature `0x20`, or PS5 / Sony PC updater) |
+| Firmware | build "Jul  4 2025 10:10:32" (feature `0x20`) |
 | Bluetooth adapter | (Device Manager → Bluetooth) |
 | USB cable | USB-C data cable |
 | OS | Windows 11 Pro 26200 |
@@ -14,8 +14,8 @@ Fill in when the controller is connected. `tactile-capture list` prints link and
 
 | What | USB | Bluetooth |
 |---|---|---|
-| Input reports per second | | |
-| Reduced mode before feature `0x05`? | n/a | |
+| Input reports per second | | ~800 (median 1.25 ms) |
+| Reduced mode before feature `0x05`? | n/a | yes, 7 short reports then full |
 | Max output reports per second without drops | | |
 
 ## Capture

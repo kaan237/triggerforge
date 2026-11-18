@@ -35,7 +35,18 @@ the controller.
 | Bluetooth | `0x31` | 78 | byte 2 (byte 1 is a sequence/tag byte) |
 
 Bluetooth starts in a reduced mode (short `0x01` reports). Reading feature report
-`0x05` switches it to full `0x31` reports. **Unverified on our hardware.**
+`0x05` switches it to full `0x31` reports. Verified 2026-11-18: 7 `0x01` reports,
+then only `0x31` after the feature read; all 13 646 `0x31` CRCs valid.
+
+On Bluetooth, byte 1 of `0x31` is the sequence (high nibble, +0x10 per report) and
+the state block's own counter (offset 6) stays constant. Observed rate over BT:
+~800 reports/s (median interval 1.25 ms). Once switched, the controller stays in
+full mode for the rest of the connection (second capture had no `0x01` at all).
+
+Checked on hardware (BT, 2026-11-18): sticks 0-255 at offsets 0-3, face buttons and
+hat at offset 7, L3/R3 at offset 8 bits 6-7, gyro/accel at 15-26, battery nibble at
+52. Offsets 11-12 and 55-62 change every report (counters or timestamps, unused).
+Not yet seen on hardware: L1/R1/L2/R2, trigger analog, touchpad, PS/mic buttons.
 
 State block (63 bytes, offsets relative to block start):
 
@@ -131,7 +142,9 @@ firmware. Valid ranges: zone 0-9, force/amplitude 1-8 (stored as 0-7).
 | `0x09` | 20 | Pairing info, controller MAC at bytes 1-6 (reversed) |
 | `0x20` | 64 | Firmware info: build date/time strings, hardware and firmware versions |
 
-On Bluetooth, feature replies end with a CRC using seed `0xA3`.
+On Bluetooth, feature replies end with a CRC using seed `0xA3`. Windows reports a
+547-byte feature length over BT; the real payload is shorter and the CRC sits
+right after it (verified: `0x05` CRC at bytes 37-40, `0x20` at 60-63).
 
 ## Bluetooth haptics and speaker
 
