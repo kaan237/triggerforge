@@ -323,6 +323,7 @@ public sealed class HapticStreamer : IDisposable
     /// <summary>Test signal: a sine burst on one or both actuators.</summary>
     public static Func<int, sbyte[]> Tone(float frequencyHz, float amplitude, bool left = true, bool right = true, int blocks = int.MaxValue)
     {
+        amplitude = Math.Clamp(amplitude, 0f, 1f);
         return block =>
         {
             var samples = new sbyte[HapticReport.PayloadLength];

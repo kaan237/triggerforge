@@ -1,54 +1,67 @@
 import { useEffect, useState } from "react";
-import { inHost, send, subscribe, type Input, type Output, type Status } from "./host";
-import { Live } from "./Live";
-import { Outputs } from "./Outputs";
+import { inHost, type Profile } from "./host";
+import { deepEqual } from "./model";
+import { Notices } from "./Notices";
+import { Light } from "./pages/Light";
+import { Overview } from "./pages/Overview";
+import { Profiles } from "./pages/Profiles";
+import { Settings } from "./pages/Settings";
+import { Sticks } from "./pages/Sticks";
+import { Triggers } from "./pages/Triggers";
+import { AppProvider, useApp, useInput } from "./state";
 
+// `keys`: profile fields edited on that page, for the unsaved mark in the rail.
 const sections = [
-  { id: "controller", label: "Kontrolcü" },
-  { id: "triggers", label: "Tetikler" },
-  { id: "light", label: "Işık" },
-  { id: "buttons", label: "Tuşlar" },
-  { id: "haptics", label: "Ses ve haptik" },
-  { id: "profiles", label: "Profiller" },
-] as const;
+  { id: "controller", label: "Kontrolcü", keys: [] },
+  { id: "triggers", label: "Tetikler", keys: ["triggers", "triggerResponse"] },
+  { id: "light", label: "Işık", keys: ["lightbar", "playerLeds", "micLed"] },
+  { id: "sticks", label: "Analoglar", keys: ["sticks", "gyro"] },
+  { id: "profiles", label: "Profiller", keys: [] },
+] as const satisfies readonly { id: string; label: string; keys: readonly (keyof Profile)[] }[];
 
 type SectionId = (typeof sections)[number]["id"] | "settings";
 
 const linkLabel: Record<string, string> = { Bluetooth: "Bluetooth", Usb: "USB", Simulated: "simülasyon" };
 
-export function App() {
+function StatusBar() {
+  const { status, profiles, activeId } = useApp();
+  const input = useInput();
+  const connected = status?.connected ?? false;
+  const active = profiles.find((p) => p.id === activeId);
+
+  return (
+    <header className="status">
+      <span className={connected ? "dot live" : "dot"} aria-hidden />
+      <span className="status-model">{connected ? status?.model ?? "DualSense" : "Kontrolcü bağlı değil"}</span>
+      <span className="spacer" />
+      {active && (
+        <span className="metric">
+          <span className="label">profil</span>
+          <span className="value">{active.name}</span>
+        </span>
+      )}
+      <span className="metric">
+        <span className="label">pil</span>
+        <span className="value">{input ? `%${input.battery}${input.charging ? " şarjda" : ""}` : "—"}</span>
+      </span>
+      <span className="metric">
+        <span className="label">bağlantı</span>
+        <span className="value">{connected && status?.link ? linkLabel[status.link] ?? status.link : "—"}</span>
+      </span>
+    </header>
+  );
+}
+
+function Shell() {
   const [section, setSection] = useState<SectionId>("controller");
-  const [status, setStatus] = useState<Status | null>(null);
-  const [input, setInput] = useState<Input | null>(null);
-  const [output, setOutput] = useState<Output | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const off = subscribe((m) => {
-      if (m.type === "status") {
-        setStatus(m);
-        if (!m.connected) setInput(null);
-      } else if (m.type === "input") setInput(m);
-      else if (m.type === "output") setOutput(m);
-      else if (m.type === "error") setError(m.message);
-    });
-    send({ type: "hello" });
-    return off;
-  }, []);
-
-  useEffect(() => {
-    if (!error) return;
-    const t = window.setTimeout(() => setError(null), 4000);
-    return () => window.clearTimeout(t);
-  }, [error]);
+  const { status, output, dirty, draft, draftBase } = useApp();
+  const changed = (keys: readonly (keyof Profile)[]) => dirty && !!draft && !!draftBase && keys.some((k) => !deepEqual(draft[k], draftBase[k]));
 
   // The interface accent follows the controller lightbar.
   useEffect(() => {
     const color = status?.connected && output ? output.lightbar : null;
-    document.documentElement.style.setProperty("--accent", color && color !== "#000000" ? lift(color) : "#9a9ca1");
+    document.documentElement.style.setProperty("--accent", color && color.toUpperCase() !== "#000000" ? lift(color) : "#9a9ca1");
   }, [output, status]);
-
-  const connected = status?.connected ?? false;
 
   return (
     <div className="shell">
@@ -59,6 +72,7 @@ export function App() {
             <li key={s.id}>
               <button className={section === s.id ? "active" : ""} onClick={() => setSection(s.id)}>
                 {s.label}
+                {changed(s.keys) && <span className="dirty-mark" title="Kaydedilmemiş değişiklik" />}
               </button>
             </li>
           ))}
@@ -72,44 +86,26 @@ export function App() {
       </nav>
 
       <main>
-        <header className="status">
-          <span className={connected ? "dot live" : "dot"} aria-hidden />
-          <span>{connected ? `${status?.model ?? "DualSense"}` : "Kontrolcü bağlı değil"}</span>
-          {connected && status?.firmware && <span className="faint">fw {status.firmware}</span>}
-          <span className="spacer" />
-          {error && <span className="error">{error}</span>}
-          <span className="metric">
-            <span className="label">pil</span>
-            <span className="value">{input ? `${input.battery}%${input.charging ? " şarjda" : ""}` : "—"}</span>
-          </span>
-          <span className="metric">
-            <span className="label">bağlantı</span>
-            <span className="value">{connected && status?.link ? linkLabel[status.link] ?? status.link : "—"}</span>
-          </span>
-        </header>
-
-        <section className="content">
-          {section === "controller" ? (
-            connected ? (
-              <div className="controller-page">
-                <Live input={input} />
-                <Outputs output={output} link={status?.link} />
-              </div>
-            ) : (
-              <div className="empty">
-                <h1>Kontrolcü bekleniyor</h1>
-                <p>DualSense'i USB kabloyla tak ya da Bluetooth ile eşleştir. Bağlandığında burada canlı görünecek.</p>
-              </div>
-            )
-          ) : (
-            <div className="empty">
-              <h1>{section === "settings" ? "Ayarlar" : sections.find((s) => s.id === section)?.label}</h1>
-              <p>Bu bölüm sonraki fazlarda gelecek. Şimdilik test araçları Kontrolcü sayfasında.</p>
-            </div>
-          )}
+        <StatusBar />
+        <section className="content" key={section}>
+          {section === "controller" && <Overview />}
+          {section === "triggers" && <Triggers />}
+          {section === "light" && <Light />}
+          {section === "sticks" && <Sticks />}
+          {section === "profiles" && <Profiles />}
+          {section === "settings" && <Settings />}
         </section>
       </main>
+      <Notices />
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <AppProvider>
+      <Shell />
+    </AppProvider>
   );
 }
 

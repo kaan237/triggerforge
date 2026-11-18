@@ -4,90 +4,264 @@ using Tactile.Device.DualSense;
 
 namespace Tactile.Host;
 
-/// <summary>Translates UI messages into service calls and service state into UI messages.</summary>
+/// <summary>
+/// Translates UI messages into core calls and core state into UI messages (docs/contract.md).
+/// UI thread only. Nothing is posted until the page says hello, except notices, which wait.
+/// </summary>
 internal sealed class Bridge
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private const int MaxQueued = 50;
 
-    private readonly ControllerService _service;
-    private readonly Action<string> _post;
+    private readonly AppCore _core;
+    private readonly Action<string> _postRaw;
+    private readonly List<string> _queued = [];
+    private OutputState? _lastOutput;
+    private bool _ready;
 
-    public Bridge(ControllerService service, Action<string> post)
+    public Bridge(AppCore core, Action<string> postRaw)
     {
-        _service = service;
-        _post = post;
+        _core = core;
+        _postRaw = postRaw;
     }
+
+    public bool Ready => _ready;
+
+    /// <summary>The page is going away; hold posts until the next hello.</summary>
+    public void Detach() => _ready = false;
 
     public void Handle(string json)
     {
-        using JsonDocument doc = JsonDocument.Parse(json);
-        JsonElement m = doc.RootElement;
-        string? type = m.TryGetProperty("type", out JsonElement t) ? t.GetString() : null;
+        string? type = null;
         try
         {
-            switch (type)
+            using JsonDocument doc = JsonDocument.Parse(json);
+            JsonElement m = doc.RootElement;
+            if (m.ValueKind != JsonValueKind.Object)
             {
-                case "hello":
-                    PostStatus();
-                    PostOutput();
-                    break;
-                case "lightbar":
-                    _service.SetOutput(o => o with { Lightbar = Rgb.FromHex(m.GetProperty("color").GetString()!) });
-                    break;
-                case "brightness":
-                    _service.SetOutput(o => o with { Brightness = (LedBrightness)m.GetProperty("level").GetInt32() });
-                    break;
-                case "playerLeds":
-                    _service.SetOutput(o => o with { PlayerLeds = (byte)m.GetProperty("mask").GetInt32() });
-                    break;
-                case "micLed":
-                    _service.SetOutput(o => o with { MicLed = (MicLed)m.GetProperty("mode").GetInt32() });
-                    break;
-                case "rumble":
-                    _service.SetOutput(o => o with
-                    {
-                        RumbleLeft = (byte)m.GetProperty("left").GetInt32(),
-                        RumbleRight = (byte)m.GetProperty("right").GetInt32(),
-                    });
-                    break;
-                case "trigger":
-                    TriggerEffect effect = ParseTrigger(m);
-                    bool left = m.GetProperty("side").GetString() == "left";
-                    _service.SetOutput(o => left ? o with { LeftTrigger = effect } : o with { RightTrigger = effect });
-                    break;
-                case "haptic":
-                    string? error = _service.PlayHapticTone(
-                        m.GetProperty("frequency").GetSingle(),
-                        m.GetProperty("amplitude").GetSingle(),
-                        m.GetProperty("left").GetBoolean(),
-                        m.GetProperty("right").GetBoolean(),
-                        m.GetProperty("ms").GetInt32());
-                    if (error is not null)
-                    {
-                        PostError(error);
-                    }
-
-                    break;
-                case "reset":
-                    _service.StopHaptics();
-                    _service.SetOutput(_ => OutputState.Default);
-                    break;
+                throw new BadMessage("Mesaj bir nesne olmalı.");
             }
+
+            type = m.TryGetProperty("type", out JsonElement t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+            Dispatch(type, m);
         }
-        catch (Exception e) when (e is ArgumentException or KeyNotFoundException or InvalidOperationException or FormatException)
+        catch (Exception e)
         {
-            PostError(e.Message);
+            PostError(Describe(e));
         }
 
-        if (type is "lightbar" or "brightness" or "playerLeds" or "micLed" or "rumble" or "trigger" or "reset")
+        if (type is "lightbar" or "brightness" or "playerLeds" or "micLed" or "rumble" or "trigger" or "reset" or "trigger.preview")
         {
-            PostOutput();
+            PostOutputIfChanged();
+        }
+    }
+
+    private void Dispatch(string? type, JsonElement m)
+    {
+        switch (type)
+        {
+            case "hello":
+                _ready = true;
+                PostStatus();
+                _lastOutput = null;
+                PostOutputIfChanged();
+                PostProfiles();
+                PostSettings();
+                foreach (string q in _queued)
+                {
+                    _postRaw(q);
+                }
+
+                _queued.Clear();
+                break;
+
+            case "profile.save":
+            {
+                Profile p = Read<Profile>(m, "profile");
+                _core.Profiles.Save(p, out IReadOnlyList<string> issues);
+                if (issues.Count > 0)
+                {
+                    PostNotice(new Notice(NoticeKinds.Info, "Profil kaydedildi, düzeltilenler: " + string.Join("; ", issues)));
+                }
+
+                break;
+            }
+
+            case "profile.delete":
+            {
+                string id = Str(m, "id");
+                if (_core.Profiles.Get(id) is null)
+                {
+                    throw new BadMessage("Profil bulunamadı.");
+                }
+
+                if (!_core.Profiles.Delete(id))
+                {
+                    throw new BadMessage("Son profil silinemez.");
+                }
+
+                break;
+            }
+
+            case "profile.duplicate":
+            {
+                string id = Str(m, "id");
+                Profile source = _core.Profiles.Get(id) ?? throw new BadMessage("Profil bulunamadı.");
+                string name = OptStr(m, "name") is { Length: > 0 } n ? n : source.Name + " (kopya)";
+                _core.Profiles.Duplicate(id, name);
+                break;
+            }
+
+            case "profile.activate":
+                _core.ActivateProfile(Str(m, "id"));
+                break;
+
+            case "profile.import":
+            {
+                Profile p = _core.Profiles.Import(Str(m, "json"));
+                PostNotice(new Notice(NoticeKinds.Info, $"“{p.Name}” içe aktarıldı."));
+                break;
+            }
+
+            case "profile.export":
+            {
+                string id = Str(m, "id");
+                if (_core.Profiles.Get(id) is null)
+                {
+                    throw new BadMessage("Profil bulunamadı.");
+                }
+
+                Post(new { type = "export", id, json = _core.Profiles.Export(id) });
+                break;
+            }
+
+            case "trigger.preview":
+            {
+                bool left = Side(m);
+                TriggerConfig? config = m.TryGetProperty("config", out JsonElement c) && c.ValueKind != JsonValueKind.Null
+                    ? c.Deserialize<TriggerConfig>(TactileJson.Options)
+                    : null;
+                _core.PreviewTrigger(left, config);
+                break;
+            }
+
+            case "settings.save":
+                SaveSettings(Read<AppSettings>(m, "settings"));
+                break;
+
+            case "gyro.calibrate":
+                if (_core.Controllers.Controller is null)
+                {
+                    throw new BadMessage("Kontrolcü bağlı değil.");
+                }
+
+                _core.StartGyroCalibration();
+                break;
+
+            case "foreground.pick":
+                Post(new { type = "foreground", recent = _core.RecentForeground });
+                break;
+
+            // Phase 1 live controls: layers over the profile until reset.
+            case "lightbar":
+            {
+                Rgb color = ParseColor(Str(m, "color"));
+                _core.SetOverride("live.lightbar", o => o with { Lightbar = color });
+                break;
+            }
+
+            case "brightness":
+            {
+                var level = (LedBrightness)Int(m, "level", 0, 2);
+                _core.SetOverride("live.brightness", o => o with { Brightness = level });
+                break;
+            }
+
+            case "playerLeds":
+            {
+                byte mask = (byte)Int(m, "mask", 0, 31);
+                _core.SetOverride("live.playerLeds", o => o with { PlayerLeds = mask });
+                break;
+            }
+
+            case "micLed":
+            {
+                var mode = (MicLed)Int(m, "mode", 0, 2);
+                _core.SetOverride("live.micLed", o => o with { MicLed = mode });
+                break;
+            }
+
+            case "rumble":
+            {
+                byte l = (byte)Int(m, "left", 0, 255);
+                byte r = (byte)Int(m, "right", 0, 255);
+                _core.SetOverride("live.rumble", o => o with { RumbleLeft = l, RumbleRight = r });
+                break;
+            }
+
+            case "trigger":
+            {
+                bool left = Side(m);
+                Str(m, "mode");
+                // The message carries mode/params/zones at the top level, the same names as TriggerConfig.
+                TriggerEffect effect = Triggers.ToEffect(m.Deserialize<TriggerConfig>(TactileJson.Options) ?? TriggerConfig.Off);
+                _core.SetOverride(left ? "live.trigger.left" : "live.trigger.right",
+                    o => left ? o with { LeftTrigger = effect } : o with { RightTrigger = effect });
+                break;
+            }
+
+            case "haptic":
+            {
+                string? error = _core.Controllers.PlayHapticTone(
+                    Float(m, "frequency"),
+                    Math.Clamp(Float(m, "amplitude"), 0f, 1f),
+                    Bool(m, "left"),
+                    Bool(m, "right"),
+                    Int(m, "ms", 1, 10_000));
+                if (error is not null)
+                {
+                    PostError(error);
+                }
+
+                break;
+            }
+
+            case "reset":
+                _core.Controllers.StopHaptics();
+                _core.ClearOverrides();
+                break;
+
+            case null:
+                throw new BadMessage("Mesaj türü eksik.");
+
+            default:
+                throw new BadMessage($"Bilinmeyen mesaj: {type}");
+        }
+    }
+
+    private void SaveSettings(AppSettings s)
+    {
+        bool before = _core.Settings.Current.StartWithWindows;
+        _core.Settings.Save(s);
+        bool after = _core.Settings.Current.StartWithWindows;
+        if (after == before)
+        {
+            return;
+        }
+
+        try
+        {
+            Autostart.Apply(after);
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            _core.Settings.Save(_core.Settings.Current with { StartWithWindows = before });
+            throw new BadMessage("Windows ile başlatma ayarlanamadı.");
         }
     }
 
     public void PostStatus()
     {
-        DualSenseController? c = _service.Controller;
+        DualSenseController? c = _core.Controllers.Controller;
         Post(new
         {
             type = "status",
@@ -97,19 +271,32 @@ internal sealed class Bridge
             mac = c?.Details.MacAddress,
             firmware = c?.Details.Firmware?.Display,
             version = Application.ProductVersion,
+            activeProfileId = _core.ActiveProfile.Id,
+            activeReason = _core.ActiveReason,
         });
     }
 
-    public void PostInput(InputState s, ControllerStats stats, ImuCalibration cal)
+    public void PostInput(InputState s)
     {
-        Vector3 gyro = cal.GyroDegPerSec(s.GyroRaw);
-        Vector3 accel = cal.AccelG(s.AccelRaw);
+        DualSenseController? c = _core.Controllers.Controller;
+        if (!_ready || c is null)
+        {
+            return;
+        }
+
+        Vector3 gyro = _core.GyroDegPerSec(s);
+        Vector3 accel = c.Details.Calibration.AccelG(s.AccelRaw);
+        (float lx, float ly) = _core.LeftStick.Process(s.Left);
+        (float rx, float ry) = _core.RightStick.Process(s.Right);
+        ControllerStats stats = c.Stats;
         Post(new
         {
             type = "input",
             buttons = Enum.GetValues<Buttons>().Where(b => b != Buttons.None && s.IsDown(b)).Select(b => b.ToString()),
             left = new[] { (int)s.Left.X, s.Left.Y },
             right = new[] { (int)s.Right.X, s.Right.Y },
+            leftProcessed = new[] { lx, ly },
+            rightProcessed = new[] { rx, ry },
             l2 = s.L2,
             r2 = s.R2,
             gyro = new[] { gyro.X, gyro.Y, gyro.Z },
@@ -123,9 +310,21 @@ internal sealed class Bridge
         });
     }
 
-    private void PostOutput()
+    /// <summary>Lightbar effects animate, so this is also called from the 30 Hz timer.</summary>
+    public void PostOutputIfChanged()
     {
-        OutputState o = _service.Output;
+        if (!_ready)
+        {
+            return;
+        }
+
+        OutputState o = _core.Controllers.Output;
+        if (o.Equals(_lastOutput))
+        {
+            return;
+        }
+
+        _lastOutput = o;
         Post(new
         {
             type = "output",
@@ -140,26 +339,112 @@ internal sealed class Bridge
         });
     }
 
+    public void PostProfiles() =>
+        Post(new { type = "profiles", list = _core.Profiles.All, activeId = _core.ActiveProfile.Id });
+
+    public void PostSettings() => Post(new { type = "settings", settings = _core.Settings.Current });
+
+    public void PostNotice(Notice n)
+    {
+        string json = n.Progress is double p
+            ? Serialize(new { type = "notice", kind = n.Kind, message = n.Message, progress = p })
+            : Serialize(new { type = "notice", kind = n.Kind, message = n.Message });
+        if (_ready)
+        {
+            _postRaw(json);
+        }
+        else if (_queued.Count < MaxQueued)
+        {
+            _queued.Add(json);
+        }
+    }
+
     private void PostError(string message) => Post(new { type = "error", message });
 
-    private void Post(object message) => _post(JsonSerializer.Serialize(message, Json));
-
-    private static TriggerEffect ParseTrigger(JsonElement m)
+    private void Post(object message)
     {
-        JsonElement p = m.TryGetProperty("params", out JsonElement x) ? x : default;
-        int I(string name) => p.GetProperty(name).GetInt32();
-        return m.GetProperty("mode").GetString() switch
+        if (_ready)
         {
-            "off" => TriggerEffect.Off,
-            "feedback" => TriggerEffect.Feedback(I("start"), I("strength")),
-            "slope" => TriggerEffect.Slope(I("start"), I("end"), I("startStrength"), I("endStrength")),
-            "weapon" => TriggerEffect.Weapon(I("start"), I("end"), I("strength")),
-            "vibration" => TriggerEffect.Vibration(I("start"), I("amplitude"), I("frequency")),
-            "bow" => TriggerEffect.Bow(I("start"), I("end"), I("strength"), I("snap")),
-            "galloping" => TriggerEffect.Galloping(I("start"), I("end"), I("firstFoot"), I("secondFoot"), I("frequency")),
-            "machine" => TriggerEffect.Machine(I("start"), I("end"), I("amplitudeA"), I("amplitudeB"), I("frequency"), I("period")),
-            string other => throw new ArgumentException($"Unknown trigger mode '{other}'."),
-            null => throw new ArgumentException("Missing trigger mode."),
-        };
+            _postRaw(Serialize(message));
+        }
     }
+
+    private static string Serialize(object message) => JsonSerializer.Serialize(message, TactileJson.Compact);
+
+    private static string Describe(Exception e) => e switch
+    {
+        BadMessage => e.Message,
+        JsonException j => string.IsNullOrEmpty(j.Path) ? "Mesaj okunamadı." : $"Geçersiz alan: {j.Path}",
+        // Core throws with Turkish text; the device library does not.
+        ArgumentException or KeyNotFoundException or InvalidOperationException
+            when e.TargetSite?.DeclaringType?.Assembly == typeof(AppCore).Assembly => e.Message,
+        ArgumentOutOfRangeException a => $"Değer aralık dışında: {a.ParamName}",
+        ArgumentException => "Geçersiz değer.",
+        IOException or UnauthorizedAccessException => "Dosya yazılamadı.",
+        _ => $"Beklenmeyen hata ({e.GetType().Name}).",
+    };
+
+    private static T Read<T>(JsonElement m, string name)
+        where T : class
+    {
+        if (!m.TryGetProperty(name, out JsonElement v) || v.ValueKind != JsonValueKind.Object)
+        {
+            throw new BadMessage($"Eksik alan: {name}");
+        }
+
+        return v.Deserialize<T>(TactileJson.Options) ?? throw new BadMessage($"Eksik alan: {name}");
+    }
+
+    private static string Str(JsonElement m, string name) =>
+        OptStr(m, name) ?? throw new BadMessage($"Eksik alan: {name}");
+
+    private static string? OptStr(JsonElement m, string name) =>
+        m.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    private static int Int(JsonElement m, string name, int min, int max)
+    {
+        if (!m.TryGetProperty(name, out JsonElement v) || v.ValueKind != JsonValueKind.Number || !v.TryGetDouble(out double d))
+        {
+            throw new BadMessage($"Eksik alan: {name}");
+        }
+
+        if (double.IsNaN(d) || d < min || d > max)
+        {
+            throw new BadMessage($"{name} {min}-{max} arası olmalı.");
+        }
+
+        return (int)Math.Round(d);
+    }
+
+    private static float Float(JsonElement m, string name) =>
+        m.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.Number && v.TryGetSingle(out float f) && float.IsFinite(f)
+            ? f
+            : throw new BadMessage($"Eksik alan: {name}");
+
+    private static bool Bool(JsonElement m, string name) =>
+        m.TryGetProperty(name, out JsonElement v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? v.GetBoolean()
+            : throw new BadMessage($"Eksik alan: {name}");
+
+    private static bool Side(JsonElement m) => Str(m, "side") switch
+    {
+        "left" => true,
+        "right" => false,
+        _ => throw new BadMessage("side left ya da right olmalı."),
+    };
+
+    private static Rgb ParseColor(string hex)
+    {
+        try
+        {
+            return Rgb.FromHex(hex);
+        }
+        catch (Exception e) when (e is FormatException or ArgumentException or IndexOutOfRangeException)
+        {
+            throw new BadMessage("Geçersiz renk.");
+        }
+    }
+
+    /// <summary>A message the UI got wrong; the text goes back as is.</summary>
+    private sealed class BadMessage(string message) : Exception(message);
 }

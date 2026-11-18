@@ -18,8 +18,16 @@ public sealed class ControllerService : IDisposable
     private OutputState _output = OutputState.Default;
 
     public ControllerService()
+        : this(autoConnect: true)
     {
-        _scan = new Timer(_ => Scan(), null, TimeSpan.Zero, ScanInterval);
+    }
+
+    /// <param name="autoConnect">False never looks for hardware; outputs are only stored (tests).</param>
+    public ControllerService(bool autoConnect)
+    {
+        _scan = autoConnect
+            ? new Timer(_ => Scan(), null, TimeSpan.Zero, ScanInterval)
+            : new Timer(_ => { }, null, Timeout.Infinite, Timeout.Infinite);
     }
 
     public DualSenseController? Controller => _controller;

@@ -208,6 +208,16 @@ Her faz **çalışan bir ürünle** biter. Bir faz bitmeden sonrakine geçilmez.
 
 ---
 
+**Faz 2 sonucu (2026-11-18)**
+- Üç alt ajanla yapıldı (çekirdek, arayüz, pencere/köprü). Ortak sözleşme `docs/contract.md`'de; çıktılar ayrıca kontrol edildi ve kod incelemesinden geçti.
+- Çekirdek: profil ve ayar dosyaları (atomik yazım, bozuk dosyayı kenara alma, bilinmeyen enum değerini varsayılana çevirme), ışık efektleri, oyuncu LED'leri, analog/tetik eğrileri, gyro kalibrasyonu, öndeki oyuna göre profil seçimi, boşta uyku, pil uyarısı.
+- Arayüz: Kontrolcü, Tetikler (10 bölgeli editör ve şablonlar), Işık, Analoglar, Profiller, Ayarlar; Faz 1 test araçları "Geliştirici araçları" altında.
+- Pencere: tray simgesi ve menüsü, kapatınca tray'e küçültme, `--tray` ile gizli başlatma, Windows ile başlatma (HKCU Run, yalnız ayardan), tek kopya çalışma.
+- Testler 95/95. Duman testinde tray modu, tek kopya ve ilk profil oluşturma çalıştı.
+- Denenmeyenler: pencerenin gerçek controller ile kullanımı, BT bağlantısını kesme (boşta uyku), Windows ile başlatma kaydı, tray balonları, gyro "hareketsiz" eşiği.
+
+---
+
 ### Faz 3 — Tuş atama ve klavye/fare (2 hafta)
 
 Bu faz sanal kontrolcü **gerektirmez**; klavye ve fare `SendInput` ile gönderilir. **Controller tuşunu başka bir controller tuşuna çevirmek** (örn. ✕ ↔ ○) oyunun gördüğü cihazı değiştirmeyi gerektirir, bu yüzden **Faz 4'e** aittir.
