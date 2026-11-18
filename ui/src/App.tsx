@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { inHost, type Profile, type Status } from "./host";
 import { deepEqual } from "./model";
 import { Notices } from "./Notices";
+import { Emulation } from "./pages/Emulation";
 import { Light } from "./pages/Light";
 import { Mapping } from "./pages/Mapping";
 import { Overview } from "./pages/Overview";
@@ -18,6 +19,7 @@ const sections = [
   { id: "light", label: "Işık", keys: ["lightbar", "playerLeds", "micLed"] },
   { id: "sticks", label: "Analoglar", keys: ["sticks", "gyro"] },
   { id: "mapping", label: "Tuşlar", keys: ["mapping", "macros"] },
+  { id: "emulation", label: "Sanal kontrolcü", keys: ["emulation"] },
   { id: "profiles", label: "Profiller", keys: [] },
 ] as const satisfies readonly { id: string; label: string; keys: readonly (keyof Profile)[] }[];
 
@@ -109,6 +111,7 @@ function Shell() {
           {section === "light" && <Light />}
           {section === "sticks" && <Sticks />}
           {section === "mapping" && <Mapping />}
+          {section === "emulation" && <Emulation />}
           {section === "profiles" && <Profiles />}
           {section === "settings" && <Settings />}
         </section>

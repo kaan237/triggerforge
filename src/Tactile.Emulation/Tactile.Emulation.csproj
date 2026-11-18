@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Tactile.Device.DualSense/Tactile.Device.DualSense.csproj" />
+  </ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="Tactile.Tests" /></ItemGroup>
+</Project>

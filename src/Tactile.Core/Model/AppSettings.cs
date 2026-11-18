@@ -21,4 +21,13 @@ public sealed record AppSettings
     /// <summary>Battery percentages that raise a notice, highest first.</summary>
     public IReadOnlyList<int> LowBatteryWarnings { get; init; } = [20, 10];
     public bool RunAsAdminHint { get; init; }
+    public EmulationSettings Emulation { get; init; } = new();
+}
+
+public sealed record EmulationSettings
+{
+    /// <summary>Master switch; false never attaches or hides anything.</summary>
+    public bool Enabled { get; init; } = true;
+    /// <summary>Hide the real controller from other apps while a virtual pad is attached.</summary>
+    public bool HideController { get; init; } = true;
 }

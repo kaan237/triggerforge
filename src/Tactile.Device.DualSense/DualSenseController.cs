@@ -36,15 +36,22 @@ public sealed class DualSenseController : IDisposable
     private bool _sentFirst;
     private volatile bool _hapticsActive;
 
-    private DualSenseController(HidDevice device, ControllerDetails details)
+    private DualSenseController(HidDevice device, ControllerDetails details, UsbFeatureReports features)
     {
         _device = device;
         Details = details;
+        Features = features;
         _writeBuffer = new byte[Math.Max(device.Info.OutputReportLength, HapticReport.Length)];
         _reader = new Thread(ReadLoop) { IsBackground = true, Name = "dualsense-reader", Priority = ThreadPriority.AboveNormal };
     }
 
     public ControllerDetails Details { get; }
+
+    /// <summary>Feature reports read at open, in USB form (what a virtual DualSense answers with).</summary>
+    public UsbFeatureReports Features { get; }
+
+    /// <summary>HID device path this controller was opened from.</summary>
+    public string DevicePath => _device.Info.Path;
 
     public ControllerStats Stats { get; } = new();
 
@@ -73,7 +80,11 @@ public sealed class DualSenseController : IDisposable
                 firmware is null ? null : FirmwareInfo.Parse(firmware),
                 calibration is null ? ImuCalibration.Identity : ImuCalibration.Parse(calibration));
 
-            var controller = new DualSenseController(device, details);
+            var features = new UsbFeatureReports(
+                calibration is null ? null : FeatureReport.ToUsb(calibration, info.Link),
+                pairing is null ? null : FeatureReport.ToUsb(pairing, info.Link),
+                firmware is null ? null : FeatureReport.ToUsb(firmware, info.Link));
+            var controller = new DualSenseController(device, details, features);
             controller._reader.Start();
             return controller;
         }

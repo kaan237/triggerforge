@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using Tactile.Core;
 using Tactile.Device.DualSense;
+using Tactile.Drivers;
+using Tactile.Emulation;
 using Tactile.Input.Windows;
 
 namespace Tactile.Host;
@@ -20,7 +22,11 @@ internal sealed class TactileApp : ApplicationContext
     private readonly MainWindow _window;
     private readonly Tray _tray;
     private readonly System.Windows.Forms.Timer _inputTimer = new() { Interval = 33 };
+    private readonly System.Windows.Forms.Timer _emulationTimer = new() { Interval = 1000 };
     private readonly RegisteredWaitHandle _showWait;
+    private readonly EventWaitHandle _restoreSignal;
+    private readonly EventWaitHandle _restoredSignal;
+    private readonly RegisteredWaitHandle _restoreWait;
     private volatile InputState? _pendingInput;
     private Battery? _battery;
     private bool _toldAboutTray;
@@ -28,7 +34,8 @@ internal sealed class TactileApp : ApplicationContext
 
     public TactileApp(bool startHidden, EventWaitHandle showSignal)
     {
-        _core = new AppCore(platform: WindowsInputPlatform.Create());
+        (DriverPlatform? drivers, IUsbIpServer? server) = StartEmulation();
+        _core = new AppCore(platform: WindowsInputPlatform.Create(), drivers: drivers, server: server);
         _window = new MainWindow(_core, _largeGlyph.Icon);
         // A handle now, so core events can be marshalled even while the window was never shown.
         _ = _window.Handle;
@@ -36,7 +43,7 @@ internal sealed class TactileApp : ApplicationContext
         _window.FormClosed += (_, _) => Exit();
 
         // Exit later: the tray disposes itself, which must not happen inside its own menu click.
-        _tray = new Tray(_smallGlyph.Icon, ShowWindow, Activate, () => Ui(Exit));
+        _tray = new Tray(_smallGlyph.Icon, ShowWindow, Activate, RestoreController, () => Ui(Exit));
         _tray.SetProfiles(_core.Profiles.All, _core.ActiveProfile.Id);
         UpdateTrayStatus();
 
@@ -49,16 +56,101 @@ internal sealed class TactileApp : ApplicationContext
         _core.MappingChanged += OnMappingChanged;
         _core.ShowAppRequested += OnShowAppRequested;
         _window.Bridge.RestartElevatedRequested += RestartElevated;
+        _window.Bridge.RestoreRequested += RestoreController;
+        if (_core.Emulation is { } emulation)
+        {
+            emulation.Changed += OnEmulationChanged;
+        }
 
         _inputTimer.Tick += (_, _) => FlushInput();
         _inputTimer.Start();
+        _emulationTimer.Tick += (_, _) =>
+        {
+            if (_window.OnScreen)
+            {
+                _window.Bridge.PostEmulation();
+            }
+        };
+        _emulationTimer.Start();
 
         _showWait = ThreadPool.RegisterWaitForSingleObject(showSignal, (_, _) => Ui(ShowWindow), null, Timeout.Infinite, executeOnlyOnce: false);
+        // `Tactile.exe --restore` started while we run: undo here, then say so.
+        _restoreSignal = new EventWaitHandle(false, EventResetMode.AutoReset, Program.RestoreEventName);
+        _restoredSignal = new EventWaitHandle(false, EventResetMode.AutoReset, Program.RestoredEventName);
+        _restoreWait = ThreadPool.RegisterWaitForSingleObject(_restoreSignal, (_, _) =>
+        {
+            RestoreNow();
+            _restoredSignal.Set();
+        }, null, Timeout.Infinite, executeOnlyOnce: false);
+
+        _ = Task.Run(StartMenu.EnsureRestoreShortcut);
 
         if (!startHidden)
         {
             _window.Show();
         }
+    }
+
+    /// <summary>Any failure (including the placeholder factories) leaves emulation off; the app still runs.</summary>
+    private static (DriverPlatform?, IUsbIpServer?) StartEmulation()
+    {
+        DriverPlatform? drivers = null;
+        try
+        {
+            drivers = DriverPlatform.CreateWindows(AppCore.DataDirectory());
+        }
+        catch (Exception)
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            return (drivers, UsbIpServerFactory.Start());
+        }
+        catch (Exception)
+        {
+            return (drivers, null);
+        }
+    }
+
+    private void OnEmulationChanged() => Ui(_window.Bridge.PostEmulation);
+
+    /// <summary>Tray, settings page: same as <c>--restore</c>, in this process, off the UI thread.</summary>
+    private void RestoreController()
+    {
+        if (_exiting)
+        {
+            return;
+        }
+
+        _ = Task.Run(RestoreNow);
+    }
+
+    private void RestoreNow()
+    {
+        string message;
+        try
+        {
+            message = _core.RestoreEmulation()
+                ? "Kontrolcü geri getirildi: sanal kontrolcü kaldırıldı, gizleme kapatıldı, sanal kontrolcü ayarı kapandı."
+                : "Sanal kontrolcü ayarı kapatıldı. Sürücü katmanı çalışmadığı için geri alınacak bir şey yoktu.";
+        }
+        catch (Exception e)
+        {
+            message = $"Kontrolcü geri getirilemedi: {e.Message}";
+        }
+
+        var notice = new Notice(NoticeKinds.Emulation, message);
+        Ui(() =>
+        {
+            _window.Bridge.PostNotice(notice);
+            _window.Bridge.PostEmulation();
+            if (!_window.OnScreen)
+            {
+                _tray.Balloon(message);
+            }
+        });
     }
 
     private void ShowWindow()
@@ -223,7 +315,15 @@ internal sealed class TactileApp : ApplicationContext
 
         _exiting = true;
         _showWait.Unregister(null);
+        _restoreWait.Unregister(null);
         _inputTimer.Stop();
+        _emulationTimer.Stop();
+        if (_core.Emulation is { } emulation)
+        {
+            emulation.Changed -= OnEmulationChanged;
+        }
+
+        _window.Bridge.RestoreRequested -= RestoreController;
         _core.Controllers.Input -= OnInput;
         _core.Controllers.ConnectionChanged -= OnConnection;
         _core.ActiveProfileChanged -= OnActiveProfile;
@@ -245,6 +345,9 @@ internal sealed class TactileApp : ApplicationContext
         if (disposing)
         {
             _inputTimer.Dispose();
+            _emulationTimer.Dispose();
+            _restoreSignal.Dispose();
+            _restoredSignal.Dispose();
             // No-op after Exit; covers the loop ending some other way (session end).
             _core.Dispose();
             if (!_window.IsDisposed)

@@ -12,6 +12,8 @@ public enum CurveKind { Linear, Exponential, Custom }
 
 public enum StickShape { Round, Square }
 
+public enum EmulationMode { Off, Xbox360, DualSense }
+
 /// <summary>Everything one profile sets. File format: docs/contract.md.</summary>
 public sealed record Profile
 {
@@ -34,6 +36,19 @@ public sealed record Profile
     public MappingConfig Mapping { get; init; } = new();
     /// <summary>At most 50.</summary>
     public IReadOnlyList<Macro> Macros { get; init; } = [];
+    /// <summary>Virtual controller (phase 4).</summary>
+    public EmulationConfig Emulation { get; init; } = new();
+}
+
+/// <summary>What the virtual controller looks like for this profile. File format: docs/contract-phase4.md.</summary>
+public sealed record EmulationConfig
+{
+    public EmulationMode Mode { get; init; } = EmulationMode.Off;
+    /// <summary>Source button name to target button name or "none". Unlisted buttons stay as they are.</summary>
+    public IReadOnlyDictionary<string, string> Remap { get; init; } = new Dictionary<string, string>();
+    public bool SwapSticks { get; init; }
+    /// <summary>Buttons bound in <see cref="Profile.Mapping"/> are released on the virtual pad.</summary>
+    public bool HideMappedButtons { get; init; } = true;
 }
 
 public sealed record LightbarConfig

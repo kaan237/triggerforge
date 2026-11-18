@@ -34,14 +34,14 @@ export function Segmented<T extends string | number>({
   label,
 }: {
   value: T;
-  options: { id: T; label: string }[];
+  options: { id: T; label: string; disabled?: boolean }[];
   onChange: (v: T) => void;
   label?: string;
 }) {
   return (
     <div className="segmented" role="radiogroup" aria-label={label}>
       {options.map((o) => (
-        <button key={String(o.id)} role="radio" aria-checked={o.id === value} className={o.id === value ? "on" : ""} onClick={() => onChange(o.id)}>
+        <button key={String(o.id)} role="radio" aria-checked={o.id === value} className={o.id === value ? "on" : ""} disabled={o.disabled} onClick={() => onChange(o.id)}>
           {o.label}
         </button>
       ))}

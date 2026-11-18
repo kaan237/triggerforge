@@ -85,6 +85,7 @@ public static partial class Validation
             Rumble = new RumbleConfig { Strength = Clamp(rumble.Strength, 0, 2, 1) },
             Mapping = mapping,
             Macros = macros,
+            Emulation = NormalizeEmulation(p.Emulation, issues),
         };
     }
 
@@ -117,6 +118,55 @@ public static partial class Validation
                 .Take(5)
                 .ToArray(),
             RunAsAdminHint = s.RunAsAdminHint,
+            Emulation = new EmulationSettings
+            {
+                Enabled = s.Emulation?.Enabled ?? true,
+                HideController = s.Emulation?.HideController ?? true,
+            },
+        };
+    }
+
+    private static EmulationConfig NormalizeEmulation(EmulationConfig? e, List<string> issues)
+    {
+        e ??= new();
+        var remap = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach ((string key, string target) in e.Remap ?? new Dictionary<string, string>())
+        {
+            if (!ButtonNames.TryParse(key, out Buttons source))
+            {
+                issues.Add($"Sanal kontrolcü: bilinmeyen tuş adı \"{key}\", yeniden ataması silindi.");
+                continue;
+            }
+
+            string to;
+            if (string.Equals(target?.Trim(), ButtonNames.None, StringComparison.OrdinalIgnoreCase))
+            {
+                to = ButtonNames.None;
+            }
+            else if (ButtonNames.TryParse(target, out Buttons t))
+            {
+                to = ButtonNames.Name(t);
+            }
+            else
+            {
+                issues.Add($"Sanal kontrolcü: \"{key}\" için hedef tuş bilinmiyor ({target}), yeniden ataması silindi.");
+                continue;
+            }
+
+            string from = ButtonNames.Name(source);
+            // Mapping a button to itself is the same as not listing it.
+            if (from != to)
+            {
+                remap.TryAdd(from, to);
+            }
+        }
+
+        return new EmulationConfig
+        {
+            Mode = Defined(e.Mode, EmulationMode.Off),
+            Remap = remap,
+            SwapSticks = e.SwapSticks,
+            HideMappedButtons = e.HideMappedButtons,
         };
     }
 

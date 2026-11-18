@@ -5,6 +5,8 @@
   <ItemGroup>
     <ProjectReference Include="../Tactile.Device.DualSense/Tactile.Device.DualSense.csproj" />
     <ProjectReference Include="../Tactile.Input/Tactile.Input.csproj" />
+    <ProjectReference Include="../Tactile.Emulation/Tactile.Emulation.csproj" />
+    <ProjectReference Include="../Tactile.Drivers/Tactile.Drivers.csproj" />
   </ItemGroup>
   <ItemGroup><InternalsVisibleTo Include="Tactile.Tests" /></ItemGroup>
 </Project>

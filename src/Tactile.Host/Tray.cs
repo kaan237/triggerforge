@@ -14,7 +14,7 @@ internal sealed class Tray : IDisposable
     private readonly Action<string> _activate;
     private string _text = "";
 
-    public Tray(Icon icon, Action show, Action<string> activate, Action exit)
+    public Tray(Icon icon, Action show, Action<string> activate, Action restore, Action exit)
     {
         _activate = activate;
         var showItem = new ToolStripMenuItem("Göster", null, (_, _) => show());
@@ -22,6 +22,8 @@ internal sealed class Tray : IDisposable
         _menu.Items.Add(showItem);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(_profilesEnd);
+        _menu.Items.Add(new ToolStripMenuItem("Kontrolcüyü geri getir", null, (_, _) => restore()));
+        _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(new ToolStripMenuItem("Çıkış", null, (_, _) => exit()));
 
         _icon = new NotifyIcon { Icon = icon, Text = "Tactile", ContextMenuStrip = _menu, Visible = true };

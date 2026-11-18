@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using Tactile.Device.DualSense;
+using Tactile.Drivers;
+using Tactile.Emulation;
 using Tactile.Input;
 
 namespace Tactile.Core;
@@ -62,9 +64,16 @@ public sealed class AppCore : IDisposable
     private string? _elevationCheckedFor;
     private volatile bool _mappingPaused;
 
+    private readonly EmulationService? _emulation;
+    private (DualSenseController? Source, RealController? Value) _real;
+
     /// <param name="platform">Keyboard, mouse, microphone and launcher; null = <see cref="InputPlatform.None"/> (no output).</param>
-    public AppCore(string? dataDir = null, IForegroundSource? foreground = null, InputPlatform? platform = null)
-        : this(dataDir, foreground, new ControllerService(), TimeProvider.System, runTimer: true, platform)
+    /// <param name="drivers">Driver layer for the virtual controller; null = emulation unavailable.</param>
+    /// <param name="server">USB/IP server; null with drivers set = drivers shown, no virtual pad.</param>
+    public AppCore(string? dataDir = null, IForegroundSource? foreground = null, InputPlatform? platform = null,
+        DriverPlatform? drivers = null, IUsbIpServer? server = null)
+        : this(dataDir, foreground, new ControllerService(autoConnect: true, drivers is null ? null : drivers.Tree.IsVirtual),
+            TimeProvider.System, runTimer: true, platform, drivers, server)
     {
     }
 
@@ -73,7 +82,7 @@ public sealed class AppCore : IDisposable
     /// worker and macros then also run on the calling thread, driven by the same clock.
     /// </param>
     internal AppCore(string? dataDir, IForegroundSource? foreground, ControllerService controllers, TimeProvider time, bool runTimer,
-        InputPlatform? platform = null)
+        InputPlatform? platform = null, DriverPlatform? drivers = null, IUsbIpServer? server = null, Func<bool>? steamRunning = null)
     {
         _time = time;
         _platform = platform ?? InputPlatform.None;
@@ -86,6 +95,12 @@ public sealed class AppCore : IDisposable
         foreach (string broken in Profiles.BrokenFiles.Concat(Settings.BrokenFiles))
         {
             Queue(new Notice(NoticeKinds.BrokenFile, $"Bozuk dosya atlandı: {Path.GetFileName(broken)}"));
+        }
+
+        if (drivers is not null)
+        {
+            // Restores a crashed session's leftovers before the controller is used.
+            _emulation = new EmulationService(drivers, server, new EmulationHost(this), Now, threaded: runTimer, steamRunning);
         }
 
         if (foreground is null)
@@ -125,6 +140,33 @@ public sealed class AppCore : IDisposable
     public SettingsStore Settings { get; }
 
     public IForegroundSource Foreground => _foreground;
+
+    /// <summary>Folder for settings, profiles and the recovery journal.</summary>
+    public static string DataDirectory(string? dataDir = null) => JsonFile.ResolveDataDir(dataDir);
+
+    /// <summary>Null when the driver layer could not start.</summary>
+    public EmulationService? Emulation => _emulation;
+
+    /// <summary>
+    /// Stops emulation for good: the master switch goes off, our pad is removed and everything
+    /// in the recovery journal is undone. False when the driver layer is not available.
+    /// </summary>
+    public bool RestoreEmulation()
+    {
+        AppSettings s = Settings.Current;
+        if (s.Emulation.Enabled)
+        {
+            Settings.Save(s with { Emulation = s.Emulation with { Enabled = false } });
+        }
+
+        if (_emulation is null)
+        {
+            return false;
+        }
+
+        _emulation.RestoreAll();
+        return true;
+    }
 
     /// <summary>Last 10 distinct exe names seen in front, most recent first.</summary>
     public IReadOnlyList<string> RecentForeground => _recent.Items;
@@ -277,22 +319,7 @@ public sealed class AppCore : IDisposable
     {
         lock (_lock)
         {
-            int i = _overrides.FindIndex(kv => kv.Key == key);
-            if (layer is null)
-            {
-                if (i >= 0)
-                {
-                    _overrides.RemoveAt(i);
-                }
-            }
-            else if (i >= 0)
-            {
-                _overrides[i] = new(key, layer);
-            }
-            else
-            {
-                _overrides.Add(new(key, layer));
-            }
+            SetLayerLocked(key, layer);
         }
 
         Refresh();
@@ -345,6 +372,8 @@ public sealed class AppCore : IDisposable
             return;
         }
 
+        // First, while output still works: the game layers clear and the journal is closed.
+        _emulation?.Dispose();
         _disposed = true;
         _timer?.Dispose();
         _foreground.Changed -= OnForeground;
@@ -368,6 +397,9 @@ public sealed class AppCore : IDisposable
         string? sleepMac = null;
         OutputState? toSend = null;
         long version = 0;
+        Profile activeProfile;
+        AppSettings activeSettings;
+        DualSenseController? activeController;
         lock (_lock)
         {
             if (_disposed)
@@ -378,6 +410,8 @@ public sealed class AppCore : IDisposable
             AppSettings settings = Settings.Current;
             DualSenseController? controller = Controllers.Controller;
             string? mac = controller?.Details.MacAddress;
+            activeSettings = settings;
+            activeController = controller;
 
             ProfileSelection selection = _selector.Select(_foreground.Current, Profiles.All, settings, mac, now);
             if (!ReferenceEquals(selection.Profile, _active.Profile) || selection.Reason != _active.Reason)
@@ -406,6 +440,7 @@ public sealed class AppCore : IDisposable
                     $"Kontrolcü {settings.IdleSleepMinutes} dakikadır kullanılmadı, kapatılıyor."));
             }
 
+            activeProfile = _active.Profile;
             OutputState output = Build(now);
             if (!output.Equals(_lastOutput))
             {
@@ -415,17 +450,8 @@ public sealed class AppCore : IDisposable
             }
         }
 
-        if (toSend is not null)
-        {
-            lock (_sendLock)
-            {
-                // A newer tick may have computed a later state already; never send an older one after it.
-                if (version == Interlocked.Read(ref _outputVersion))
-                {
-                    Controllers.SetOutput(_ => toSend);
-                }
-            }
-        }
+        Send(toSend, version);
+        _emulation?.Update(activeProfile, activeSettings, RealOf(activeController));
 
         if (sleepMac is not null)
         {
@@ -435,6 +461,90 @@ public sealed class AppCore : IDisposable
         UpdateMapping();
         _mapper.Tick(now);
         Flush();
+    }
+
+    /// <summary>Writes a computed state unless a newer one was computed meanwhile. True when the controller write went out.</summary>
+    private bool Send(OutputState? toSend, long version)
+    {
+        if (toSend is null)
+        {
+            return false;
+        }
+
+        lock (_sendLock)
+        {
+            // A newer tick may have computed a later state already; never send an older one after it.
+            return version == Interlocked.Read(ref _outputVersion) && Controllers.SetOutputAndSend(toSend);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="SetOverride"/> without the rest of the tick: rebuilds the output and sends it
+    /// right away. Used for game feedback, which can arrive a few hundred times a second.
+    /// </summary>
+    internal bool SetOutputLayerNow(string key, Func<OutputState, OutputState>? layer)
+    {
+        OutputState? toSend = null;
+        long version = 0;
+        lock (_lock)
+        {
+            if (_disposed)
+            {
+                return false;
+            }
+
+            SetLayerLocked(key, layer);
+            OutputState output = Build(Now());
+            if (!output.Equals(_lastOutput))
+            {
+                _lastOutput = output;
+                toSend = output;
+                version = ++_outputVersion;
+            }
+        }
+
+        return Send(toSend, version);
+    }
+
+    private void SetLayerLocked(string key, Func<OutputState, OutputState>? layer)
+    {
+        int i = _overrides.FindIndex(kv => kv.Key == key);
+        if (layer is null)
+        {
+            if (i >= 0)
+            {
+                _overrides.RemoveAt(i);
+            }
+        }
+        else if (i >= 0)
+        {
+            _overrides[i] = new(key, layer);
+        }
+        else
+        {
+            _overrides.Add(new(key, layer));
+        }
+    }
+
+    private RealController? RealOf(DualSenseController? c)
+    {
+        if (c is null)
+        {
+            return null;
+        }
+
+        // One record per controller, so the emulation sees "unchanged" between ticks.
+        (DualSenseController? source, RealController? value) = _real;
+        if (ReferenceEquals(source, c))
+        {
+            return value;
+        }
+
+        UsbFeatureReports f = c.Features;
+        DualSenseIdentity? identity = f is { Calibration: { } cal, Pairing: { } pair, Firmware: { } fw } ? new DualSenseIdentity(cal, pair, fw) : null;
+        var real = new RealController(c.DevicePath, c.Details.Link, identity);
+        _real = (c, real);
+        return real;
     }
 
     internal void OnInput(InputState s)
@@ -469,6 +579,8 @@ public sealed class AppCore : IDisposable
                 }
             }
         }
+
+        _emulation?.OnInput(s);
 
         if (firstInput)
         {
@@ -641,6 +753,13 @@ public sealed class AppCore : IDisposable
         }
 
         ActivateProfile(id);
+    }
+
+    private sealed class EmulationHost(AppCore core) : IEmulationHost
+    {
+        public bool SetOutputLayer(string key, Func<OutputState, OutputState>? layer) => core.SetOutputLayerNow(key, layer);
+
+        public void Report(Notice notice) => core.Queue(notice);
     }
 
     private sealed class MappingHost(AppCore core) : IMappingHost

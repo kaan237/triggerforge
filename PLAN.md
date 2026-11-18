@@ -278,6 +278,16 @@ Bu faz sanal kontrolcü **gerektirmez**; klavye ve fare `SendInput` ile gönderi
 
 **Geri alma:** sürücüleri kendi kaldırıcılarıyla kaldırmak; uygulama içinde "emülasyonu tamamen kapat" anahtarı.
 
+**Faz 4 sonucu (2026-11-19, kod tamam, donanımda denenmedi)**
+- Üç alt ajanla yapıldı (sanal cihaz, sürücüler, çekirdek + arayüz), aynı anda. Sözleşme `docs/contract-phase4.md`; protokol bilgisi `docs/protocol-emulation.md` (kendi cümlelerimizle, kaynaklı).
+- `src/Tactile.Emulation`: 127.0.0.1'de USB/IP sunucusu (kontrol + interrupt), sanal Xbox 360 ve sanal DualSense (yalnız HID, ses yok). Her çalıştırmada yeni port.
+- `src/Tactile.Drivers`: usbip-win2 (yalnız 0.9.8.1; yapı düzeni sürüme göre değişiyor) ve HidHide durumu, VHCI takma/çıkarma, HidHide gizleme. Her değişiklik önce `recovery.json`'a yazılıyor; çökme sonrası açılışta, `Tactile.exe --restore` ile ve Başlat menüsündeki "Kontrolcüyü geri getir" kısayoluyla geri alınıyor. Yalnız bizim eklediklerimiz geri alınıyor.
+- Dağıtım: sürücüler pakete gömülmüyor. Uygulama resmi GitHub sürümünü indiriyor, boyut + SHA-256 + Authenticode imzacısını kontrol ediyor (usbip-win2: Cloudyne Systems, HidHide: Nefarius Software Solutions e.U.; 19 Kasım'da doğrulandı), kullanıcı UAC'ye onay veriyor. İkisi de yeniden başlatma istiyor. Lisanslar (BSD-2, MIT) faz 7'de `licenses.txt`'e girecek.
+- Çekirdek: profil başına mod (Kapalı / Xbox 360 / DualSense; USB'de DualSense modu yok), controller → controller tuş yönlendirme, analog takası, klavyeye atanan tuşları sanal pad'de gizleme; Xbox rumble ve oyunun DualSense çıktısı (tetik, ışık, rumble) anında gerçek controller'a; gecikme p50/p95; Steam uyarısı.
+- Arayüz: "Sanal kontrolcü" sayfası (sürücü kartları, kur düğmesi, USB hub ve yeniden başlatma uyarısı, durum, geri getir).
+- Testler 314/314. İnceleme düzeltmeleri: HidHide meşgulken pad oyun ortasında sökülmüyor; meşgulken gizleme geri alınamazsa hata bildiriliyor ve tekrar deneniyor; çıkarma başarısız olsa da sürücünün yeniden bağlanma denemeleri durduruluyor; temiz kapanışta geri alınamayan kayıtlar silinmiyor.
+- Denenmeyenler (sürücüler kurulmadı): gerçek takma/gizleme/geri alma, Windows'un descriptor istekleri (ilk çalıştırmada kurulum günlüğü okunacak), oyunlarda tetik, XInput testi, zorla kapatma testi, 10 dk gecikme ölçümü, `--restore` ikinci kopya ile, Bluetooth feature raporlarının USB biçimi. Kabul ölçütü için 2 DualSense destekli oyun daha gerekli.
+
 ---
 
 ### Faz 5a — Yerel ses → haptik (1-2 hafta, sanal cihaz gerektirmez)

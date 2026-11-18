@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Tactile.Core;
 using Tactile.Device.DualSense;
+using Tactile.Drivers;
 using Tactile.Input.Windows;
 
 namespace Tactile.Host;
@@ -31,6 +32,9 @@ internal sealed class Bridge
 
     /// <summary>The UI asked to restart as administrator. Raised on the UI thread, outside any WebView2 event.</summary>
     public event Action? RestartElevatedRequested;
+
+    /// <summary>The UI asked for "Kontrolcüyü geri getir". Raised on the UI thread.</summary>
+    public event Action? RestoreRequested;
 
     /// <summary>The page is going away; hold posts until the next hello.</summary>
     public void Detach()
@@ -77,6 +81,7 @@ internal sealed class Bridge
                 PostOutputIfChanged();
                 PostProfiles();
                 PostSettings();
+                PostEmulation();
                 foreach (string q in _queued)
                 {
                     _postRaw(q);
@@ -190,6 +195,27 @@ internal sealed class Bridge
                 _owner.BeginInvoke(() => RestartElevatedRequested?.Invoke());
                 break;
 
+            case "emulation.status":
+                PostEmulation();
+                break;
+
+            case "emulation.retry":
+                (_core.Emulation ?? throw new BadMessage(Unavailable)).Retry();
+                break;
+
+            case "emulation.restore":
+                _owner.BeginInvoke(() => RestoreRequested?.Invoke());
+                break;
+
+            case "driver.install":
+                Install(Str(m, "kind") switch
+                {
+                    "usbIp" => DriverKind.UsbIp,
+                    "hidHide" => DriverKind.HidHide,
+                    _ => throw new BadMessage("kind usbIp ya da hidHide olmalı."),
+                });
+                break;
+
             case "foreground.pick":
                 Post(new { type = "foreground", recent = _core.RecentForeground });
                 break;
@@ -269,6 +295,64 @@ internal sealed class Bridge
             default:
                 throw new BadMessage($"Bilinmeyen mesaj: {type}");
         }
+    }
+
+    private const string Unavailable = "Sanal kontrolcü bu sistemde başlatılamadı.";
+
+    private readonly HashSet<DriverKind> _installing = [];
+
+    private void Install(DriverKind kind)
+    {
+        EmulationService emulation = _core.Emulation ?? throw new BadMessage(Unavailable);
+        if (!_installing.Add(kind))
+        {
+            throw new BadMessage("Kurulum zaten sürüyor.");
+        }
+
+        _ = InstallAsync(emulation, kind);
+    }
+
+    /// <summary>Never throws: every outcome becomes a <c>driver.progress</c> message.</summary>
+    private async Task InstallAsync(EmulationService emulation, DriverKind kind)
+    {
+        string name = kind == DriverKind.UsbIp ? "usbIp" : "hidHide";
+        // Created on the UI thread, so reports come back here.
+        var progress = new Progress<string>(message => Post(new { type = "driver.progress", kind = name, message, done = false, ok = false }));
+        try
+        {
+            InstallResult result = await emulation.InstallAsync(kind, progress, CancellationToken.None);
+            string message = result.Ok && result.RebootRequired
+                ? $"{result.Message} Kurulumu bitirmek için bilgisayarı yeniden başlatın."
+                : result.Message;
+            Post(new { type = "driver.progress", kind = name, message, done = true, ok = result.Ok });
+        }
+        catch (Exception e)
+        {
+            Post(new { type = "driver.progress", kind = name, message = $"Kurulum başarısız: {e.Message}", done = true, ok = false });
+        }
+        finally
+        {
+            _installing.Remove(kind);
+            emulation.RecheckDrivers();
+        }
+    }
+
+    /// <summary>Also sent every second while the window is on screen.</summary>
+    public void PostEmulation()
+    {
+        EmulationStatus s = _core.Emulation?.Status ?? EmulationStatus.Unavailable with { Error = Unavailable };
+        Post(new
+        {
+            type = "emulation",
+            available = s.Available,
+            enabled = _core.Settings.Current.Emulation.Enabled,
+            mode = s.Mode,
+            attached = s.Attached,
+            hidden = s.Hidden,
+            drivers = s.Drivers.Select(d => new { kind = d.Kind, state = d.State, version = d.Version, detail = d.Detail }),
+            latency = new { p50Ms = s.Latency.P50Ms, p95Ms = s.Latency.P95Ms, samples = s.Latency.Samples },
+            error = s.Error,
+        });
     }
 
     private void PickRun()

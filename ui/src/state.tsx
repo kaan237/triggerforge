@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { send, subscribe, type AppSettings, type Input, type NoticeKind, type Output, type Profile, type Status } from "./host";
+import { send, subscribe, type AppSettings, type DriverKind, type DriverProgress, type EmulationStatus, type Input, type NoticeKind, type Output, type Profile, type Status } from "./host";
 import { clone, deepEqual, normalizeProfile, normalizeSettings } from "./model";
 
 export type Notice = { id: number; kind: NoticeKind | "error"; message: string; progress?: number };
@@ -10,6 +10,9 @@ type AppState = {
   profiles: Profile[];
   activeId: string;
   settings: AppSettings | null;
+  emulation: EmulationStatus | null;
+  // Last install message per driver; cleared when a new install starts.
+  installs: Partial<Record<DriverKind, DriverProgress>>;
   recent: string[] | null;
   notices: Notice[];
   dismiss: (id: number) => void;
@@ -53,6 +56,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [activeId, setActiveId] = useState("");
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [emulation, setEmulation] = useState<EmulationStatus | null>(null);
+  const [installs, setInstalls] = useState<Partial<Record<DriverKind, DriverProgress>>>({});
   const [recent, setRecent] = useState<string[] | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [draft, setDraft] = useState<Profile | null>(null);
@@ -92,6 +97,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
         case "foreground":
           setRecent(m.recent);
+          break;
+        case "emulation":
+          setEmulation(m);
+          break;
+        case "driver.progress":
+          setInstalls((all) => ({ ...all, [m.kind]: m }));
           break;
         case "export":
           download(m.json, profilesRef.current.find((p) => p.id === m.id)?.name ?? m.id);
@@ -143,8 +154,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [activeId]);
 
   const value = useMemo<AppState>(
-    () => ({ status, output, profiles, activeId, settings, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft }),
-    [status, output, profiles, activeId, settings, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft],
+    () => ({ status, output, profiles, activeId, settings, emulation, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft }),
+    [status, output, profiles, activeId, settings, emulation, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

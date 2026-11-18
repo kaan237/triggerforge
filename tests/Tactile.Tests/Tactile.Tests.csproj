@@ -12,6 +12,8 @@
     <Using Include="Xunit" />
     <ProjectReference Include="..\..\src\Tactile.Device.DualSense\Tactile.Device.DualSense.csproj" />
     <ProjectReference Include="..\..\src\Tactile.Core\Tactile.Core.csproj" />
+    <ProjectReference Include="..\..\src\Tactile.Emulation\Tactile.Emulation.csproj" />
+    <ProjectReference Include="..\..\src\Tactile.Drivers\Tactile.Drivers.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Fixtures/**" CopyToOutputDirectory="PreserveNewest" />

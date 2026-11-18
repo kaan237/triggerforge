@@ -162,6 +162,38 @@ export type Macro = {
 
 export type MappingStatus = { active: boolean; paused: boolean; blockedBy: string | null };
 
+// ---- virtual controller (docs/contract-phase4.md) ----
+
+export type EmulationMode = "off" | "xbox360" | "dualSense";
+
+export type EmulationConfig = {
+  mode: EmulationMode;
+  // source button -> target button or "none"; only listed buttons change
+  remap: Partial<Record<ButtonName, ButtonName | "none">>;
+  swapSticks: boolean;
+  hideMappedButtons: boolean;
+};
+
+export type EmulationSettings = { enabled: boolean; hideController: boolean };
+
+export type DriverKind = "usbIp" | "hidHide";
+export type DriverState = "missing" | "ready" | "unsupported" | "error";
+export type DriverStatus = { kind: DriverKind; state: DriverState; version: string | null; detail: string | null };
+
+export type EmulationStatus = {
+  type: "emulation";
+  available?: boolean;
+  enabled: boolean;
+  mode: EmulationMode;
+  attached: boolean;
+  hidden: boolean;
+  drivers: DriverStatus[];
+  latency: { p50Ms: number; p95Ms: number; samples: number };
+  error: string | null;
+};
+
+export type DriverProgress = { type: "driver.progress"; kind: DriverKind; message: string; done: boolean; ok: boolean };
+
 export type Profile = {
   version: number;
   id: string;
@@ -177,6 +209,7 @@ export type Profile = {
   rumble: { strength: number };
   mapping: Mapping;
   macros: Macro[];
+  emulation: EmulationConfig;
 };
 
 export type AppSettings = {
@@ -191,6 +224,7 @@ export type AppSettings = {
   idleSleepMinutes: number;
   lowBatteryWarnings: number[];
   runAsAdminHint: boolean;
+  emulation: EmulationSettings;
 };
 
 // ---- host → UI ----
@@ -240,7 +274,7 @@ export type Output = {
   rightTrigger: string;
 };
 
-export type NoticeKind = "lowBattery" | "brokenFile" | "idleSleep" | "gyroCalibration" | "info" | "elevated" | "mapping";
+export type NoticeKind = "lowBattery" | "brokenFile" | "idleSleep" | "gyroCalibration" | "info" | "elevated" | "mapping" | "emulation";
 
 export type HostMessage =
   | Status
@@ -252,6 +286,8 @@ export type HostMessage =
   | { type: "foreground"; recent: string[] }
   | { type: "runPicked"; path: string | null }
   | { type: "notice"; kind: NoticeKind; message: string; progress?: number }
+  | EmulationStatus
+  | DriverProgress
   | { type: "error"; message: string };
 
 // ---- UI → host (Phase 2 additions; Phase 1 test messages stay loose) ----
@@ -270,7 +306,11 @@ export type UiMessage =
   | { type: "foreground.pick" }
   | { type: "mapping.pause"; paused: boolean }
   | { type: "run.pick" }
-  | { type: "app.restartElevated" };
+  | { type: "app.restartElevated" }
+  | { type: "emulation.status" }
+  | { type: "driver.install"; kind: DriverKind }
+  | { type: "emulation.retry" }
+  | { type: "emulation.restore" };
 
 type LooseMessage = { type: string; [key: string]: unknown };
 

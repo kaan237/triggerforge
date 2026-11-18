@@ -15,4 +15,6 @@ public static class NoticeKinds
     public const string Elevated = "elevated";
     /// <summary>A mapping action failed at runtime.</summary>
     public const string Mapping = "mapping";
+    /// <summary>Virtual controller, drivers and recovery.</summary>
+    public const string Emulation = "emulation";
 }

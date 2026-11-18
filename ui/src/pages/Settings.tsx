@@ -169,6 +169,19 @@ export function Settings() {
           <NumberField label="İkinci pil uyarısı" value={warnings[1]} min={0} max={89} suffix="%" onChange={(v) => set({ lowBatteryWarnings: [Math.max(warnings[0], v + 1), v] })} />
         </section>
 
+        <section className="settings-group">
+          <h2>Sanal kontrolcü</h2>
+          <div className="setting-row">
+            <span className="toggle-text">
+              <span>Kontrolcüyü geri getir</span>
+              <span className="hint">Sanal kontrolcüyü kaldırır, gerçek kontrolcüyü yeniden görünür yapar ve sanal kontrolcüyü kapatır</span>
+            </span>
+            <button className="button" onClick={() => send({ type: "emulation.restore" })}>
+              Geri getir
+            </button>
+          </div>
+        </section>
+
         <section className="settings-group dev">
           <button className="disclosure" aria-expanded={dev} onClick={() => setDev(!dev)}>
             <span className="chev" aria-hidden />

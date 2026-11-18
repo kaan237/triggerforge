@@ -1,7 +1,7 @@
 // Browser-only stand-in for the host. Keeps profiles and settings in memory and fakes
 // a controller so every screen can be used without hardware.
 
-import type { Action, AppSettings, Binding, HostMessage, Output, Profile, TriggerConfig } from "./host";
+import type { Action, AppSettings, Binding, DriverKind, DriverState, EmulationStatus, HostMessage, Output, Profile, TriggerConfig } from "./host";
 import {
   clone,
   defaultBinding,
@@ -49,6 +49,7 @@ function sampleProfiles(): Profile[] {
     },
   ];
   race.mapping.buttons.create = { ...defaultBinding(), press: { kind: "macro", macroId: race.macros[0].id } };
+  race.emulation = { mode: "xbox360", remap: { cross: "circle", circle: "cross" }, swapSticks: false, hideMappedButtons: true };
 
   return [base, ghost, race];
 }
@@ -77,6 +78,14 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   let tick = 0;
   let battery = 85;
   let mappingPaused = false;
+  // Virtual controller: usbip-win2 starts missing so the install flow can be tried.
+  const drivers: Record<DriverKind, { state: DriverState; version: string | null }> = {
+    usbIp: { state: "missing", version: null },
+    hidHide: { state: "ready", version: "1.5.230" },
+  };
+  const installing = new Set<DriverKind>();
+  let emuError: string | null = null;
+  let steamNoticed = false;
 
   const active = () => profiles.find((p) => p.id === activeId) ?? profiles[0];
 
@@ -107,6 +116,45 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       elevated: false,
     });
   const sendProfiles = () => emit({ type: "profiles", list: clone(profiles), activeId });
+
+  function emulationStatus(): EmulationStatus {
+    const mode = active().emulation.mode;
+    const ready = drivers.usbIp.state === "ready" && (!settings.emulation.hideController || drivers.hidHide.state === "ready");
+    const attached = settings.emulation.enabled && mode !== "off" && ready && emuError === null;
+    return {
+      type: "emulation",
+      available: true,
+      enabled: settings.emulation.enabled,
+      mode: attached ? mode : "off",
+      attached,
+      hidden: attached && settings.emulation.hideController,
+      drivers: (Object.keys(drivers) as DriverKind[]).map((kind) => ({ kind, state: drivers[kind].state, version: drivers[kind].version, detail: null })),
+      latency: attached ? { p50Ms: 2.1 + Math.random() * 0.4, p95Ms: 3.8 + Math.random() * 0.8, samples: 512 } : { p50Ms: 0, p95Ms: 0, samples: 0 },
+      error: emuError,
+    };
+  }
+
+  function sendEmulation() {
+    const e = emulationStatus();
+    if (e.attached && !steamNoticed) {
+      steamNoticed = true;
+      emit({ type: "notice", kind: "emulation", message: "Steam Input bu oyunda açıksa çift kontrolcü görünür; oyunun Steam ayarlarında Steam Input'u kapatın." });
+    }
+    emit(e);
+  }
+
+  function install(kind: DriverKind) {
+    if (installing.has(kind)) return emit({ type: "error", message: "Kurulum zaten sürüyor." });
+    installing.add(kind);
+    const steps = ["Kurulum dosyası indiriliyor…", "İmza ve SHA-256 denetleniyor…", "Kurulum başlatıldı, Windows izin isteyebilir…"];
+    steps.forEach((message, i) => window.setTimeout(() => emit({ type: "driver.progress", kind, message, done: false, ok: false }), 400 + i * 900));
+    window.setTimeout(() => {
+      installing.delete(kind);
+      drivers[kind] = { state: "ready", version: kind === "usbIp" ? "0.9.8.1" : "1.5.230" };
+      emit({ type: "driver.progress", kind, message: "Kuruldu. Kurulumu bitirmek için bilgisayarı yeniden başlatın.", done: true, ok: true });
+      sendEmulation();
+    }, 400 + steps.length * 900);
+  }
 
   function computeOutput(): Output {
     const p = active();
@@ -187,6 +235,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     });
     // Animated effects: about 10 Hz is plenty for a preview.
     if (tick % 3 === 0) pushOutput();
+    if (tick % 30 === 0) sendEmulation();
     // Slow drain so the low battery notice shows up once in a long session.
     if (tick % 1800 === 0 && battery > 5) {
       battery--;
@@ -202,6 +251,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         emit({ type: "settings", settings: clone(settings) });
         output = computeOutput();
         emit(output);
+        sendEmulation();
         timer ??= window.setInterval(simTick, 33);
         return;
 
@@ -213,6 +263,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         sendProfiles();
         if (p.id === activeId) status();
         pushOutput();
+        sendEmulation();
         return;
       }
       case "profile.delete": {
@@ -231,7 +282,11 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         return;
       }
       case "profile.activate":
-        if (profiles.some((p) => p.id === m.id)) activate(String(m.id), "manual");
+        if (profiles.some((p) => p.id === m.id)) {
+          emuError = null;
+          activate(String(m.id), "manual");
+          sendEmulation();
+        }
         return;
       case "profile.import": {
         try {
@@ -266,6 +321,23 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       case "settings.save":
         settings = normalizeSettings(m.settings as AppSettings);
         emit({ type: "settings", settings: clone(settings) });
+        sendEmulation();
+        return;
+      case "emulation.status":
+        sendEmulation();
+        return;
+      case "emulation.retry":
+        emuError = null;
+        sendEmulation();
+        return;
+      case "emulation.restore":
+        settings = { ...settings, emulation: { ...settings.emulation, enabled: false } };
+        emit({ type: "settings", settings: clone(settings) });
+        emit({ type: "notice", kind: "emulation", message: "Kontrolcü geri getirildi: sanal kontrolcü kaldırıldı, gizleme kapatıldı, sanal kontrolcü ayarı kapandı." });
+        sendEmulation();
+        return;
+      case "driver.install":
+        install(m.kind === "hidHide" ? "hidHide" : "usbIp");
         return;
       case "gyro.calibrate":
         calibrate();

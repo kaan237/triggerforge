@@ -15,6 +15,7 @@ public sealed class ControllerService : IDisposable
     private DualSenseController? _controller;
     private HapticStreamer? _haptics;
     private Timer? _hapticStop;
+    private readonly Func<string, bool>? _isVirtual;
     private OutputState _output = OutputState.Default;
 
     public ControllerService()
@@ -23,8 +24,10 @@ public sealed class ControllerService : IDisposable
     }
 
     /// <param name="autoConnect">False never looks for hardware; outputs are only stored (tests).</param>
-    public ControllerService(bool autoConnect)
+    /// <param name="isVirtual">True for HID paths of our own virtual pads, which the scan must skip.</param>
+    public ControllerService(bool autoConnect, Func<string, bool>? isVirtual = null)
     {
+        _isVirtual = isVirtual;
         _scan = autoConnect
             ? new Timer(_ => Scan(), null, TimeSpan.Zero, ScanInterval)
             : new Timer(_ => { }, null, Timeout.Infinite, Timeout.Infinite);
@@ -109,7 +112,7 @@ public sealed class ControllerService : IDisposable
             }
         }
 
-        ControllerInfo? info = DualSenseIds.FindControllers().FirstOrDefault();
+        ControllerInfo? info = DualSenseIds.FindControllers().FirstOrDefault(c => !IsVirtual(c.Hid.Path));
         if (info is null)
         {
             return;
@@ -134,6 +137,34 @@ public sealed class ControllerService : IDisposable
         }
 
         ConnectionChanged?.Invoke(controller);
+    }
+
+    internal bool IsVirtual(string path)
+    {
+        if (_isVirtual is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return _isVirtual(path);
+        }
+        catch (Exception)
+        {
+            // A device-tree query that fails says nothing; treat the pad as real.
+            return false;
+        }
+    }
+
+    /// <summary>Like <see cref="SetOutput"/>, but true only when the controller write itself went out.</summary>
+    internal bool SetOutputAndSend(OutputState state)
+    {
+        lock (_lock)
+        {
+            _output = state;
+            return _controller?.Send(_output) ?? false;
+        }
     }
 
     private void OnDisconnected(DualSenseController c)

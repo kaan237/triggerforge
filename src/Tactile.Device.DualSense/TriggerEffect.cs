@@ -21,6 +21,17 @@ public readonly struct TriggerEffect : IEquatable<TriggerEffect>
 
     public static TriggerEffect Off => new(OffBytes);
 
+    /// <summary>An effect block as written by someone else (a game), passed through unchanged.</summary>
+    public static TriggerEffect FromBytes(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length != Size)
+        {
+            throw new ArgumentException($"Expected {Size} bytes.", nameof(bytes));
+        }
+
+        return new TriggerEffect(bytes.ToArray());
+    }
+
     /// <summary>Constant resistance from <paramref name="startZone"/> to the bottom.</summary>
     public static TriggerEffect Feedback(int startZone, int strength)
     {

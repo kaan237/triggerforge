@@ -11,6 +11,7 @@ import type {
   TouchpadMapping,
   Curve,
   CurvePoint,
+  EmulationConfig,
   LightEffect,
   Lightbar,
   Profile,
@@ -101,7 +102,12 @@ export function defaultProfile(name = "Varsayılan", id = newId()): Profile {
     rumble: { strength: 1 },
     mapping: defaultMapping(),
     macros: [],
+    emulation: defaultEmulation(),
   };
+}
+
+export function defaultEmulation(): EmulationConfig {
+  return { mode: "off", remap: {}, swapSticks: false, hideMappedButtons: true };
 }
 
 export function defaultSettings(defaultProfileId = ""): AppSettings {
@@ -117,6 +123,7 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     idleSleepMinutes: 15,
     lowBatteryWarnings: [20, 10],
     runAsAdminHint: false,
+    emulation: { enabled: true, hideController: true },
   };
 }
 
@@ -146,6 +153,7 @@ export function normalizeProfile(p: Partial<Profile> & { id: string }): Profile 
     rumble: { ...d.rumble, ...p.rumble },
     mapping: normalizeMapping(p.mapping),
     macros: (p.macros ?? []).map(normalizeMacro),
+    emulation: { ...defaultEmulation(), ...p.emulation, remap: { ...(p.emulation?.remap ?? {}) } },
   };
 }
 
@@ -194,7 +202,8 @@ export function normalizeMacro(m: Partial<Macro>): Macro {
 }
 
 export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
-  return { ...defaultSettings(), ...s, controllerDefaults: { ...(s.controllerDefaults ?? {}) } };
+  const d = defaultSettings();
+  return { ...d, ...s, controllerDefaults: { ...(s.controllerDefaults ?? {}) }, emulation: { ...d.emulation, ...s.emulation } };
 }
 
 export function clone<T>(v: T): T {

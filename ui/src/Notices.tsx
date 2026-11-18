@@ -9,6 +9,7 @@ const title: Record<Notice["kind"], string> = {
   info: "Bilgi",
   elevated: "Yönetici izni",
   mapping: "Tuş ataması",
+  emulation: "Sanal kontrolcü",
   error: "Hata",
 };
 
