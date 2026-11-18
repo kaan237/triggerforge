@@ -12,17 +12,22 @@ public sealed record HidDeviceInfo(
     int OutputReportLength,
     int FeatureReportLength);
 
-/// <summary>An open HID device handle. Reads block; use one reader thread per device.</summary>
+/// <summary>
+/// An open HID device. Reads and writes use separate handles so a blocking read on the
+/// reader thread never holds up a write from another thread.
+/// </summary>
 public sealed class HidDevice : IDisposable
 {
-    private readonly SafeFileHandle _handle;
-    private readonly FileStream _stream;
+    private readonly SafeFileHandle _writeHandle;
+    private readonly FileStream _reader;
+    private readonly FileStream _writer;
 
-    private HidDevice(HidDeviceInfo info, SafeFileHandle handle)
+    private HidDevice(HidDeviceInfo info, SafeFileHandle readHandle, SafeFileHandle writeHandle)
     {
         Info = info;
-        _handle = handle;
-        _stream = new FileStream(handle, FileAccess.ReadWrite, bufferSize: 0, isAsync: false);
+        _writeHandle = writeHandle;
+        _reader = new FileStream(readHandle, FileAccess.Read, bufferSize: 0, isAsync: false);
+        _writer = new FileStream(writeHandle, FileAccess.Write, bufferSize: 0, isAsync: false);
     }
 
     public HidDeviceInfo Info { get; }
@@ -51,28 +56,44 @@ public sealed class HidDevice : IDisposable
 
     public static HidDevice Open(HidDeviceInfo info)
     {
-        SafeFileHandle handle = Native.CreateFile(info.Path, Native.GenericRead | Native.GenericWrite,
-            Native.FileShareRead | Native.FileShareWrite, 0, Native.OpenExisting, 0, 0);
-        if (handle.IsInvalid)
+        SafeFileHandle read = OpenHandle(info.Path, Native.GenericRead);
+        try
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), $"Cannot open {info.Path}");
+            return new HidDevice(info, read, OpenHandle(info.Path, Native.GenericRead | Native.GenericWrite));
         }
-
-        return new HidDevice(info, handle);
+        catch
+        {
+            read.Dispose();
+            throw;
+        }
     }
 
-    /// <summary>Reads one input report. Byte 0 is the report id.</summary>
-    public int Read(byte[] buffer) => _stream.Read(buffer, 0, Math.Min(buffer.Length, Info.InputReportLength));
+    /// <summary>Blocks until one input report arrives. Byte 0 is the report id.</summary>
+    public int Read(byte[] buffer) => _reader.Read(buffer, 0, Math.Min(buffer.Length, Info.InputReportLength));
 
-    public void Write(ReadOnlySpan<byte> report) => _stream.Write(report);
+    /// <summary>Writes one output report; pad to <see cref="HidDeviceInfo.OutputReportLength"/>.</summary>
+    public void Write(ReadOnlySpan<byte> report) => _writer.Write(report);
 
     /// <summary>Reads a feature report; <paramref name="buffer"/>[0] must hold the report id.</summary>
-    public bool TryGetFeature(byte[] buffer) => Native.HidD_GetFeature(_handle, buffer, buffer.Length);
+    public bool TryGetFeature(byte[] buffer) => Native.HidD_GetFeature(_writeHandle, buffer, buffer.Length);
 
     public void Dispose()
     {
-        _stream.Dispose();
-        _handle.Dispose();
+        _writer.Dispose();
+        _reader.Dispose();
+    }
+
+    private static SafeFileHandle OpenHandle(string path, uint access)
+    {
+        SafeFileHandle handle = Native.CreateFile(path, access, Native.FileShareRead | Native.FileShareWrite, 0, Native.OpenExisting, 0, 0);
+        if (handle.IsInvalid)
+        {
+            int error = Marshal.GetLastWin32Error();
+            handle.Dispose();
+            throw new Win32Exception(error, $"Cannot open {path}");
+        }
+
+        return handle;
     }
 
     private static HidDeviceInfo? Describe(string path, SafeFileHandle handle)

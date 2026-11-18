@@ -25,16 +25,21 @@ if (command == "list")
     return 0;
 }
 
-if (command != "record" || args.Length < 2)
-{
-    Console.Error.WriteLine("usage: tactile-capture list | record <file.bin> [seconds]");
-    return 2;
-}
-
 if (controllers.Count == 0)
 {
     Console.Error.WriteLine("No DualSense found.");
     return 1;
+}
+
+if (command == "probe" && args.Length >= 2)
+{
+    return Probe.Run(controllers[0], args[1..]);
+}
+
+if (command != "record" || args.Length < 2)
+{
+    Console.Error.WriteLine("usage: tactile-capture list | record <file.bin> [seconds] | probe <info|light|rumble|trigger|haptic> ...");
+    return 2;
 }
 
 ControllerInfo target = controllers[0];

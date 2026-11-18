@@ -179,6 +179,14 @@ Her faz **çalışan bir ürünle** biter. Bir faz bitmeden sonrakine geçilmez.
 
 ---
 
+**Faz 1 sonucu (2026-11-18)**
+- Kod: `InputParser`, `ImuCalibration`, `FirmwareInfo`, `OutputReport`, `TriggerEffect` (7 mod + çok bölgeli + eğim), `HapticReport`, `DualSenseController` (ayrı okuma/yazma handle'ı, CRC eleme, kopma), `HapticStreamer`, `ControllerService` (otomatik bağlanma), WebView2 köprüsü ve test ekranı, `tactile-capture probe`.
+- Testler 27/27 geçiyor; giriş testleri gerçek BT kayıtlarıyla (`tests/Tactile.Tests/Fixtures/bt-sample.bin`).
+- Donanımda elle doğrulandı (BT): ışık, oyuncu/mic LED, iki rumble motoru, silah, titreşim, artan direnç, dörtnala ve haptik sol/sağ. Haptik için oturum açma (prime) adımı gerekiyordu; `docs/protocol.md`'ye yazıldı.
+- Denenmeyenler: USB bağlantısı, yay ve makine modu, BT yazma hız sınırı, uygulama penceresinden (GUI) gerçek controller ile kullanım, PS/mic tuşu.
+
+---
+
 ### Faz 2 — Arayüz ve profiller (2-3 hafta)
 
 **Özellikler**

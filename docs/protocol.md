@@ -175,6 +175,19 @@ Timing: one packet every 512 samples at 48 kHz = 10.667 ms.
 The 3 kHz stream comes from the 48 kHz channels 3-4 by averaging each group of 16
 samples.
 
+**Opening the stream (verified on hardware 2026-11-18).** Haptic reports alone do
+nothing; the controller ignores them until the session is opened:
+
+1. Main `0x31` report with rumble flags cleared (Flags A bits 0-1, Flags C bit 2)
+   and audio fields enabled: headphone/speaker volume, audio control = `0x30`
+   (speaker path), audio control 2 = `0x02` (preamp gain).
+2. One `0x32` "prime": byte 1 = `0x10`, sub-packet `0x10` header `0x90 0x3F`, then the
+   same 47-byte state block (63-byte sub-packet, zero tail), CRC.
+3. About 8 silent haptic reports at the normal cadence, then real samples.
+
+Classic rumble is ignored while the stream is open; restore the rumble flags to
+return to motor rumble.
+
 **Combined reports**
 
 | ID | Size | Carries |

@@ -16,7 +16,8 @@ Fill in when the controller is connected. `tactile-capture list` prints link and
 |---|---|---|
 | Input reports per second | | ~800 (median 1.25 ms) |
 | Reduced mode before feature `0x05`? | n/a | yes, 7 short reports then full |
-| Max output reports per second without drops | | |
+| Max output reports per second without drops | | not measured yet |
+| Output checked by hand | | lightbar, player LEDs, mic LED, both rumble motors, weapon, vibration, slope, galloping, haptics L/R |
 
 ## Capture
 
