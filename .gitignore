@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+node_modules/
+ui/dist/
+artifacts/
+captures/*.bin
+*.log
+*.tsbuildinfo
