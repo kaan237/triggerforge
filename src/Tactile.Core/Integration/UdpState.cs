@@ -8,6 +8,7 @@ internal sealed record UdpState(
     byte? RumbleLeft = null, byte? RumbleRight = null)
 {
     public static UdpState Empty { get; } = new();
+    internal ControllerSlot? Owner { get; init; }
 
     public OutputState Overlay(OutputState output) => output with
     {

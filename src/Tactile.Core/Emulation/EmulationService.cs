@@ -8,6 +8,8 @@ namespace Tactile.Core;
 
 public enum EmulationAudioStatus { Off, Ready, Playing }
 
+public sealed record EmulationSlotStatus(int Index, EmulationMode Mode, bool Attached, bool Hidden, string? Error);
+
 /// <param name="Available">False when the USB/IP server or the driver layer could not start.</param>
 /// <param name="Mode">The mode of the pad attached right now, Off when none.</param>
 public sealed record EmulationStatus(
@@ -21,16 +23,19 @@ public sealed record EmulationStatus(
     string? Error,
     EmulationAudioStatus Audio = EmulationAudioStatus.Off)
 {
+    public IReadOnlyList<EmulationSlotStatus> Slots { get; init; } = [];
+
     public static EmulationStatus Unavailable { get; } = new(false, false, EmulationMode.Off, false, false, [], LatencySummary.Empty, null);
 
     /// <summary>Equal apart from latency, which moves all the time.</summary>
     public bool SameState(EmulationStatus other) =>
         Available == other.Available && Enabled == other.Enabled && Mode == other.Mode && Attached == other.Attached &&
-        Hidden == other.Hidden && Error == other.Error && Audio == other.Audio && Drivers.SequenceEqual(other.Drivers);
+        Hidden == other.Hidden && Error == other.Error && Audio == other.Audio && Drivers.SequenceEqual(other.Drivers) &&
+        Slots.SequenceEqual(other.Slots);
 }
 
 /// <summary>The real controller as the emulation needs it.</summary>
-internal sealed record RealController(string Path, Link Link, DualSenseIdentity? Identity);
+internal sealed record RealController(string Path, Link Link, DualSenseIdentity? Identity, SecondaryEmulationConnection? Secondary = null);
 
 internal interface IEmulationHost
 {
@@ -45,7 +50,7 @@ internal interface IEmulationHost
 /// order, and undoes it in reverse. Lifecycle work runs on its own thread so device calls never
 /// block the output tick or the UI; feedback from the game arrives on the server thread.
 /// </summary>
-public sealed class EmulationService : IDisposable
+public sealed partial class EmulationService : IDisposable
 {
     public const string XboxLayer = "emulation";
     public const string GameLayer = "game";
@@ -63,8 +68,9 @@ public sealed class EmulationService : IDisposable
     private readonly Func<long> _timestamp;
     private readonly bool _threaded;
     private readonly Thread? _worker;
-    private readonly AutoResetEvent _wake = new(false);
+    private readonly AutoResetEvent? _wake;
     private readonly LatencyStats _latency = new();
+    private readonly int _slotIndex;
 
     // Serialises lifecycle work (start, stop, hide, restore).
     private readonly Lock _opLock = new();
@@ -74,7 +80,7 @@ public sealed class EmulationService : IDisposable
     private readonly Lock _feedbackLock = new();
 
     private Wanted? _wanted;
-    private (string ProfileId, EmulationMode Mode, bool Audio)? _failedFor;
+    private (string ProfileId, EmulationMode Mode, bool Audio, SecondaryEmulationConnection? Secondary)? _failedFor;
     private (string En, string Tr)? _error;
     private DriverStatus[] _drivers;
     private TimeSpan? _driversCheckedAt;
@@ -90,7 +96,9 @@ public sealed class EmulationService : IDisposable
     private bool _padAudioEnabled;
     private int _hubPort;
     private string? _padPath;
-    private string? _hiddenId;
+    private volatile string? _hiddenId;
+    private string? _hiddenPath;
+    private volatile LocalizedMessage? _hideError;
     private bool _hideTried;
     private bool _unhideFailNoticed;
     private Dictionary<AudioDefaultSlot, string>? _audioDefaultsToRestore;
@@ -103,7 +111,7 @@ public sealed class EmulationService : IDisposable
     private OutputFields _gameFields;
 
     internal EmulationService(DriverPlatform platform, IUsbIpServer? server, IEmulationHost host, Func<TimeSpan> clock, bool threaded,
-        Func<bool>? steamRunning = null, Func<long>? timestamp = null, IAudioDefaults? audioDefaults = null)
+        Func<bool>? steamRunning = null, Func<long>? timestamp = null, IAudioDefaults? audioDefaults = null, int slotIndex = 0)
     {
         _platform = platform;
         _server = server;
@@ -111,9 +119,15 @@ public sealed class EmulationService : IDisposable
         _audioDefaults = audioDefaults;
         _clock = clock;
         _threaded = threaded;
+        _slotIndex = slotIndex;
         _steamRunning = steamRunning ?? SteamRunning;
         _timestamp = timestamp ?? Stopwatch.GetTimestamp;
         _drivers = [Missing(DriverKind.UsbIp), Missing(DriverKind.HidHide)];
+
+        if (slotIndex != 0)
+        {
+            return;
+        }
 
         // A crash last time may have left a pad attached or the controller hidden.
         bool unclean;
@@ -146,6 +160,7 @@ public sealed class EmulationService : IDisposable
 
         if (threaded)
         {
+            _wake = new AutoResetEvent(false);
             _worker = new Thread(Run) { IsBackground = true, Name = "TriggerForge: emulation" };
             _worker.Start();
         }
@@ -158,7 +173,8 @@ public sealed class EmulationService : IDisposable
     /// <summary>Raised when the status (apart from latency) changes. Any thread.</summary>
     public event Action? Changed;
 
-    internal IVirtualAudio? VirtualAudio => _pad as IVirtualAudio;
+    internal IVirtualAudio? VirtualAudio => _route is { IsCurrent: true } route && ReferenceEquals(route.Pad, _pad)
+        ? route.Pad as IVirtualAudio : null;
 
     public EmulationStatus Status
     {
@@ -174,14 +190,26 @@ public sealed class EmulationService : IDisposable
     /// <summary>Called with every tick's view of the world; cheap when nothing changed.</summary>
     internal void Update(Profile profile, AppSettings settings, RealController? controller)
     {
-        EmulationConfig config = profile.Emulation ?? new();
-        _plan = new InputPlan(config, config.HideMappedButtons ? EmulationInput.MappedButtons(profile) : Buttons.None, profile.Rumble?.Strength ?? 1);
-        var wanted = new Wanted(profile.Id, config.Mode, settings.Emulation ?? new(), controller);
+        if (UpdateWanted(profile, settings.Emulation ?? new(), controller) ||
+            (!_threaded && (_secondarySource is not null || SecondarySlots().Any())))
+        {
+            Signal();
+        }
+    }
+
+    private bool UpdateWanted(Profile? profile, EmulationSettings settings, RealController? controller)
+    {
+        EmulationConfig config = profile?.Emulation ?? new();
+        _plan = new InputPlan(config,
+            _slotIndex == 0 && config.HideMappedButtons && profile is not null ? EmulationInput.MappedButtons(profile) : Buttons.None,
+            profile?.Rumble?.Strength ?? 1,
+            _slotIndex == 0 || profile is null ? null : new SecondaryAxes(profile));
+        var wanted = new Wanted(profile?.Id ?? "", config.Mode, settings, controller);
         lock (_stateLock)
         {
             if (wanted == _wanted)
             {
-                return;
+                return false;
             }
 
             if (_wanted is null || _wanted.FailureKey != wanted.FailureKey)
@@ -192,19 +220,32 @@ public sealed class EmulationService : IDisposable
             _wanted = wanted;
         }
 
-        Signal();
+        return true;
     }
 
     /// <summary>Forgets an attach failure and tries again.</summary>
     public void Retry()
     {
+        ResetFailure();
+        foreach (EmulationService slot in SecondarySlots())
+        {
+            slot.ResetFailure();
+        }
+
+        Signal();
+    }
+
+    private void ResetFailure()
+    {
         lock (_stateLock)
         {
             ClearFailureLocked();
             _driversCheckedAt = null;
+            if (_slotIndex > 0)
+            {
+                _retryHide = true;
+            }
         }
-
-        Signal();
     }
 
     /// <summary>Forces a fresh driver check (after an install).</summary>
@@ -226,7 +267,7 @@ public sealed class EmulationService : IDisposable
     {
         lock (_opLock)
         {
-            StopLocked();
+            StopAllLocked();
             try
             {
                 _platform.Recovery.RestoreAll();
@@ -241,10 +282,11 @@ public sealed class EmulationService : IDisposable
     }
 
     /// <summary>Real controller input → remap → pad. Reader thread.</summary>
-    internal void OnInput(InputState s)
+    internal void OnInput(InputState s, ControllerSlot? slot = null)
     {
         IVirtualPad? pad = _pad;
-        if (pad is null)
+        if (pad is null || _route is not { IsCurrent: true } route || !ReferenceEquals(route.Pad, pad) ||
+            !ReferenceEquals(route.Secondary?.Slot, slot))
         {
             return;
         }
@@ -252,7 +294,7 @@ public sealed class EmulationService : IDisposable
         InputPlan plan = _plan;
         try
         {
-            pad.Submit(EmulationInput.Transform(s, plan.Config, plan.Hidden));
+            pad.Submit(EmulationInput.Transform(plan.Axes?.Apply(s) ?? s, plan.Config, plan.Hidden));
         }
         catch (ObjectDisposedException)
         {
@@ -268,12 +310,13 @@ public sealed class EmulationService : IDisposable
         }
 
         _disposed = true;
-        _wake.Set();
+        UnbindSecondary();
+        _wake?.Set();
         _worker?.Join(TimeSpan.FromSeconds(5));
         bool clean;
         lock (_opLock)
         {
-            clean = StopLocked();
+            clean = StopAllLocked();
         }
 
         try
@@ -303,7 +346,7 @@ public sealed class EmulationService : IDisposable
     {
         while (!_disposed)
         {
-            _wake.WaitOne(ReconcileDelay());
+            _wake!.WaitOne(ReconcileDelay());
             if (_disposed)
             {
                 break;
@@ -339,7 +382,7 @@ public sealed class EmulationService : IDisposable
         {
             if (!_disposed)
             {
-                _wake.Set();
+                _wake!.Set();
             }
         }
         else
@@ -358,39 +401,75 @@ public sealed class EmulationService : IDisposable
             }
 
             RefreshDriversIfDue();
-            Wanted? w;
-            VirtualKind? want;
-            lock (_stateLock)
+            (Wanted? wanted, VirtualKind? kind) = Desired();
+            if (!UpdateSecondaries(wanted))
             {
-                w = _wanted;
-                want = WantedKindLocked(w);
+                return;
+            }
+            var secondaryPlans = SecondarySlots().Select(slot => (Slot: slot, Plan: slot.Desired())).ToArray();
+
+            // A primary swap can move both devices. Release their former hiding entries before either reattaches.
+            StopObsolete(wanted, kind);
+            foreach (var (slot, (secondaryWanted, secondaryKind)) in secondaryPlans)
+            {
+                slot.StopObsolete(secondaryWanted, secondaryKind);
             }
 
-            if (_pad is not null && (want != _kind || w?.Controller?.Path != _padPath ||
-                _kind == VirtualKind.DualSense && w?.Settings.Audio != _padAudioEnabled))
+            string?[] pendingUnhide = secondaryPlans.Select(p => p.Slot.PendingUnhide).Append(PendingUnhide).ToArray();
+            Apply(wanted, kind, pendingUnhide);
+            foreach (var (slot, (secondaryWanted, secondaryKind)) in secondaryPlans)
             {
-                StopLocked();
+                slot.Apply(secondaryWanted, secondaryKind, pendingUnhide);
             }
 
-            if (_pad is null && _hiddenId is not null)
+            if (_pad is not null || secondaryPlans.Any(p => p.Slot._pad is not null))
             {
-                Unhide();
-            }
-
-            if (want is VirtualKind kind && _pad is null && w?.Controller is { } controller)
-            {
-                Start(kind, w, controller);
-            }
-
-            if (_pad is not null && w is not null)
-            {
-                CheckAudioDefaults(w.Settings.KeepAudioDefaults);
-                SyncHide(w);
                 CheckSteam();
             }
         }
 
         RaiseIfChanged();
+    }
+
+    private (Wanted? Wanted, VirtualKind? Kind) Desired()
+    {
+        lock (_stateLock)
+        {
+            return (_wanted, WantedKindLocked(_wanted));
+        }
+    }
+
+    private string? PendingUnhide => _pad is null ? _hiddenPath : null;
+
+    private void StopObsolete(Wanted? w, VirtualKind? kind)
+    {
+        if (_pad is not null && (kind != _kind || w?.Controller?.Path != _padPath ||
+            _kind == VirtualKind.DualSense && w?.Settings.Audio != _padAudioEnabled ||
+            w?.Controller?.Secondary != _route?.Secondary || _route?.IsCurrent == false))
+        {
+            StopLocked();
+        }
+
+        if (PendingUnhide is not null)
+        {
+            Unhide();
+        }
+    }
+
+    private void Apply(Wanted? w, VirtualKind? kind, string?[] pendingUnhide)
+    {
+        if (kind is VirtualKind wanted && _pad is null && w?.Controller is { } controller &&
+            controller.Secondary?.IsCurrent != false &&
+            PendingUnhide is null && !pendingUnhide.Contains(controller.Path, StringComparer.OrdinalIgnoreCase))
+        {
+            Start(wanted, w, controller);
+        }
+
+        if (_pad is not null && w is not null)
+        {
+            CheckAudioDefaults(w.Settings.KeepAudioDefaults);
+            SyncHide(w);
+        }
     }
 
     private VirtualKind? WantedKindLocked(Wanted? w)
@@ -410,8 +489,8 @@ public sealed class EmulationService : IDisposable
             return null;
         }
 
-        // A controller on USB already is a wired DualSense.
-        if (w.Mode == EmulationMode.DualSense && w.Controller.Link == Link.Usb)
+        // The primary already exposes a wired DualSense on USB. Secondary modes follow their own profiles.
+        if (_slotIndex == 0 && w.Mode == EmulationMode.DualSense && w.Controller.Link == Link.Usb)
         {
             return null;
         }
@@ -421,11 +500,21 @@ public sealed class EmulationService : IDisposable
 
     private void Start(VirtualKind kind, Wanted w, RealController controller)
     {
+        Func<bool>? primaryCurrent = null;
+        if (_slotIndex == 0 && _controllers is { } controllers)
+        {
+            if (controllers.Slots.FirstOrDefault() is not { Index: 0 } primary || primary.Controller.DevicePath != controller.Path)
+                return;
+
+            primaryCurrent = () => ReferenceEquals(controllers.Slots.FirstOrDefault(), primary);
+        }
+
         IUsbIpServer server = _server!;
         IVirtualPad pad;
         try
         {
-            pad = kind == VirtualKind.DualSense
+            pad = _slotIndex > 0 ? server.CreateSecondaryPad(_slotIndex, kind, controller.Identity)
+                : kind == VirtualKind.DualSense
                 ? server.CreateDualSense(controller.Identity, w.Settings.Audio)
                 : server.Create(kind, null);
         }
@@ -435,7 +524,8 @@ public sealed class EmulationService : IDisposable
             return;
         }
 
-        Action<PadFeedback> handler = f => OnFeedback(pad, f);
+        var route = new PadRoute(pad, controller.Secondary, primaryCurrent);
+        Action<PadFeedback> handler = f => OnFeedback(route, f);
         pad.Feedback += handler;
         var defaults = kind == VirtualKind.DualSense && w.Settings.Audio && w.Settings.KeepAudioDefaults
             ? SnapshotAudioDefaults() : null;
@@ -478,6 +568,7 @@ public sealed class EmulationService : IDisposable
         _padPath = controller.Path;
         _padHandler = handler;
         _hideTried = false;
+        _route = route;
         // Published last: input starts flowing only once the pad is attached.
         _pad = pad;
     }
@@ -552,10 +643,18 @@ public sealed class EmulationService : IDisposable
 
     private void SyncHide(Wanted w)
     {
+        if (_retryHide)
+        {
+            _retryHide = false;
+            _hideTried = false;
+            _hideError = null;
+        }
+
         bool want = w.Settings.HideController && Usable(DriverKind.HidHide);
         if (!want)
         {
             _hideTried = false;
+            _hideError = null;
             Unhide();
             return;
         }
@@ -571,20 +670,21 @@ public sealed class EmulationService : IDisposable
             string? id = _platform.Tree.InstanceId(_padPath);
             if (id is null)
             {
-                Notify("Could not find the physical controller's device ID to hide it. Games may see two controllers.", "Gerçek kontrolcünün aygıt kimliği bulunamadı, gizlenemedi. Oyunlar iki kontrolcü görebilir.");
+                HideError("Could not find the physical controller's device ID to hide it. Games may see two controllers.", "Gerçek kontrolcünün aygıt kimliği bulunamadı, gizlenemedi. Oyunlar iki kontrolcü görebilir.");
             }
             else if (_platform.Hider.Hide(id))
             {
                 _hiddenId = id;
+                _hiddenPath = _padPath;
             }
             else
             {
-                Notify("Could not hide the physical controller. Games may see two controllers.", "Gerçek kontrolcü gizlenemedi. Oyunlar iki kontrolcü görebilir.");
+                HideError("Could not hide the physical controller. Games may see two controllers.", "Gerçek kontrolcü gizlenemedi. Oyunlar iki kontrolcü görebilir.");
             }
         }
         catch (Exception e)
         {
-            Notify($"Could not hide the physical controller: {Text.English(e)}", $"Gerçek kontrolcü gizlenemedi: {e.Message}");
+            HideError($"Could not hide the physical controller: {Text.English(e)}", $"Gerçek kontrolcü gizlenemedi: {e.Message}");
         }
     }
 
@@ -599,6 +699,7 @@ public sealed class EmulationService : IDisposable
         {
             _platform.Hider.Unhide(id);
             _hiddenId = null;
+            _hiddenPath = null;
             _unhideFailNoticed = false;
             return true;
         }
@@ -619,6 +720,7 @@ public sealed class EmulationService : IDisposable
     private bool StopLocked()
     {
         _audioDefaultsToRestore = null;
+        _hideError = null;
         IVirtualPad? pad = _pad;
         if (pad is null)
         {
@@ -626,6 +728,8 @@ public sealed class EmulationService : IDisposable
         }
 
         _pad = null;
+        SecondaryEmulationConnection? secondary = _route?.Secondary;
+        _route = null;
         if (_padHandler is not null)
         {
             pad.Feedback -= _padHandler;
@@ -651,8 +755,15 @@ public sealed class EmulationService : IDisposable
         {
             _game = OutputState.Default;
             _gameFields = OutputFields.None;
-            _host.SetOutputLayer(XboxLayer, null);
-            _host.SetOutputLayer(GameLayer, null);
+            if (secondary is not null)
+            {
+                secondary.SetFeedback(null, OutputFields.None);
+            }
+            else
+            {
+                _host.SetOutputLayer(XboxLayer, null);
+                _host.SetOutputLayer(GameLayer, null);
+            }
         }
 
         return clean;
@@ -669,24 +780,31 @@ public sealed class EmulationService : IDisposable
         }
     }
 
-    private void OnFeedback(IVirtualPad from, PadFeedback f)
+    private void OnFeedback(PadRoute route, PadFeedback f)
     {
         lock (_feedbackLock)
         {
-            if (!ReferenceEquals(from, _pad))
+            if (!ReferenceEquals(route.Pad, _pad) || !route.IsCurrent)
             {
                 return;
             }
 
             double strength = _plan.RumbleStrength;
+            SecondaryEmulationConnection? secondary = route.Secondary;
             bool sent;
             switch (f)
             {
                 case RumbleFeedback r:
                 {
+                    if (secondary is not null)
+                    {
+                        secondary.SetFeedback(OutputState.Default with { RumbleLeft = r.Large, RumbleRight = r.Small }, OutputFields.Rumble);
+                        return;
+                    }
+
                     byte large = GameOutput.ScaleRumble(r.Large, strength);
                     byte small = GameOutput.ScaleRumble(r.Small, strength);
-                    sent = _host.SetOutputLayer(XboxLayer, o => o with { RumbleLeft = large, RumbleRight = small });
+                    sent = _host.SetOutputLayer(XboxLayer, o => route.IsCurrent ? o with { RumbleLeft = large, RumbleRight = small } : o);
                     break;
                 }
 
@@ -694,9 +812,15 @@ public sealed class EmulationService : IDisposable
                 {
                     _gameFields |= OutputReport.ValidFields(block);
                     _game = OutputReport.ApplyState(block, _game);
+                    if (secondary is not null)
+                    {
+                        secondary.SetFeedback(_game, _gameFields);
+                        return;
+                    }
+
                     OutputState game = _game;
                     OutputFields fields = _gameFields;
-                    sent = _host.SetOutputLayer(GameLayer, o => GameOutput.Overlay(o, game, fields, strength));
+                    sent = _host.SetOutputLayer(GameLayer, o => route.IsCurrent ? GameOutput.Overlay(o, game, fields, strength) : o);
                     break;
                 }
 
@@ -796,7 +920,10 @@ public sealed class EmulationService : IDisposable
         }
 
         Notify(en, tr);
-        RaiseIfChanged();
+        if (_slotIndex == 0)
+        {
+            RaiseIfChanged();
+        }
     }
 
     private void ClearFailureLocked()
@@ -820,7 +947,11 @@ public sealed class EmulationService : IDisposable
             Error: _error is { } error ? Text.Pick(error.En, error.Tr) : null,
             Audio: pad is IVirtualAudio audio
                 ? audio.SpeakerActive ? EmulationAudioStatus.Playing : EmulationAudioStatus.Ready
-                : EmulationAudioStatus.Off);
+                : EmulationAudioStatus.Off)
+        {
+            Slots = BuildSlots(new(0, mode, pad is not null, pad is not null && _hiddenId is not null,
+                _error is { } slotError ? Text.Pick(slotError.En, slotError.Tr) : null)),
+        };
     }
 
     private void RaiseIfChanged()
@@ -839,7 +970,15 @@ public sealed class EmulationService : IDisposable
         }
     }
 
-    private void Notify(string en, string tr) => _host.Report(new Notice(NoticeKinds.Emulation, en, tr));
+    private void HideError(string en, string tr)
+    {
+        _hideError = new LocalizedMessage(en, tr);
+        Notify(en, tr);
+    }
+
+    private void Notify(string en, string tr) => _host.Report(_slotIndex == 0
+        ? new Notice(NoticeKinds.Emulation, en, tr)
+        : new Notice(NoticeKinds.Emulation, $"Controller {_slotIndex + 1}. {en}", $"Kontrolcü {_slotIndex + 1}. {tr}"));
 
     private static DriverStatus Missing(DriverKind kind) => new(kind, DriverState.Missing, null, null);
 
@@ -856,9 +995,9 @@ public sealed class EmulationService : IDisposable
 
     private sealed record Wanted(string ProfileId, EmulationMode Mode, EmulationSettings Settings, RealController? Controller)
     {
-        public (string ProfileId, EmulationMode Mode, bool Audio) FailureKey =>
-            (ProfileId, Mode, Mode == EmulationMode.DualSense && Settings.Audio);
+        public (string ProfileId, EmulationMode Mode, bool Audio, SecondaryEmulationConnection? Secondary) FailureKey =>
+            (ProfileId, Mode, Mode == EmulationMode.DualSense && Settings.Audio, Controller?.Secondary);
     }
 
-    private sealed record InputPlan(EmulationConfig Config, Buttons Hidden, double RumbleStrength);
+    private sealed record InputPlan(EmulationConfig Config, Buttons Hidden, double RumbleStrength, SecondaryAxes? Axes = null);
 }

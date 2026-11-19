@@ -169,6 +169,15 @@ internal sealed class Mapper : IDisposable
         }
     }
 
+    internal void ResetController()
+    {
+        lock (_gate)
+        {
+            _prev = Buttons.None;
+            ReleaseAllLocked();
+        }
+    }
+
     public void Dispose()
     {
         lock (_gate)

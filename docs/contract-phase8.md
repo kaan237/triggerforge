@@ -15,7 +15,8 @@ passes unchanged in meaning.
 - **Primary controller** = slot 0. It keeps every feature it has today: mapping to keyboard and
   mouse, macros, audio haptics, speaker, game audio, Forza telemetry, gyro, idle sleep, the
   live view. It is the controller whose MAC equals `settings.primaryController`, else the first
-  one found.
+  one found. A returning preferred controller takes slot 0 once it opens. The fallback moves to
+  a free secondary slot, or is closed when all slots are occupied.
 - **Secondary controllers** = slots 1-3, in the order they connected. Each has:
   - its profile: `settings.controllerDefaults[mac]` if set, else the primary's active profile;
   - from that profile: triggers, trigger response, light bar, player LEDs, mic LED, rumble
@@ -29,6 +30,9 @@ passes unchanged in meaning.
   outer … bit 4 = right outer): player 1 `0x04` (center), 2 `0x0A` (inner two), 3 `0x15`
   (center + outer two), 4 `0x1B` (all but center), unless the profile or a UDP command sets
   player LEDs. With one controller nothing changes.
+  In number mode, `playerLeds.automatic: true` uses the slot pattern (or the center LED for one
+  controller). With `false`, `number` is explicit. Legacy profiles without `automatic` use
+  automatic assignment only for number 1.
 - A controller that disconnects frees its slot; the others keep their slots (no renumbering
   while connected). A new controller takes the lowest free secondary slot. If the primary
   disconnects, no other controller is promoted automatically (its profile and virtual pad stay
@@ -78,8 +82,8 @@ code only. No tool or assistant names anywhere.
 "edgeShortcuts": true,
 "maxControllers": 4          // 1-4; 1 = exactly today's behaviour (only one controller opened)
 ```
-`maxControllers: 1` is also the rollback switch: with it no secondary code runs at all (no
-`SecondaryControllers` instance, no extra scans), which a test checks.
+`maxControllers: 1` is also the rollback switch: with it no secondary code runs at all and
+scanning stops while a primary is connected, unless the saved preference is still unsatisfied.
 Validation clamps and normalizes the MAC like `controllerDefaults` keys.
 
 ### Controllers (`ControllerService`)
@@ -91,7 +95,7 @@ Validation clamps and normalizes the MAC like `controllerDefaults` keys.
   `SlotInput(index, InputState)`, and `SendSecondary(index, OutputState)`.
 - Scanning: every scan looks at all DualSense HID paths (skipping our virtual pads and paths
   already open), opens new ones up to `maxControllers`, and puts the primary-MAC controller in
-  slot 0 when the primary slot is free. Opening one controller never blocks the others; a
+  slot 0 when available. Opening one controller never blocks the others' input; a
   failing open is retried on the next scan. No extra threads per controller beyond what
   `DualSenseController` already uses.
 
@@ -129,8 +133,10 @@ fires, even if bits are set).
   "profileId": "…", "profileName": "…" }]` (sorted by index; sent with every status).
 - UI → app: `controller.setPrimary { "mac": "…" }` (saves `primaryController`; takes effect
   at once if that controller is connected: slots are swapped, the old primary becomes a
-  secondary), `controller.setProfile { "index": 1-3, "profileId": "…" }` (session only).
+  secondary), `controller.setProfile { "index": 1-3, "mac": "…", "profileId": "…" }`
+  (session only, ignored if the MAC no longer matches the slot).
 - Existing `status` fields for the primary stay as they are.
+- Each live `input` sample includes the MAC of the primary slot that produced it.
 
 ### Tests
 

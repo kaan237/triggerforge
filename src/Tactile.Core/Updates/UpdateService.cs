@@ -19,7 +19,7 @@ public sealed class UpdateService : IDisposable
     private readonly string _directory;
     private readonly Version _current;
     private readonly bool _portable;
-    private readonly Func<string, bool> _signerMatches;
+    private readonly Func<FileStream, string, bool> _signerMatches;
     private readonly CancellationTokenSource _lifetime = new();
     private UpdateState _state;
     private UpdateManifest? _manifest;
@@ -34,7 +34,7 @@ public sealed class UpdateService : IDisposable
             new UpdateClient(ComparableVersion(runningVersion).ToString()), SignerMatches) { }
 
     internal UpdateService(string directory, bool portable, Version runningVersion, UpdateClient client,
-        Func<string, bool> signerMatches)
+        Func<FileStream, string, bool> signerMatches)
     {
         _directory = directory;
         _portable = portable;
@@ -186,9 +186,13 @@ public sealed class UpdateService : IDisposable
 
     private async Task<FileStream> OpenVerifiedAsync(string path, UpdateAsset asset, CancellationToken token)
     {
-        RejectReparsePoint(_directory);
-        RejectReparsePoint(Path.GetDirectoryName(path)!);
-        RejectReparsePoint(path);
+        // Every component up to the drive root: a redirected ancestor could make the path that is
+        // verified and the path that is elevated resolve to different files.
+        for (string? part = Path.GetFullPath(path); !string.IsNullOrEmpty(part); part = Path.GetDirectoryName(part))
+        {
+            RejectReparsePoint(part);
+        }
+
         var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
         try
@@ -199,7 +203,7 @@ public sealed class UpdateService : IDisposable
                 throw new UpdateException(UpdateError.BadFile, "The installer size or hash did not match the manifest.");
             }
 
-            if (!_signerMatches(path))
+            if (!_signerMatches(file, path))
             {
                 throw new UpdateException(UpdateError.BadSigner, "The installer certificate did not match the pinned signer.");
             }
@@ -253,8 +257,14 @@ public sealed class UpdateService : IDisposable
         }
     }
 
-    private static bool SignerMatches(string path)
+    private static bool SignerMatches(FileStream file, string path)
     {
+        // The signature must verify over this open file before its certificate is trusted.
+        if (!Authenticode.IsIntact(file.SafeFileHandle, path))
+        {
+            return false;
+        }
+
         try
         {
 #pragma warning disable SYSLIB0057 // Reading the signer of a PE file requires this API.

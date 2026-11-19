@@ -16,3 +16,8 @@ export function locale(): string {
 export function L(en: string, tr: string): string {
   return current === "tr" ? tr : en;
 }
+
+/** Display name for a controller model id from the host ("DualSenseEdge" → "DualSense Edge"). */
+export function modelName(model: string | null | undefined): string {
+  return model === "DualSenseEdge" ? "DualSense Edge" : model ?? "DualSense";
+}

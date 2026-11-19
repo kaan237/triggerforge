@@ -33,8 +33,8 @@ public sealed class CommandTests
     [MemberData(nameof(DsxModes), DisableDiscoveryEnumeration = true)]
     public void Dsx_trigger_modes(string args, TriggerEffect expected)
     {
-        using JsonDocument packet = JsonDocument.Parse($$"""[{"type":1,"parameters":[99,"2",{{args}}]}]""");
-        (UdpState state, int unsupported) = DsxTranslator.Apply(packet.RootElement, UdpState.Empty);
+        using JsonDocument packet = JsonDocument.Parse($$"""[{"type":1,"parameters":[0,"2",{{args}}]}]""");
+        (UdpState state, int unsupported) = ApplyDsx(packet, UdpState.Empty);
         Assert.Equal(0, unsupported);
         Assert.Equal(expected, state.RightTrigger);
         Assert.Null(state.LeftTrigger);
@@ -61,7 +61,7 @@ public sealed class CommandTests
     {
         using JsonDocument packet = JsonDocument.Parse(
             $$"""[{"type":1,"parameters":[0,1,12,{{mode}},-3,310,"8",true,5,6,7]}]""");
-        (UdpState state, int unsupported) = DsxTranslator.Apply(packet.RootElement, UdpState.Empty);
+        (UdpState state, int unsupported) = ApplyDsx(packet, UdpState.Empty);
         Assert.Equal(0, unsupported);
         Assert.Equal(TriggerEffect.FromBytes([rawMode, 0, 255, 8, 1, 5, 6, 7, 0, 0, 0]), state.LeftTrigger);
     }
@@ -75,14 +75,14 @@ public sealed class CommandTests
               {"type":99,"parameters":[0]},
               {"type":1,"parameters":[0,1,82]},
               {"type":1,"parameters":[0,1,12,20,0,0,0,0,0,0,0]},
-              {"type":2,"parameters":[42,-5,"999",true,44]},
+              {"type":2,"parameters":[0,-5,"999",true,44]},
               {"type":2,"parameters":[0,1,2,"blue"]},
               {"type":3,"parameters":[0,true,false,3,"0","1"]},
               {"type":4,"parameters":[0,2,255]},
               {"type":5,"parameters":[0,1]}
             ]
             """);
-        (UdpState state, int unsupported) = DsxTranslator.Apply(packet.RootElement, UdpState.Empty);
+        (UdpState state, int unsupported) = ApplyDsx(packet, UdpState.Empty);
         Assert.Equal(5, unsupported);
         Assert.Equal(new Rgb(0, 255, 1), state.Lightbar);
         Assert.Equal((byte)0b10101, state.PlayerLeds);
@@ -110,7 +110,7 @@ public sealed class CommandTests
     {
         using JsonDocument packet = JsonDocument.Parse($"[{instruction}]");
         var original = new UdpState(PlayerLeds: 8);
-        (UdpState state, int unsupported) = DsxTranslator.Apply(packet.RootElement, original);
+        (UdpState state, int unsupported) = ApplyDsx(packet, original);
         Assert.Equal(1, unsupported);
         Assert.Equal(original, state);
     }
@@ -125,7 +125,7 @@ public sealed class CommandTests
     public void Dsx_player_layouts(int number, byte mask)
     {
         using JsonDocument packet = JsonDocument.Parse($$"""[{"type":6,"parameters":[0,{{number}}]}]""");
-        Assert.Equal(mask, DsxTranslator.Apply(packet.RootElement, UdpState.Empty).State.PlayerLeds);
+        Assert.Equal(mask, ApplyDsx(packet, UdpState.Empty).State.PlayerLeds);
     }
 
     [Theory]
@@ -135,7 +135,7 @@ public sealed class CommandTests
     public void Dsx_microphone_modes(int mode, MicLed expected)
     {
         using JsonDocument packet = JsonDocument.Parse($$"""[{"type":5,"parameters":[0,{{mode}}]}]""");
-        Assert.Equal(expected, DsxTranslator.Apply(packet.RootElement, UdpState.Empty).State.MicLed);
+        Assert.Equal(expected, ApplyDsx(packet, UdpState.Empty).State.MicLed);
     }
 
     [Fact]
@@ -144,7 +144,14 @@ public sealed class CommandTests
         using JsonDocument packet = JsonDocument.Parse("""
             [{"type":2,"parameters":[0,1,2,3]},{"type":7,"parameters":[0]},{"type":5,"parameters":[0,0]}]
             """);
-        Assert.Equal(new UdpState(MicLed: MicLed.On), DsxTranslator.Apply(packet.RootElement, new(PlayerLeds: 31)).State);
+        Assert.Equal(new UdpState(MicLed: MicLed.On), ApplyDsx(packet, new(PlayerLeds: 31)).State);
+    }
+
+    private static (UdpState State, int Unsupported) ApplyDsx(JsonDocument packet, UdpState initial)
+    {
+        UdpState[] states = [initial];
+        int unsupported = DsxTranslator.Apply(packet.RootElement, states, index => index == 0, _ => { });
+        return (states[0], unsupported);
     }
 
     [Fact]

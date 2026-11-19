@@ -1,5 +1,5 @@
 import { L } from "../i18n";
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 import { send, type ButtonName, type DriverKind, type DriverState, type DriverStatus, type EmulationConfig, type EmulationMode, type EmulationStatus } from "../host";
 import { buttonDefs, buttonLabel } from "../mapping";
 import { useApp } from "../state";
@@ -81,6 +81,27 @@ function SystemPanel() {
     <div className="emu-side">
       <Section title={L("Status", "Durum")}>
         {emulation ? <LiveStatus e={emulation} /> : <p className="hint">{L("Waiting…", "Bekleniyor…")}</p>}
+        {emulation && emulation.slots.length > 1 && (
+          <>
+            <dl className="kv emu-kv">
+              {emulation.slots.map((slot) => (
+                <Fragment key={slot.index}>
+                  <dt>{L(`Controller ${slot.index + 1}`, `Kontrolcü ${slot.index + 1}`)}</dt>
+                  <dd>
+                    {slot.attached ? L(`${modeLabel[slot.mode]} connected`, `${modeLabel[slot.mode]} takılı`) : L("disconnected", "takılı değil")}
+                    {" · "}{slot.hidden ? L("hidden from games", "oyunlardan gizli") : L("visible", "görünür")}
+                    {slot.index > 0 && slot.error && <div className="small warn">{slot.error}</div>}
+                  </dd>
+                </Fragment>
+              ))}
+            </dl>
+            {!unavailable && !emulation.error && emulation.slots.some((slot) => slot.error) && (
+              <button className="button" onClick={() => send({ type: "emulation.retry" })}>
+                {L("Retry", "Yeniden dene")}
+              </button>
+            )}
+          </>
+        )}
         {emulation?.error && (
           <div className="map-status">
             <span className="small warn">{emulation.error}</span>

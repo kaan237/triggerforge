@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { send, type AppSettings } from "./host";
-import { L } from "./i18n";
+import { L, modelName } from "./i18n";
 import { Live } from "./Live";
 import { linkLabel } from "./model";
 import { DriverCard } from "./pages/Emulation";
@@ -11,7 +11,7 @@ function ControllerStep() {
   const { status } = useApp();
   if (status?.connected) {
     const link = status.link && (linkLabel[status.link] ?? status.link);
-    return <p role="status"><span className="dot live" aria-hidden /> {status.model ?? "DualSense"}{link && ` · ${link}`}</p>;
+    return <p role="status"><span className="dot live" aria-hidden /> {modelName(status.model)}{link && ` · ${link}`}</p>;
   }
   return (
     <>
@@ -57,7 +57,7 @@ function TestStep() {
 
   return (
     <>
-      <Live input={input} />
+      <Live input={input} edge={status?.model === "DualSenseEdge"} />
       <div className="button-row setup-actions">
         <button className="button" disabled={disabled} onClick={() => {
           tested.current = true;

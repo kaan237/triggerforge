@@ -21,11 +21,23 @@ $exists = $LASTEXITCODE -eq 0
 $ErrorActionPreference = 'Stop'
 if ($exists) { throw "Release $tag already exists on $Repository." }
 
-& (Join-Path $PSScriptRoot 'publish.ps1')
 $installer = Join-Path $artifacts "TriggerForge-$version-setup.exe"
 $zip = Join-Path $artifacts "TriggerForge-$version-portable.zip"
+# A file left from an earlier build must never be hashed into a new manifest.
+foreach ($file in $installer, $zip, (Join-Path $artifacts 'manifest.json'), (Join-Path $artifacts 'manifest.json.sig')) {
+    if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force }
+}
+
+& (Join-Path $PSScriptRoot 'publish.ps1')
 foreach ($file in $installer, $zip) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing $file; Inno Setup 6 is needed for the installer." }
+}
+
+# The app refuses an installer that is not signed by the pinned certificate, so check it here too.
+$pinned = '25C26195A82AC4EC3A5C57CF6B7D652939154655'
+$signature = Get-AuthenticodeSignature -LiteralPath $installer
+if ($signature.Status -notin @('Valid', 'UnknownError') -or $signature.SignerCertificate.Thumbprint -ne $pinned) {
+    throw "The installer is not signed by the pinned certificate: $($signature.Status) $($signature.StatusMessage)"
 }
 
 $tool = Join-Path $artifacts 'release-tool'

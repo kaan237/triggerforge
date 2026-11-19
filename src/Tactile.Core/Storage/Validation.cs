@@ -62,6 +62,7 @@ public static partial class Validation
             {
                 Mode = Defined(leds.Mode, PlayerLedMode.Number),
                 Number = Math.Clamp(leds.Number, 1, PlayerLeds.MaxNumber),
+                Automatic = leds.Automatic,
                 Mask = leds.Mask & 0x1F,
             },
             MicLed = Defined(p.MicLed, MicLed.Off),
@@ -198,9 +199,9 @@ public static partial class Validation
         var defaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach ((string mac, string id) in s.ControllerDefaults ?? new Dictionary<string, string>())
         {
-            if (!string.IsNullOrWhiteSpace(mac) && IsId(id))
+            if (NormalizeMac(mac) is { } key && IsId(id))
             {
-                defaults[mac.Trim().ToUpperInvariant()] = id;
+                defaults[key] = id;
             }
         }
 
@@ -214,6 +215,10 @@ public static partial class Validation
             AutoProfileDelayMs = Math.Clamp(s.AutoProfileDelayMs, 0, 10_000),
             DefaultProfileId = IsId(s.DefaultProfileId) ? s.DefaultProfileId : null,
             ControllerDefaults = defaults,
+            PrimaryController = NormalizeMac(s.PrimaryController),
+            AutoPlayerLeds = s.AutoPlayerLeds,
+            EdgeShortcuts = s.EdgeShortcuts,
+            MaxControllers = Math.Clamp(s.MaxControllers, 1, 4),
             IdleSleepMinutes = Math.Clamp(s.IdleSleepMinutes, 0, 240),
             LowBatteryWarnings = (s.LowBatteryWarnings ?? [])
                 .Where(v => v is >= 1 and <= 99)
@@ -241,6 +246,10 @@ public static partial class Validation
             },
         };
     }
+
+    internal static string? NormalizeMac(string? mac) =>
+        mac?.Trim() is { } value && BluetoothLink.TryParseAddress(value, out _)
+            ? value.Replace('-', ':').ToUpperInvariant() : null;
 
     private static EmulationConfig NormalizeEmulation(EmulationConfig? e, List<string> issues)
     {

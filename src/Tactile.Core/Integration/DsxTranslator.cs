@@ -8,7 +8,7 @@ internal static class DsxTranslator
 {
     private static readonly byte[] PlayerMasks = [0b00100, 0b01010, 0b10101, 0b11011, 0b11111, 0];
 
-    public static (UdpState State, int Unsupported) Apply(JsonElement instructions, UdpState state)
+    public static int Apply(JsonElement instructions, UdpState[] states, Func<int, bool> connected, Action<int> addressed)
     {
         int unsupported = 0;
         foreach (JsonElement instruction in instructions.EnumerateArray())
@@ -33,10 +33,23 @@ internal static class DsxTranslator
                 continue;
             }
 
-            state = ApplyInstruction(type, values, state, ref unsupported);
+            if (values.Length == 0 || values[0] is < 0 or > 3 || values[0] != Math.Truncate(values[0]) ||
+                !connected((int)values[0]))
+            {
+                unsupported++;
+                continue;
+            }
+
+            int index = (int)values[0];
+            int before = unsupported;
+            states[index] = ApplyInstruction(type, values, states[index], ref unsupported);
+            if (before == unsupported)
+            {
+                addressed(index);
+            }
         }
 
-        return (state, unsupported);
+        return unsupported;
     }
 
     private static UdpState ApplyInstruction(int type, double[] values, UdpState state, ref int unsupported)

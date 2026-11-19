@@ -22,9 +22,9 @@ public static class PlayerLeds
         _ => 0,
     };
 
-    public static byte Mask(PlayerLedConfig config) => config.Mode switch
+    public static byte Mask(PlayerLedConfig config, int? autoPlayer = null) => config.Mode switch
     {
-        PlayerLedMode.Number => ForNumber(config.Number),
+        PlayerLedMode.Number => ForNumber((config.Automatic ?? config.Number == 1) ? autoPlayer ?? 1 : config.Number),
         PlayerLedMode.Custom => (byte)(config.Mask & 0x1F),
         _ => 0,
     };

@@ -1,16 +1,54 @@
-import { L, locale } from "../i18n";
+import { L, locale, modelName } from "../i18n";
 import { ControllerDrawing } from "../ControllerDrawing";
-import { send } from "../host";
+import { send, type ControllerStatus, type Profile } from "../host";
+import { EdgeButtons } from "../Live";
 import { brightnessLabel, effectLabel, ledMask, reasonLabel, triggerSummary } from "../model";
 import { useApp, useInput } from "../state";
 import { PageHead } from "../ui";
 
 const linkLabel: Record<string, string> = { Bluetooth: "Bluetooth", Usb: "USB", get Simulated() { return L("Simulation", "Simülasyon"); } };
 
+function ControllerCard({ controller, profiles }: { controller: ControllerStatus; profiles: Profile[] }) {
+  const { index, model, link, battery, charging, primary, mac, profileId, profileName } = controller;
+  const name = L(`Controller ${index + 1}`, `Kontrolcü ${index + 1}`);
+  return (
+    <section className="panel controller-card">
+      <h2>{name}</h2>
+      <div className="controller-tags">
+        <span className={model === "DualSenseEdge" ? "chip" : undefined}>{modelName(model)}</span>
+        {primary && <span className="chip on">{L("Primary", "Birincil")}</span>}
+      </div>
+      <dl className="kv">
+        <dt>{L("Connection", "Bağlantı")}</dt>
+        <dd>{linkLabel[link]}</dd>
+        <dt>{L("Battery", "Pil")}</dt>
+        <dd>{battery === null ? "—" : L(`${battery}%`, `%${battery}`)}{charging && <span className="faint"> · {L("charging", "şarjda")}</span>}</dd>
+        <dt>{L("Profile", "Profil")}</dt>
+        <dd>{profileName}</dd>
+      </dl>
+      {!primary && (
+        <>
+          <label className="controller-session">
+            <span>{L("Session profile", "Oturum profili")}</span>
+            <select value={profileId} disabled={!mac} onChange={(e) => mac && send({ type: "controller.setProfile", index, mac, profileId: e.target.value })}>
+              {!profiles.some((p) => p.id === profileId) && <option value={profileId} disabled>{profileName || "—"}</option>}
+              {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </label>
+          <button className="button" disabled={!mac} onClick={() => mac && send({ type: "controller.setPrimary", mac })}>{L("Make primary", "Birincil yap")}</button>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function Overview() {
   const { status, output, profiles, activeId } = useApp();
   const input = useInput();
   const connected = status?.connected ?? false;
+  const controllers = status?.controllers ?? [];
+  const primaryMissing = !connected && controllers.length > 0;
+  const edge = connected && status?.model === "DualSenseEdge";
   const active = profiles.find((p) => p.id === activeId);
 
   return (
@@ -22,10 +60,19 @@ export function Overview() {
         </span>
       </PageHead>
 
+      {primaryMissing && <p className="warn" role="status">{L("Primary controller not connected", "Birincil kontrolcü bağlı değil")}</p>}
+      {(controllers.length >= 2 || primaryMissing) && (
+        <div className="controller-cards">
+          {controllers.map((controller) => (
+            <ControllerCard key={controller.index} controller={controller} profiles={profiles} />
+          ))}
+        </div>
+      )}
       <div className="overview-grid">
         <div className={connected ? "drawing" : "drawing idle"}>
           <ControllerDrawing input={connected ? input : null} output={connected ? output : null} />
-          {!connected && <p className="drawing-note">{L("Waiting for a controller. Plug it in via USB or pair over Bluetooth.", "Kontrolcü bekleniyor. USB ile tak ya da Bluetooth ile eşleştir.")}</p>}
+          {edge && <EdgeButtons input={input} />}
+          {!connected && !primaryMissing && <p className="drawing-note">{L("Waiting for a controller. Plug it in via USB or pair over Bluetooth.", "Kontrolcü bekleniyor. USB ile tak ya da Bluetooth ile eşleştir.")}</p>}
         </div>
 
         <aside className="info">
@@ -33,7 +80,7 @@ export function Overview() {
             <h2>{L("Device", "Cihaz")}</h2>
             <dl className="kv">
               <dt>Model</dt>
-              <dd>{connected ? status?.model ?? "DualSense" : L("Disconnected", "Bağlı değil")}</dd>
+              <dd>{connected ? <span className={edge ? "chip" : undefined}>{modelName(status?.model)}</span> : L("Disconnected", "Bağlı değil")}</dd>
               <dt>{L("Connection", "Bağlantı")}</dt>
               <dd>{connected && status?.link ? linkLabel[status.link] ?? status.link : "—"}</dd>
               <dt>MAC</dt>

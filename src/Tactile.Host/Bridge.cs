@@ -156,6 +156,29 @@ internal sealed class Bridge
                 _core.ActivateProfile(Str(m, "id"));
                 break;
 
+            case "controller.setPrimary":
+                _core.SetPrimaryController(Str(m, "mac"));
+                PostStatus();
+                break;
+
+            case "controller.setProfile":
+                if (!m.TryGetProperty("index", out JsonElement slotIndex) ||
+                    slotIndex.ValueKind != JsonValueKind.Number || !slotIndex.TryGetInt32(out int index) ||
+                    index is < 1 or > 3)
+                {
+                    throw new BadMessage(new LocalizedMessage("Controller index must be 1, 2 or 3.", "Kontrolcü indeksi 1, 2 veya 3 olmalı."));
+                }
+
+                if (!_core.TrySetSecondaryProfile(index, Str(m, "mac"), Str(m, "profileId")))
+                {
+                    Log.Info(Text.Pick($"Ignored a profile change for slot {index} because the controller changed.",
+                        $"Kontrolcü değiştiği için {index}. yuva için profil değişikliği yok sayıldı."));
+                    break;
+                }
+
+                PostStatus();
+                break;
+
             case "profile.import":
             {
                 Profile p = _core.Profiles.Import(Str(m, "json"), out int removed);
@@ -459,6 +482,7 @@ internal sealed class Bridge
             drivers = s.Drivers.Select(d => new { kind = d.Kind, state = d.State, version = d.Version, detail = d.Detail }),
             latency = new { p50Ms = s.Latency.P50Ms, p95Ms = s.Latency.P95Ms, samples = s.Latency.Samples },
             error = s.Error,
+            slots = s.Slots.Select(slot => new { index = slot.Index, mode = slot.Mode, attached = slot.Attached, hidden = slot.Hidden, error = slot.Error }),
         });
     }
 
@@ -570,7 +594,9 @@ internal sealed class Bridge
         {
             UseShellExecute = true,
             Verb = "runas",
-            Arguments = "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /RELAUNCH",
+            // An elevated app has no unelevated token to hand down, so setup would relaunch it as
+            // administrator; then the user starts it again from Start instead.
+            Arguments = "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS" + (WindowsInputPlatform.IsElevated ? "" : " /RELAUNCH"),
         });
         if (installer is null)
         {
@@ -631,28 +657,51 @@ internal sealed class Bridge
             version = _updates.Status.Current,
             activeProfileId = _core.ActiveProfile.Id,
             activeReason = _core.ActiveReason,
+            controllers = _core.Controllers.Slots.Select(slot =>
+            {
+                Battery? battery = slot.Controller.Latest?.Battery;
+                Profile profile = _core.ProfileForController(slot);
+                return new
+                {
+                    slot.Index,
+                    slot.Mac,
+                    model = slot.Controller.Details.Model.ToString(),
+                    link = slot.Controller.Details.Link.ToString(),
+                    battery = battery?.Percent,
+                    charging = battery is { Charge: ChargeState.Charging or ChargeState.Full },
+                    primary = slot.Index == 0,
+                    profileId = profile.Id,
+                    profileName = profile.Name,
+                };
+            }).ToArray(),
             mapping = new { active = mapping.Active, paused = mapping.Paused, blockedBy = mapping.BlockedBy },
             elevated = WindowsInputPlatform.IsElevated,
             portable = _paths.Portable,
         });
     }
 
-    public void PostInput(InputState s)
+    public void PostInput(ControllerSlot slot, InputState s)
     {
-        DualSenseController? c = _core.Controllers.Controller;
-        if (!_ready || c is null)
+        if (!_ready || !_core.Controllers.IsCurrent(slot))
         {
             return;
         }
 
-        Vector3 gyro = _core.GyroDegPerSec(s);
+        DualSenseController c = slot.Controller;
+        Vector3 gyro = GyroCalibrationResult.Apply(c.Details.Calibration.GyroDegPerSec(s.GyroRaw), _core.GyroBias);
         Vector3 accel = c.Details.Calibration.AccelG(s.AccelRaw);
         (float lx, float ly) = _core.LeftStick.Process(s.Left);
         (float rx, float ry) = _core.RightStick.Process(s.Right);
         ControllerStats stats = c.Stats;
+        if (!_core.Controllers.IsCurrent(slot))
+        {
+            return;
+        }
+
         Post(new
         {
             type = "input",
+            mac = slot.Mac,
             buttons = Enum.GetValues<Buttons>().Where(b => b != Buttons.None && s.IsDown(b)).Select(b => b.ToString()),
             left = new[] { (int)s.Left.X, s.Left.Y },
             right = new[] { (int)s.Right.X, s.Right.Y },
@@ -717,9 +766,18 @@ internal sealed class Bridge
 
     public void PostNotice(Notice n)
     {
-        string json = n.Progress is double p
-            ? Serialize(new { type = "notice", kind = n.Kind, message = n.Message, progress = p })
-            : Serialize(new { type = "notice", kind = n.Kind, message = n.Message });
+        string json;
+        if (n.Controller is int controller)
+        {
+            string message = Text.Pick($"{n.Message} (Controller {controller})", $"{n.Message} (Kontrolcü {controller})");
+            json = Serialize(new { type = "notice", kind = n.Kind, message, controller });
+        }
+        else
+        {
+            json = n.Progress is double p
+                ? Serialize(new { type = "notice", kind = n.Kind, message = n.Message, progress = p })
+                : Serialize(new { type = "notice", kind = n.Kind, message = n.Message });
+        }
         if (_ready)
         {
             _postRaw(json);

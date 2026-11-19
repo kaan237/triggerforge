@@ -16,6 +16,10 @@ public sealed record AppSettings
     public string? DefaultProfileId { get; init; }
     /// <summary>Controller MAC (upper case, colon separated) to profile id.</summary>
     public IReadOnlyDictionary<string, string> ControllerDefaults { get; init; } = new Dictionary<string, string>();
+    public string? PrimaryController { get; init; }
+    public bool AutoPlayerLeds { get; init; } = true;
+    public bool EdgeShortcuts { get; init; } = true;
+    public int MaxControllers { get; init; } = 4;
     /// <summary>0 = never. Bluetooth only.</summary>
     public int IdleSleepMinutes { get; init; } = 15;
     /// <summary>Battery percentages that raise a notice, highest first.</summary>

@@ -212,10 +212,12 @@ internal sealed class FakeRecovery(List<string> log) : IRecovery
 internal sealed class FakeTree : IDeviceTree
 {
     public HashSet<string> Virtual { get; } = [];
+    public Dictionary<string, string> InstanceIds { get; } = [];
 
     public bool IsVirtual(string hidDevicePath) => Virtual.Contains(hidDevicePath);
 
-    public string? InstanceId(string hidDevicePath) => hidDevicePath == EmulationRig.RealPath ? EmulationRig.RealId : null;
+    public string? InstanceId(string hidDevicePath) => hidDevicePath == EmulationRig.RealPath
+        ? EmulationRig.RealId : InstanceIds.GetValueOrDefault(hidDevicePath);
 }
 
 internal static class Ticks

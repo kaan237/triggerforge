@@ -1,4 +1,4 @@
-import { L } from "./i18n";
+import { L, modelName } from "./i18n";
 import { useEffect, useState } from "react";
 import { inHost, type Profile, type Status } from "./host";
 import { deepEqual, linkLabel } from "./model";
@@ -48,7 +48,7 @@ function StatusBar() {
   return (
     <header className="status">
       <span className={connected ? "dot live" : "dot"} aria-hidden />
-      <span className="status-model">{connected ? status?.model ?? "DualSense" : L("No controller connected", "Kontrolcü bağlı değil")}</span>
+      <span className="status-model">{connected ? modelName(status?.model) : L("No controller connected", "Kontrolcü bağlı değil")}</span>
       <span className="spacer" />
       {active && (
         <span className="metric">

@@ -30,10 +30,10 @@ internal sealed class VirtualXbox360 : VirtualUsbDevice
         [0x01, 0x03, 0x03],
     ];
 
-    public VirtualXbox360(UsbIpServer server, int busNum)
+    public VirtualXbox360(UsbIpServer server, int busNum, int slot = 0)
         : base(server, busNum)
     {
-        Strings = ["©Microsoft Corporation", "Controller", $"{0x7AC70000 + busNum:X8}"];
+        Strings = ["©Microsoft Corporation", "Controller", slot == 0 ? $"{0x7AC70000 + busNum:X8}" : SecondaryPads.Serial(slot)];
     }
 
     public override VirtualKind Kind => VirtualKind.Xbox360;

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Tactile.Device.DualSense;
 
@@ -7,11 +8,12 @@ namespace Tactile.Core.Integration;
 
 internal sealed class UdpApiServer(
     Func<TimeSpan> now,
-    Action<Func<OutputState, OutputState>?> setLayer,
-    Action<string> activateProfile,
-    Func<UdpControllerStatus> controllerStatus,
+    Action<int, Func<OutputState, OutputState>?> setLayer,
+    Action<int, string> activateProfile,
+    Func<int, UdpControllerStatus> controllerStatus,
     Action<Notice> report,
-    string dsxPortFilePath = DsxPortFile.DefaultPath) : IDisposable
+    string dsxPortFilePath = DsxPortFile.DefaultPath,
+    Func<IReadOnlyList<ControllerSlot>>? getSlots = null) : IDisposable
 {
     private const int MaxPacketSize = 16 * 1024;
     private const int MaxCommands = 32;
@@ -22,7 +24,10 @@ internal sealed class UdpApiServer(
 
     private readonly Lock _lock = new();
     private readonly ListenerWait _wait = new();
-    private readonly LayerPublisher _layer = new(setLayer);
+    private readonly LayerPublisher[] _layers = Enumerable.Range(0, 4)
+        .Select(index => new LayerPublisher(layer => setLayer(index, layer))).ToArray();
+    private readonly UdpState[] _states = Enumerable.Repeat(UdpState.Empty, 4).ToArray();
+    private readonly TimeSpan?[] _lastAddressed = new TimeSpan?[4];
     private readonly Queue<TimeSpan> _arrivals = new(MaxPacketsPerSecond);
     private IntegrationSettings _settings = new();
     private volatile Thread? _worker;
@@ -36,9 +41,21 @@ internal sealed class UdpApiServer(
     private long _unsupported;
     private TimeSpan? _lastPacket;
     private UdpFormat? _format;
-    private UdpState _state = UdpState.Empty;
+    public UdpApiServer(Func<TimeSpan> now, Action<Func<OutputState, OutputState>?> setLayer,
+        Action<string> activateProfile, Func<UdpControllerStatus> controllerStatus, Action<Notice> report,
+        string dsxPortFilePath = DsxPortFile.DefaultPath)
+        : this(now, (index, layer) => { if (index == 0) setLayer(layer); }, (_, id) => activateProfile(id),
+            index => index == 0 ? controllerStatus() : default, report, dsxPortFilePath)
+    {
+    }
 
     private bool Stopping => Volatile.Read(ref _stopping) != 0;
+
+    internal UdpState StateAt(ControllerSlot slot)
+    {
+        UdpState state = _layers[slot.Index].Applied;
+        return ReferenceEquals(state.Owner, slot) ? state : UdpState.Empty;
+    }
 
     public UdpStatus Status
     {
@@ -47,14 +64,18 @@ internal sealed class UdpApiServer(
             lock (_lock)
             {
                 long? age = _lastPacket is { } last ? (long)(now() - last).TotalMilliseconds : null;
-                return new(_listener, _port, _packets, _rejected, _unsupported, age, _layer.Applied != UdpState.Empty, _format);
+                return new(_listener, _port, _packets, _rejected, _unsupported, age,
+                    _layers[0].Applied != UdpState.Empty ||
+                    (getSlots is null
+                        ? _layers.Skip(1).Any(layer => layer.Applied != UdpState.Empty)
+                        : getSlots().Any(slot => slot.Index > 0 && slot.Controller.Connected && StateAt(slot) != UdpState.Empty)), _format);
             }
         }
     }
 
     public void Configure(IntegrationSettings settings)
     {
-        LayerPublisher.Publication? publish = null;
+        List<LayerUpdate> publish = [];
         lock (_lock)
         {
             if (Stopping)
@@ -72,8 +93,8 @@ internal sealed class UdpApiServer(
 
             if (!settings.UdpEnabled)
             {
-                _state = UdpState.Empty;
-                publish = _layer.Prepare(_state, now(), immediate: true);
+                Array.Fill(_states, UdpState.Empty);
+                publish = PrepareLayers(now(), out _, immediate: true);
             }
             else if (rebind)
             {
@@ -97,12 +118,12 @@ internal sealed class UdpApiServer(
             _wait.Wake();
         }
 
-        _layer.Publish(publish, _lock);
+        Publish(publish);
     }
 
     public void Release()
     {
-        LayerPublisher.Publication? publish;
+        List<LayerUpdate> publish;
         lock (_lock)
         {
             if (Stopping)
@@ -110,12 +131,12 @@ internal sealed class UdpApiServer(
                 return;
             }
 
-            _state = UdpState.Empty;
-            publish = _layer.Prepare(_state, now());
+            Array.Fill(_states, UdpState.Empty);
+            publish = PrepareLayers(now(), out _);
             _wait.Wake();
         }
 
-        _layer.Publish(publish, _lock);
+        Publish(publish);
     }
 
     public void Dispose()
@@ -145,7 +166,7 @@ internal sealed class UdpApiServer(
                 Socket? listening = null;
                 try
                 {
-                    LayerPublisher.Publication? publish;
+                    List<LayerUpdate> publish;
                     CancellationTokenSource? receive = null;
                     int wait;
                     lock (_lock)
@@ -161,30 +182,15 @@ internal sealed class UdpApiServer(
                             TryBind(time);
                         }
 
-                        TimeSpan? releaseAt = _state != UdpState.Empty && _settings.ReleaseAfterSeconds > 0
-                            ? _lastPacket + TimeSpan.FromSeconds(_settings.ReleaseAfterSeconds)
-                            : null;
-                        if (releaseAt is { } release && time >= release)
-                        {
-                            _state = UdpState.Empty;
-                            releaseAt = null;
-                        }
-
-                        publish = _layer.Prepare(_state, time);
+                        publish = PrepareLayers(time, out TimeSpan? deadline);
                         listening = _socket;
-                        TimeSpan? deadline = releaseAt;
-                        if (_layer.HasPending(_state))
-                        {
-                            deadline = Earlier(deadline, _layer.NextPublish);
-                        }
-
                         if (_settings.UdpEnabled && listening is null)
                         {
                             deadline = Earlier(deadline, _retryAt);
                         }
 
                         wait = ListenerWait.Until(time, deadline);
-                        if (publish is null)
+                        if (publish.Count == 0)
                         {
                             receive = _wait.Begin();
                         }
@@ -192,7 +198,7 @@ internal sealed class UdpApiServer(
 
                     if (receive is null)
                     {
-                        _layer.Publish(publish, _lock);
+                        Publish(publish);
                         continue;
                     }
 
@@ -220,17 +226,17 @@ internal sealed class UdpApiServer(
         }
         finally
         {
-            LayerPublisher.Publication? publish;
+            List<LayerUpdate> publish;
             lock (_lock)
             {
                 CloseSocket();
-                _state = UdpState.Empty;
-                publish = _layer.Prepare(_state, now(), immediate: true);
+                Array.Fill(_states, UdpState.Empty);
+                publish = PrepareLayers(now(), out _, immediate: true);
             }
 
             try
             {
-                _layer.Publish(publish, _lock);
+                Publish(publish);
             }
             catch (Exception)
             {
@@ -245,7 +251,97 @@ internal sealed class UdpApiServer(
     private bool IsCurrent(Socket socket) => !Stopping && ReferenceEquals(socket, _socket);
 
     private static TimeSpan? Earlier(TimeSpan? first, TimeSpan? second) =>
-        first is null || second < first ? second : first;
+        first is null || (second is not null && second < first) ? second : first;
+
+    private readonly record struct LayerUpdate(LayerPublisher Layer, LayerPublisher.Publication Publication);
+
+    private IReadOnlyList<ControllerSlot>? CaptureOccupants()
+    {
+        IReadOnlyList<ControllerSlot>? slots = getSlots?.Invoke();
+        if (slots is not null)
+        {
+            for (int i = 1; i < _states.Length; i++)
+            {
+                if (!ReferenceEquals(_states[i].Owner, Occupant(slots, i)))
+                {
+                    _states[i] = UdpState.Empty;
+                    _lastAddressed[i] = null;
+                }
+            }
+        }
+
+        return slots;
+    }
+
+    private static ControllerSlot? Occupant(IReadOnlyList<ControllerSlot> slots, int index) =>
+        slots.FirstOrDefault(s => s.Index == index);
+
+    private bool Connected(IReadOnlyList<ControllerSlot>? slots, int index) =>
+        slots is null ? controllerStatus(index).Connected : Occupant(slots, index)?.Controller.Connected == true;
+
+    private void Addressed(IReadOnlyList<ControllerSlot>? slots, int index, TimeSpan time)
+    {
+        _lastAddressed[index] = time;
+        if (slots is not null && index > 0 && _states[index] != UdpState.Empty)
+        {
+            UdpState state = _states[index] with { Owner = null };
+            _states[index] = state == UdpState.Empty ? UdpState.Empty : state with { Owner = Occupant(slots, index) };
+        }
+    }
+
+    private List<LayerUpdate> PrepareLayers(TimeSpan time, out TimeSpan? deadline, bool immediate = false)
+    {
+        CaptureOccupants();
+        List<LayerUpdate> updates = [];
+        deadline = null;
+        for (int i = 0; i < _states.Length; i++)
+        {
+            if (_states[i] != UdpState.Empty && _settings.ReleaseAfterSeconds > 0 &&
+                _lastAddressed[i] is { } last)
+            {
+                TimeSpan release = last + TimeSpan.FromSeconds(_settings.ReleaseAfterSeconds);
+                if (time >= release)
+                {
+                    _states[i] = UdpState.Empty;
+                }
+                else
+                {
+                    deadline = Earlier(deadline, release);
+                }
+            }
+
+            LayerPublisher layer = _layers[i];
+            if (layer.Prepare(_states[i], time, immediate) is { } update)
+            {
+                updates.Add(new(layer, update));
+            }
+
+            if (layer.HasPending(_states[i]))
+            {
+                deadline = Earlier(deadline, layer.NextPublish);
+            }
+        }
+
+        return updates;
+    }
+
+    private void Publish(List<LayerUpdate> updates)
+    {
+        ExceptionDispatchInfo? failure = null;
+        foreach (LayerUpdate update in updates)
+        {
+            try
+            {
+                update.Layer.Publish(update.Publication, _lock);
+            }
+            catch (Exception e)
+            {
+                failure ??= ExceptionDispatchInfo.Capture(e);
+            }
+        }
+
+        failure?.Throw();
+    }
 
     private void CloseSocket()
     {
@@ -355,13 +451,34 @@ internal sealed class UdpApiServer(
             {
                 if (TryCommands(root, "commands", out JsonElement commands))
                 {
-                    HandleNative(socket, packet.RemoteEndPoint, commands, time);
+                    if (ProcessNative(commands, time, socket) is { } reply)
+                    {
+                        SendAnswer(socket, packet.RemoteEndPoint, JsonSerializer.SerializeToUtf8Bytes(new
+                        {
+                            ok = reply.Error is null,
+                            error = reply.Error,
+                            connected = reply.Controller.Connected,
+                            link = reply.Controller.Link,
+                            battery = reply.Controller.Battery,
+                        }, TactileJson.Compact));
+                    }
+
                     return;
                 }
             }
             else if (TryCommands(root, "instructions", out JsonElement instructions))
             {
-                HandleDsx(socket, packet.RemoteEndPoint, instructions, time);
+                if (ProcessDsx(instructions, time, socket) is { } controller)
+                {
+                    SendAnswer(socket, packet.RemoteEndPoint, JsonSerializer.SerializeToUtf8Bytes(new
+                    {
+                        Status = "TriggerForge: commands received",
+                        TimeReceived = DateTime.Now.ToString(),
+                        isControllerConnected = controller.Connected,
+                        BatteryLevel = controller.Battery ?? 0,
+                    }));
+                }
+
                 return;
             }
         }
@@ -375,28 +492,32 @@ internal sealed class UdpApiServer(
         }
     }
 
-    private void HandleNative(Socket socket, EndPoint sender, JsonElement commands, TimeSpan time)
+    internal (string? Error, UdpControllerStatus Controller)? ProcessNative(
+        JsonElement commands, TimeSpan time, Socket? socket = null)
     {
         JsonElement.ArrayEnumerator remaining = commands.EnumerateArray();
         string? error = null;
         string? profileId;
+        int index = 0;
         try
         {
             do
             {
                 lock (_lock)
                 {
-                    if (!IsCurrent(socket))
+                    if (socket is not null && !IsCurrent(socket))
                     {
-                        return;
+                        return null;
                     }
 
-                    profileId = NativeCommands.ApplyUntilProfile(ref remaining, ref _state);
+                    IReadOnlyList<ControllerSlot>? slots = CaptureOccupants();
+                    profileId = NativeCommands.ApplyUntilProfile(ref remaining, _states,
+                        slot => Addressed(slots, slot, time), ref index, slot => Connected(slots, slot));
                 }
 
                 if (profileId is not null)
                 {
-                    activateProfile(profileId);
+                    activateProfile(index, profileId);
                 }
             }
             while (profileId is not null);
@@ -408,9 +529,9 @@ internal sealed class UdpApiServer(
 
         lock (_lock)
         {
-            if (!IsCurrent(socket))
+            if (socket is not null && !IsCurrent(socket))
             {
-                return;
+                return null;
             }
 
             _lastPacket = time;
@@ -425,69 +546,58 @@ internal sealed class UdpApiServer(
             }
         }
 
-        UdpControllerStatus controller = controllerStatus();
-        byte[] answer = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            ok = error is null,
-            error,
-            connected = controller.Connected,
-            link = controller.Link,
-            battery = controller.Battery,
-        }, TactileJson.Compact);
-        SendAnswer(socket, sender, answer);
+        return (error, controllerStatus(index));
     }
 
-    private void HandleDsx(Socket socket, EndPoint sender, JsonElement instructions, TimeSpan time)
+    internal UdpControllerStatus? ProcessDsx(JsonElement instructions, TimeSpan time, Socket? socket = null)
     {
         lock (_lock)
         {
-            if (!IsCurrent(socket))
+            if (socket is not null && !IsCurrent(socket))
             {
-                return;
+                return null;
             }
 
             if (!_settings.Dsx)
             {
                 _rejected++;
-                return;
+                return null;
             }
 
-            (UdpState state, int unsupported) = DsxTranslator.Apply(instructions, _state);
-            _state = state;
-            _unsupported += unsupported;
+            IReadOnlyList<ControllerSlot>? slots = CaptureOccupants();
+            _unsupported += DsxTranslator.Apply(instructions, _states,
+                index => Connected(slots, index), index => Addressed(slots, index, time));
             _packets++;
             _lastPacket = time;
-            _format = UdpFormat.Dsx;        }
+            _format = UdpFormat.Dsx;
+        }
 
-        UdpControllerStatus controller = controllerStatus();
-        byte[] answer = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            Status = "TriggerForge: commands received",
-            TimeReceived = DateTime.Now.ToString(),
-            isControllerConnected = controller.Connected,
-            BatteryLevel = controller.Battery ?? 0,
-        });
-        SendAnswer(socket, sender, answer);
+        return controllerStatus(0);
     }
 
     private void SendAnswer(Socket socket, EndPoint sender, byte[] answer)
     {
-        LayerPublisher.Publication? publish;
-        lock (_lock)
-        {
-            if (!IsCurrent(socket))
-            {
-                return;
-            }
-
-            publish = _layer.Prepare(_state, now());
-        }
-
-        _layer.Publish(publish, _lock);
+        PublishPending(socket);
         if (IsCurrent(socket))
         {
             socket.SendTo(answer, sender);
         }
+    }
+
+    internal void PublishPending(Socket? socket = null)
+    {
+        List<LayerUpdate> publish;
+        lock (_lock)
+        {
+            if (socket is not null && !IsCurrent(socket))
+            {
+                return;
+            }
+
+            publish = PrepareLayers(now(), out _);
+        }
+
+        Publish(publish);
     }
 
     private static bool TryCommands(JsonElement root, string name, out JsonElement commands) =>

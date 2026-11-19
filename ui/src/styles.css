@@ -276,6 +276,15 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 2px; }
 .legend .key.raw { border: 1.5px solid var(--muted); }
 .legend .key.proc { background: var(--accent); }
 
+.controller-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.controller-card { min-width: 0; }
+.controller-card .kv { grid-template-columns: auto minmax(0, 1fr); margin-top: 8px; }
+.controller-card .kv dd { display: block; overflow-wrap: anywhere; }
+.controller-tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.controller-session { display: grid; gap: 4px; margin: 12px 0 8px; font-size: 12px; }
+.controller-session select { width: 100%; }
+.drawing > .edge-buttons { margin-top: 8px; }
+
 .overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
 @media (max-width: 1100px) { .overview-grid { grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; } }
 

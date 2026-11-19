@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { send, subscribe, type AppSettings, type DriverKind, type DriverProgress, type EmulationStatus, type HapticStatus, type Input, type NoticeKind, type Output, type Profile, type Status, type TelemetryRule, type UpdateStatus } from "./host";
 import { L, setLanguage } from "./i18n";
 import { clone, deepEqual, normalizeProfile, normalizeSettings } from "./model";
@@ -7,6 +7,7 @@ export type Notice = { id: number; kind: NoticeKind | "error"; message: string; 
 
 type AppState = {
   status: Status | null;
+  liveInput: ReturnType<typeof createLiveInput>;
   output: Output | null;
   profiles: Profile[];
   activeId: string;
@@ -39,24 +40,45 @@ export function useApp(): AppState {
   return v;
 }
 
+function createLiveInput() {
+  let primaryMac: string | null | undefined;
+  let sample: { mac: string | null; input: Input } | null = null;
+  const listeners = new Set<() => void>();
+
+  return {
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    getSnapshot: () => sample,
+    setPrimary(status: Status) {
+      const mac = status.connected ? status.mac ?? null : undefined;
+      if (mac === primaryMac) return;
+      primaryMac = mac;
+      sample = null;
+      listeners.forEach((listener) => listener());
+    },
+    accept(input: Input) {
+      // Untagged samples use the bridge's primary-only stream after status.
+      if (primaryMac === undefined || (input.mac !== undefined && input.mac !== primaryMac)) return;
+      sample = { mac: primaryMac, input };
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
 // Input arrives at ~30 Hz; only components that draw it subscribe.
 export function useInput(): Input | null {
-  const [input, setInput] = useState<Input | null>(null);
-  useEffect(
-    () =>
-      subscribe((m) => {
-        if (m.type === "input") setInput(m);
-        else if (m.type === "status" && !m.connected) setInput(null);
-      }),
-    [],
-  );
-  return input;
+  const { status, liveInput } = useApp();
+  const sample = useSyncExternalStore(liveInput.subscribe, liveInput.getSnapshot);
+  return status?.connected && sample?.mac === (status.mac ?? null) ? sample.input : null;
 }
 
 let noticeSeq = 0;
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status | null>(null);
+  const [liveInput] = useState(createLiveInput);
   const [output, setOutput] = useState<Output | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [activeId, setActiveId] = useState("");
@@ -88,8 +110,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const off = subscribe((m) => {
       switch (m.type) {
         case "status":
+          liveInput.setPrimary(m);
           setStatus(m);
           if (m.activeProfileId) setActiveId(m.activeProfileId);
+          break;
+        case "input":
+          liveInput.accept(m);
           break;
         case "output":
           setOutput(m);
@@ -143,7 +169,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
     send({ type: "hello" });
     return off;
-  }, [push]);
+  }, [liveInput, push]);
 
   // Follow the stored active profile unless the user has unsaved edits.
   useEffect(() => {
@@ -190,8 +216,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AppState>(
-    () => ({ status, output, profiles, activeId, settings, update, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, telemetryDrafts, setTelemetryDraft }),
-    [status, output, profiles, activeId, settings, update, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, telemetryDrafts, setTelemetryDraft],
+    () => ({ status, liveInput, output, profiles, activeId, settings, update, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, telemetryDrafts, setTelemetryDraft }),
+    [status, liveInput, output, profiles, activeId, settings, update, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, telemetryDrafts, setTelemetryDraft],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

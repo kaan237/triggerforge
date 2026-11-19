@@ -26,12 +26,14 @@ public sealed class ControllerStats
 /// </summary>
 public sealed class DualSenseController : IDisposable
 {
-    private readonly HidDevice _device;
-    private readonly Thread _reader;
+    private readonly HidDevice? _device;
+    private readonly Thread? _reader;
+    private readonly Action<OutputState>? _observeOutput;
     private readonly Lock _writeLock = new();
     private readonly byte[] _writeBuffer;
     private volatile bool _running = true;
-    private OutputState? _lastSent;
+    private volatile OutputState? _lastSent;
+    private volatile InputState? _latest;
     private int _sequence;
     private bool _sentFirst;
     private volatile bool _hapticsActive;
@@ -39,10 +41,20 @@ public sealed class DualSenseController : IDisposable
     private DualSenseController(HidDevice device, ControllerDetails details, UsbFeatureReports features)
     {
         _device = device;
+        DevicePath = device.Info.Path;
         Details = details;
         Features = features;
         _writeBuffer = new byte[Math.Max(device.Info.OutputReportLength, HapticReport.SpeakerDoubleLength)];
         _reader = new Thread(ReadLoop) { IsBackground = true, Name = "TriggerForge: dualsense-reader", Priority = ThreadPriority.AboveNormal };
+    }
+
+    internal DualSenseController(string path, ControllerDetails details, Action<OutputState> observeOutput)
+    {
+        DevicePath = path;
+        Details = details;
+        Features = new(null, null, null);
+        _observeOutput = observeOutput;
+        _writeBuffer = [];
     }
 
     public ControllerDetails Details { get; }
@@ -51,11 +63,11 @@ public sealed class DualSenseController : IDisposable
     public UsbFeatureReports Features { get; }
 
     /// <summary>HID device path this controller was opened from.</summary>
-    public string DevicePath => _device.Info.Path;
+    public string DevicePath { get; }
 
     public ControllerStats Stats { get; } = new();
 
-    public InputState? Latest { get; private set; }
+    public InputState? Latest => _latest;
 
     public bool Connected => _running;
 
@@ -85,7 +97,7 @@ public sealed class DualSenseController : IDisposable
                 pairing is null ? null : FeatureReport.ToUsb(pairing, info.Link),
                 firmware is null ? null : FeatureReport.ToUsb(firmware, info.Link));
             var controller = new DualSenseController(device, details, features);
-            controller._reader.Start();
+            controller._reader!.Start();
             return controller;
         }
         catch
@@ -95,14 +107,32 @@ public sealed class DualSenseController : IDisposable
         }
     }
 
+    public static string? ReadMac(ControllerInfo info)
+    {
+        using HidDevice device = HidDevice.Open(info.Hid);
+        return ReadFeature(device, 0x09) is { } pairing ? ParseMac(pairing) : null;
+    }
+
     /// <summary>Sends the state if it differs from what was last sent.</summary>
-    public bool Send(OutputState state, bool force = false)
+    public bool Send(OutputState state, bool force = false) => Send(state, force, null);
+
+    /// <summary>Checks that the caller still owns the output while holding this device's write lock.</summary>
+    public bool SendIfCurrent(OutputState state, Func<bool> isCurrent) => Send(state, false, isCurrent);
+
+    private bool Send(OutputState state, bool force, Func<bool>? isCurrent)
     {
         lock (_writeLock)
         {
-            if (!force && state.Equals(_lastSent))
+            if ((isCurrent is not null && !isCurrent()) || (!force && state.Equals(_lastSent)))
             {
                 return false;
+            }
+
+            if (_observeOutput is not null)
+            {
+                _observeOutput(state);
+                _lastSent = state;
+                return true;
             }
 
             OutputOptions options = CurrentOptions();
@@ -167,7 +197,7 @@ public sealed class DualSenseController : IDisposable
     {
         if (!_running)
         {
-            _device.Dispose();
+            _device?.Dispose();
             return;
         }
 
@@ -181,12 +211,20 @@ public sealed class DualSenseController : IDisposable
         {
         }
 
-        _device.Dispose();
-        _reader.Join(TimeSpan.FromSeconds(1));
+        _device?.Dispose();
+        if (_reader != Thread.CurrentThread)
+        {
+            _reader?.Join(TimeSpan.FromSeconds(1));
+        }
     }
 
     private bool Write(ReadOnlySpan<byte> report)
     {
+        if (_device is null)
+        {
+            return false;
+        }
+
         // Windows wants the full capability length; the driver sends the report's real size.
         Span<byte> buffer = _writeBuffer;
         buffer.Clear();
@@ -208,13 +246,14 @@ public sealed class DualSenseController : IDisposable
 
     private void ReadLoop()
     {
-        byte[] buffer = new byte[_device.Info.InputReportLength];
+        HidDevice device = _device!;
+        byte[] buffer = new byte[device.Info.InputReportLength];
         while (_running)
         {
             int read;
             try
             {
-                read = _device.Read(buffer);
+                read = device.Read(buffer);
             }
             catch (Exception e) when (e is IOException or ObjectDisposedException or OperationCanceledException)
             {
@@ -230,8 +269,7 @@ public sealed class DualSenseController : IDisposable
             {
                 case ParseResult.Ok:
                     Stats.Reports++;
-                    Latest = state;
-                    InputReceived?.Invoke(this, state!);
+                    PublishInput(state!);
                     break;
                 case ParseResult.BadCrc:
                     Stats.BadCrc++;
@@ -242,6 +280,17 @@ public sealed class DualSenseController : IDisposable
             }
         }
 
+        PublishDisconnect();
+    }
+
+    internal void PublishInput(InputState state)
+    {
+        _latest = state;
+        InputReceived?.Invoke(this, state);
+    }
+
+    internal void PublishDisconnect()
+    {
         bool wasRunning = _running;
         _running = false;
         if (wasRunning)

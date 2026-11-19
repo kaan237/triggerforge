@@ -133,6 +133,10 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     autoProfileDelayMs: 800,
     defaultProfileId,
     controllerDefaults: {},
+    primaryController: null,
+    autoPlayerLeds: true,
+    edgeShortcuts: true,
+    maxControllers: 4,
     idleSleepMinutes: 15,
     lowBatteryWarnings: [20, 10],
     runAsAdminHint: false,
@@ -252,10 +256,17 @@ export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
   const d = defaultSettings();
   const emulation = { ...d.emulation, ...s.emulation };
   if (emulation.speakerPacket !== "single36") emulation.speakerPacket = d.emulation.speakerPacket;
+  const primaryController = s.primaryController?.trim().replaceAll("-", ":").toUpperCase();
   return {
     ...d, ...s,
     language: s.language === "tr" ? "tr" : "en",
     controllerDefaults: { ...(s.controllerDefaults ?? {}) },
+    primaryController: primaryController || null,
+    autoPlayerLeds: s.autoPlayerLeds !== false,
+    edgeShortcuts: s.edgeShortcuts !== false,
+    maxControllers: typeof s.maxControllers === "number" && Number.isFinite(s.maxControllers)
+      ? Math.min(4, Math.max(1, Math.trunc(s.maxControllers)))
+      : d.maxControllers,
     emulation,
     integration: { ...d.integration, ...s.integration },
     updates: { autoCheck: s.updates?.autoCheck !== false },

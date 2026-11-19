@@ -15,19 +15,21 @@ internal static class NativeCommands
     public static (UdpState State, string? Error) Apply(
         JsonElement commands, UdpState state, Action<string> activateProfile)
     {
+        UdpState[] states = [state, UdpState.Empty, UdpState.Empty, UdpState.Empty];
         JsonElement.ArrayEnumerator remaining = commands.EnumerateArray();
+        int index = 0;
         try
         {
-            while (ApplyUntilProfile(ref remaining, ref state) is { } id)
+            while (ApplyUntilProfile(ref remaining, states, _ => { }, ref index) is { } id)
             {
                 activateProfile(id);
             }
 
-            return (state, null);
+            return (states[0], null);
         }
         catch (Exception e) when (e is ArgumentException or JsonException or KeyNotFoundException)
         {
-            return (state, ErrorMessage(e));
+            return (states[0], ErrorMessage(e));
         }
     }
 
@@ -35,18 +37,39 @@ internal static class NativeCommands
         ? Text.Pick("Invalid trigger configuration.", "Tetik yapılandırması geçersiz.")
         : error.Message;
 
-    public static string? ApplyUntilProfile(ref JsonElement.ArrayEnumerator remaining, ref UdpState state)
+    public static string? ApplyUntilProfile(ref JsonElement.ArrayEnumerator remaining, UdpState[] states,
+        Action<int> addressed, ref int index, Func<int, bool>? connected = null)
     {
         while (remaining.MoveNext())
         {
             JsonElement command = remaining.Current;
+            index = 0;
             string name = ReadString(command, "cmd");
+            bool targeted = command.TryGetProperty("controller", out _);
+            index = targeted ? ReadByte(command, "controller", 3) : 0;
             if (name == "profile")
             {
-                return ReadString(command, "id");
+                string id = ReadString(command, "id");
+                addressed(index);
+                return id;
             }
 
-            state = ApplyCommand(name, command, state);
+            if (name == "reset" && !targeted)
+            {
+                Array.Fill(states, UdpState.Empty);
+            }
+            else
+            {
+                UdpState next = ApplyCommand(name, command, states[index]);
+                if (name is not ("status" or "reset") && index > 0 && connected?.Invoke(index) == false)
+                {
+                    throw new ArgumentException(Text.Pick("Secondary controller is not connected.", "İkincil kontrolcü bağlı değil."));
+                }
+
+                states[index] = next;
+            }
+
+            addressed(index);
         }
 
         return null;

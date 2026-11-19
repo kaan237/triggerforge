@@ -33,7 +33,8 @@ internal sealed class TactileApp : ApplicationContext
     private readonly EventWaitHandle _restoreSignal;
     private readonly EventWaitHandle _restoredSignal;
     private readonly RegisteredWaitHandle _restoreWait;
-    private volatile InputState? _pendingInput;
+    private volatile PrimarySample? _pendingInput;
+    private sealed record PrimarySample(ControllerSlot Slot, InputState State);
     private Battery? _battery;
     private bool _toldAboutTray;
     private bool _exiting;
@@ -55,8 +56,10 @@ internal sealed class TactileApp : ApplicationContext
         _tray.SetProfiles(_core.Profiles.All, _core.ActiveProfile.Id);
         UpdateTrayStatus();
 
-        _core.Controllers.Input += OnInput;
+        _core.Controllers.PrimaryInput += OnInput;
         _core.Controllers.ConnectionChanged += OnConnection;
+        _core.Controllers.SlotConnected += OnSlotConnected;
+        _core.Controllers.SlotDisconnected += OnSlotDisconnected;
         _core.ActiveProfileChanged += OnActiveProfile;
         _core.Profiles.Changed += OnProfiles;
         _core.Settings.Changed += OnSettings;
@@ -81,6 +84,7 @@ internal sealed class TactileApp : ApplicationContext
             _window.Bridge.PostUpdateStatus();
             if (_window.OnScreen)
             {
+                _window.Bridge.PostStatus();
                 _window.Bridge.PostEmulation();
                 _window.Bridge.PostIntegration();
             }
@@ -211,14 +215,38 @@ internal sealed class TactileApp : ApplicationContext
         }
     }
 
-    private void OnInput(InputState s) => _pendingInput = s;
+    private void OnInput(ControllerSlot slot, InputState state) => _pendingInput = new(slot, state);
 
-    private void OnConnection(DualSenseController? c) => Ui(() =>
+    private void OnConnection(DualSenseController? c)
     {
-        _battery = null;
-        _window.Bridge.PostStatus();
-        UpdateTrayStatus();
-    });
+        Ui(() =>
+        {
+            if (!ReferenceEquals(c, _core.Controllers.Controller))
+            {
+                return;
+            }
+
+            _battery = null;
+            _window.Bridge.PostStatus();
+            UpdateTrayStatus();
+        });
+    }
+
+    private void OnSlotConnected(ControllerSlot slot)
+    {
+        if (slot.Index > 0)
+        {
+            Ui(_window.Bridge.PostStatus);
+        }
+    }
+
+    private void OnSlotDisconnected(int index)
+    {
+        if (index > 0)
+        {
+            Ui(_window.Bridge.PostStatus);
+        }
+    }
 
     private void OnActiveProfile() => Ui(() =>
     {
@@ -301,9 +329,9 @@ internal sealed class TactileApp : ApplicationContext
 
     private void FlushInput()
     {
-        InputState? s = Interlocked.Exchange(ref _pendingInput, null);
-        if (s is not null)
+        if (Interlocked.Exchange(ref _pendingInput, null) is { } sample && _core.Controllers.IsCurrent(sample.Slot))
         {
+            InputState s = sample.State;
             if (_battery != s.Battery)
             {
                 _battery = s.Battery;
@@ -312,7 +340,7 @@ internal sealed class TactileApp : ApplicationContext
 
             if (_window.OnScreen)
             {
-                _window.Bridge.PostInput(s);
+                _window.Bridge.PostInput(sample.Slot, s);
             }
         }
 
@@ -377,8 +405,10 @@ internal sealed class TactileApp : ApplicationContext
         }
 
         _window.Bridge.RestoreRequested -= RestoreController;
-        _core.Controllers.Input -= OnInput;
+        _core.Controllers.PrimaryInput -= OnInput;
         _core.Controllers.ConnectionChanged -= OnConnection;
+        _core.Controllers.SlotConnected -= OnSlotConnected;
+        _core.Controllers.SlotDisconnected -= OnSlotDisconnected;
         _core.ActiveProfileChanged -= OnActiveProfile;
         _core.Profiles.Changed -= OnProfiles;
         _core.Settings.Changed -= OnSettings;

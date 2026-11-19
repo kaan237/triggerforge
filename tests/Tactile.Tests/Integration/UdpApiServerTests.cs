@@ -36,18 +36,25 @@ public sealed class UdpApiServerTests
         Assert.Equal(OutputState.Default.Lightbar, fixture.Output.Lightbar);
         Assert.True(fixture.Server.Status.Holding);
 
-        fixture.Controller = default;
         fixture.Advance(10);
         JsonElement dsx = await Reply(client, Dsx);
         Assert.Equal("TriggerForge: commands received", dsx.GetProperty("Status").GetString());
         Assert.True(DateTime.TryParse(dsx.GetProperty("TimeReceived").GetString(), out _));
-        Assert.False(dsx.GetProperty("isControllerConnected").GetBoolean());
-        Assert.Equal(0, dsx.GetProperty("BatteryLevel").GetInt32());
+        Assert.True(dsx.GetProperty("isControllerConnected").GetBoolean());
+        Assert.Equal(76, dsx.GetProperty("BatteryLevel").GetInt32());
         Assert.Equal(new Rgb(5, 8, 13), fixture.Output.Lightbar);
         Assert.Equal(55, fixture.Output.RumbleLeft);
         Assert.Equal(UdpFormat.Dsx, fixture.Server.Status.Format);
         Assert.Equal(2, fixture.Server.Status.Packets);
         Assert.Equal(1, fixture.Server.Status.Unsupported);
+
+        fixture.Controller = default;
+        fixture.Advance(10);
+        JsonElement absent = await Reply(client, Dsx.Replace("5,8,13", "1,2,3"));
+        Assert.False(absent.GetProperty("isControllerConnected").GetBoolean());
+        Assert.Equal(0, absent.GetProperty("BatteryLevel").GetInt32());
+        Assert.Equal(new Rgb(5, 8, 13), fixture.Output.Lightbar);
+        Assert.Equal(3, fixture.Server.Status.Unsupported);
     }
 
     [Fact]

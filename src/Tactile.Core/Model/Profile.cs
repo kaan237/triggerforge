@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Tactile.Audio;
 using Tactile.Core.Integration;
 using Tactile.Device.DualSense;
@@ -74,6 +75,9 @@ public sealed record PlayerLedConfig
     public PlayerLedMode Mode { get; init; } = PlayerLedMode.Number;
     /// <summary>1-4.</summary>
     public int Number { get; init; } = 1;
+    /// <summary>Null keeps legacy player-1 profiles in automatic mode.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Automatic { get; init; }
     /// <summary>5 bits, bit 0 = leftmost LED.</summary>
     public int Mask { get; init; }
 }

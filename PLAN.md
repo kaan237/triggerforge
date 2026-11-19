@@ -431,6 +431,17 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 - Edge: arka kollar, Fn tuşu, controller içi profiller, tetik stop seviyeleri, analog modül.
 - Aynı anda 2-4 controller: her biri ayrı profil, ayrı sanal cihaz, ayrı oyuncu LED'i.
 
+**Faz 8 sonucu (2026-11-19, 0.9.0 kodu; donanımda denenmedi, yayınlanmadı)**
+- Sözleşme `docs/contract-phase8.md` (plan-audit: ilk karar REVİZYON GEREKLİ, düzeltildi → ONAYLANABİLİR). 1. iş (çekirdek) ve 2. iş (arayüz) aynı anda, 3. iş (yuva başına sanal controller) ardından; yanında iki salt okunur Codex denetimi.
+- En çok 4 controller. Yuva 0 = birincil: bugünkü her özellik. Yuva 1-3 = ikincil: kendi profili (controller'a göre varsayılan ya da birincilin profili, oturumluk seçim), ışık, tetikler, oyuncu LED'i, mikrofon LED'i, UDP komutları ve kendi sanal controller'ı (Xbox 360 / DualSense, yalnız HID, ses yok). Tuş atama, makro, haptik, hoparlör, telemetri yalnız birincilde.
+- Birincil seçimi (`primaryController`, "Birincil yap"), otomatik oyuncu LED'leri (konsol desenleri `0x04/0x0A/0x15/0x1B`, profilde açık seçim kazanır), `maxControllers` (1 = eski davranış, ikincil kod hiç çalışmaz; geri alma anahtarı). Hiç controller yokken bağlanan her controller birincil olur.
+- UDP: DSX'in controller indeksi ve kendi biçimimizde `controller` alanı yuvayı seçer; durum yuva başına ve yuvadaki controller'a bağlı.
+- Edge: Fn kısayolları (FnL+R1/L1 sonraki/önceki profil, FnR+üçgen/daire/çarpı/kare profil 1-4), arayüzde "DualSense Edge" ve FnL/FnR/L4/R4. Controller içi profiller, tetik stop seviyeleri ve analog modül desteklenmiyor (açık protokol bilgisi yok, `docs/protocol.md` "DualSense Edge").
+- Denetimler: Faz 8 denetimi 9 bulgu (kilit altında HID yazımı, yuva yeniden kullanımında UDP durumu, tercih edilen birincilin geri gelmesi, yanlış controller'a profil, birincil değişince gyro kalibrasyonu, kapanışta süren tarama, terfide Edge kısayolunun yeniden tetiklenmesi, açık Player 1 LED'i, arayüzde eski giriş) ve benim incelemem 1 bulgu (tek controller kullanıcısı controller değiştirince ikincil yuvaya düşüyordu): hepsi düzeltildi, her biri için test var.
+- 7b güvenlik denetimi 6 bulgu: 4'ü düzeltildi (yolun her bileşeninde yönlendirme kontrolü; installer imzası artık WinVerifyTrust ile açık dosya üzerinde doğrulanıyor, yalnız "güvenilmeyen kök" kabul; yayın betiği eski/imzasız installer'ı reddediyor; yönetici olarak çalışan uygulama güncellemeden sonra yönetici olarak yeniden açılmıyor). 2'si bırakıldı: eski imzalı manifestin yeniden oynatılması (yalnız GitHub'ın TLS'li alan adları kabul edildiği için pratikte GitHub repo erişimi gerektirir) ve aynı oturumda mutex adını tutan kötü niyetli işlem (zaten kullanıcı yetkisinde çalışan bir yazılım, etkisi yalnız güncellemenin ertelenmesi).
+- Testler 620/620. Arayüzde iki controller (biri Edge), birincil değişimi, ayarlar ve sanal controller yuvaları iki dilde simülasyonla denendi.
+- 0.9.0 yayınlanmadı: çoklu controller kodu controller taramasını değiştiriyor ve donanımda denenmedi. KH tek controller ile denedikten sonra `build/release.ps1` ile yayınlanacak.
+
 ### Faz 9 — Yedek yol: Pico 2 W köprü (isteğe bağlı)
 
 Faz 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse: Pico 2 W firmware'i ile gerçek USB DualSense görünümü; uygulama aynı UI ve profil motoruyla Pico'yu yönetir. Referans: DS5Dongle (MIT).

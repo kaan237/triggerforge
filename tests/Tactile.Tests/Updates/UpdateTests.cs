@@ -198,7 +198,7 @@ public sealed class UpdateTests
     {
         using var fixture = new Fixture();
         fixture.InstallerResponse = wrongSize ? [1, 2] : correctHash ? fixture.Installer : [3, 2, 1];
-        using UpdateService service = fixture.Create(signerMatches: _ => false);
+        using UpdateService service = fixture.Create(signerMatches: (_, _) => false);
 
         await service.CheckAsync();
         await service.DownloadAsync();
@@ -374,10 +374,10 @@ public sealed class UpdateTests
             Signature = _key.SignData(Manifest, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
         }
 
-        public UpdateService Create(bool portable = false, Func<string, bool>? signerMatches = null) =>
+        public UpdateService Create(bool portable = false, Func<FileStream, string, bool>? signerMatches = null) =>
             new(DirectoryPath, portable, new Version(0, 8, 0, 42),
                 new UpdateClient("0.8.0", new FakeHttp(this), _key.ExportSubjectPublicKeyInfo()),
-                signerMatches ?? (_ => true));
+                signerMatches ?? ((_, _) => true));
 
         private HttpResponseMessage Respond(HttpRequestMessage request)
         {

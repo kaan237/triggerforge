@@ -50,7 +50,26 @@ function Trigger({ value, label }: { value: number; label: string }) {
   );
 }
 
-export function Live({ input }: { input: Input | null }) {
+const edgeButtons = [
+  { id: "Fn1", label: "FnL" },
+  { id: "Fn2", label: "FnR" },
+  { id: "PaddleLeft", label: "L4" },
+  { id: "PaddleRight", label: "R4" },
+];
+
+export function EdgeButtons({ input }: { input: Input | null }) {
+  return (
+    <div className="chips edge-buttons">
+      {edgeButtons.map(({ id, label }) => {
+        const pressed = input?.buttons.includes(id) ?? false;
+        const state = pressed ? L("pressed", "basılı") : L("released", "bırakıldı");
+        return <span key={id} className={pressed ? "chip on" : "chip"} role="img" aria-label={`${label}, ${state}`}>{label}</span>;
+      })}
+    </div>
+  );
+}
+
+export function Live({ input, edge = false }: { input: Input | null; edge?: boolean }) {
   if (!input) {
     return <div className="panel live muted-text">{L("Waiting for input…", "Veri bekleniyor…")}</div>;
   }
@@ -90,6 +109,8 @@ export function Live({ input }: { input: Input | null }) {
           </span>
         ))}
       </div>
+
+      {edge && <EdgeButtons input={input} />}
 
       <div className="live-row bottom">
         <div className="touchpad" aria-label={L("Touchpad", "Dokunmatik yüzey")}>

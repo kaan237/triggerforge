@@ -48,6 +48,9 @@ public sealed class AppCore : IDisposable
     private StickProcessor _rightStick;
     private OutputState? _lastOutput;
     private InputState? _latestInput;
+    private readonly Lock _primaryInputLock = new();
+    private ControllerSlot? _inputSlot;
+    private string? _gyroDevice;
     private GyroCalibrator? _calibrator;
     private TimeSpan _calibrationStarted;
     private Vector3 _gyroBias;
@@ -73,6 +76,7 @@ public sealed class AppCore : IDisposable
     private readonly EmulationService? _emulation;
     private readonly UdpApiServer _udpApi;
     private readonly TelemetryListener _telemetry;
+    private volatile SecondaryControllers? _secondary;
     private (DualSenseController? Source, RealController? Value) _real;
 
     /// <param name="platform">Keyboard, mouse, microphone and launcher; null = <see cref="InputPlatform.None"/> (no output).</param>
@@ -80,8 +84,9 @@ public sealed class AppCore : IDisposable
     /// <param name="server">USB/IP server; null with drivers set = drivers shown, no virtual pad.</param>
     public AppCore(string? dataDir = null, IForegroundSource? foreground = null, InputPlatform? platform = null,
         DriverPlatform? drivers = null, IUsbIpServer? server = null, IAudioSystem? audio = null, bool portable = false)
-        : this(dataDir, foreground, new ControllerService(autoConnect: true, drivers is null ? null : drivers.Tree.IsVirtual),
-            TimeProvider.System, runTimer: true, platform, drivers, server, audio: audio, audioDefaults: new AudioDefaults(), portable: portable)
+        : this(dataDir, foreground, new ControllerService(autoConnect: false, drivers is null ? null : drivers.Tree.IsVirtual),
+            TimeProvider.System, runTimer: true, platform, drivers, server, audio: audio, audioDefaults: new AudioDefaults(),
+            portable: portable, scanControllers: true)
     {
     }
 
@@ -91,7 +96,7 @@ public sealed class AppCore : IDisposable
     /// </param>
     internal AppCore(string? dataDir, IForegroundSource? foreground, ControllerService controllers, TimeProvider time, bool runTimer,
         InputPlatform? platform = null, DriverPlatform? drivers = null, IUsbIpServer? server = null, Func<bool>? steamRunning = null,
-        IAudioSystem? audio = null, IAudioDefaults? audioDefaults = null, bool portable = false)
+        IAudioSystem? audio = null, IAudioDefaults? audioDefaults = null, bool portable = false, bool scanControllers = false)
     {
         _time = time;
         _platform = platform ?? InputPlatform.None;
@@ -140,24 +145,77 @@ public sealed class AppCore : IDisposable
         ApplyTriggers(_active.Profile);
         _mapper.Configure(_active.Profile);
 
-        _udpApi = new UdpApiServer(Now, layer => SetOutputLayerNow(IntegrationLayers.Udp, layer),
-            ActivateProfile, GetUdpControllerStatus, _outbox.Enqueue);
+        _udpApi = new UdpApiServer(Now, (index, layer) =>
+        {
+            if (index == 0)
+            {
+                SetOutputLayerNow(IntegrationLayers.Udp, layer);
+            }
+        }, SetControllerProfile, GetUdpControllerStatus, _outbox.Enqueue, getSlots: () => Controllers.Slots);
         _telemetry = new TelemetryListener(Now, () => ActiveProfile.Telemetry,
             layer => SetOutputLayerNow(IntegrationLayers.Telemetry, layer), _outbox.Enqueue);
         _foreground.Changed += OnForeground;
         Profiles.Changed += Refresh;
         Settings.Changed += OnSettingsChanged;
-        Controllers.Input += OnInput;
+        Controllers.PrimaryInput += OnPrimaryInput;
         Controllers.ConnectionChanged += OnConnection;
+        ConfigureControllers();
         ConfigureIntegration();
 
         if (runTimer)
         {
             _timer = new Timer(_ => TimerTick(), null, TimeSpan.Zero, TickInterval);
         }
+
+        if (scanControllers)
+        {
+            Controllers.StartScanning();
+        }
     }
 
     public ControllerService Controllers { get; }
+
+    public SecondaryControllers? SecondaryControllers => _secondary;
+
+    public Profile ProfileForController(ControllerSlot slot) =>
+        _secondary?.GetProfile(slot) ?? ActiveProfile;
+
+    public void SetPrimaryController(string mac)
+    {
+        if (Validation.NormalizeMac(mac) is not { } selected)
+        {
+            throw new ArgumentException(Text.Pick("Invalid controller MAC address.", "Kontrolcü MAC adresi geçersiz."));
+        }
+
+        Settings.Save(Settings.Current with { PrimaryController = selected });
+        // The saved MAC may already match when the controller first appeared in a secondary slot.
+        Controllers.SelectPrimary(selected);
+    }
+
+    public void SetSecondaryProfile(int index, string id)
+    {
+        if (_secondary is not { } secondary)
+        {
+            throw new ArgumentException(Text.Pick("Secondary controller is not connected.", "İkincil kontrolcü bağlı değil."));
+        }
+
+        secondary.SetProfile(index, id);
+    }
+
+    public bool TrySetSecondaryProfile(int index, string mac, string id) =>
+        _secondary?.SetProfile(index, id, mac) == true;
+
+    private void SetControllerProfile(int index, string id)
+    {
+        if (index == 0)
+        {
+            ActivateProfile(id);
+        }
+        else
+        {
+            SetSecondaryProfile(index, id);
+        }
+    }
 
     public HapticStatus Haptics => _haptics.Status;
 
@@ -371,11 +429,15 @@ public sealed class AppCore : IDisposable
     /// <summary>Hold the controller still for 3 s. Progress and result arrive as notices.</summary>
     public void StartGyroCalibration()
     {
-        lock (_lock)
+        lock (_primaryInputLock)
         {
-            _calibrationStarted = Now();
-            _calibrator = new GyroCalibrator(progress: p =>
-                _outbox.Enqueue(new Notice(NoticeKinds.GyroCalibration, Text.Pick("Calibrating gyro. Keep the controller still.", "Gyro kalibrasyonu sürüyor; kontrolcüyü oynatmayın."), p)));
+            SynchronizePrimary(Controllers.PrimarySlot);
+            lock (_lock)
+            {
+                _calibrationStarted = Now();
+                _calibrator = new GyroCalibrator(progress: p =>
+                    _outbox.Enqueue(new Notice(NoticeKinds.GyroCalibration, Text.Pick("Calibrating gyro. Keep the controller still.", "Gyro kalibrasyonu sürüyor; kontrolcüyü oynatmayın."), p)));
+            }
         }
 
         _outbox.Enqueue(new Notice(NoticeKinds.GyroCalibration, Text.Pick("Gyro calibration started.", "Gyro kalibrasyonu başladı."), 0));
@@ -413,9 +475,10 @@ public sealed class AppCore : IDisposable
         _emulation?.Dispose();
         _disposed = true;
         _timer?.Dispose();
+        _secondary?.Dispose();
         _foreground.Changed -= OnForeground;
         Profiles.Changed -= Refresh;
-        Controllers.Input -= OnInput;
+        Controllers.PrimaryInput -= OnPrimaryInput;
         Controllers.ConnectionChanged -= OnConnection;
         _mapper.Dispose();
         if (_ownsForeground && _foreground is IDisposable d)
@@ -440,7 +503,7 @@ public sealed class AppCore : IDisposable
         long version = 0;
         Profile activeProfile;
         AppSettings activeSettings;
-        DualSenseController? activeController;
+        ControllerSlot? activeSlot;
         lock (_lock)
         {
             if (_disposed)
@@ -449,10 +512,10 @@ public sealed class AppCore : IDisposable
             }
 
             AppSettings settings = Settings.Current;
-            DualSenseController? controller = Controllers.Controller;
+            activeSlot = Controllers.PrimarySlot;
+            DualSenseController? controller = activeSlot?.Controller;
             string? mac = controller?.Details.MacAddress;
             activeSettings = settings;
-            activeController = controller;
 
             ProfileSelection selection = _selector.Select(_foreground.Current, Profiles.All, settings, mac, now);
             if (!ReferenceEquals(selection.Profile, _active.Profile) || selection.Reason != _active.Reason)
@@ -504,7 +567,8 @@ public sealed class AppCore : IDisposable
             }
         }
 
-        Send(toSend, version);
+        Send(toSend, version, activeSlot);
+        _secondary?.Update(now, activeProfile, activeSettings);
         lock (_hapticsLock)
         {
             if (!_disposed)
@@ -514,7 +578,10 @@ public sealed class AppCore : IDisposable
             }
         }
 
-        _emulation?.Update(activeProfile, activeSettings, RealOf(activeController));
+        if (ReferenceEquals(activeSlot, Controllers.PrimarySlot))
+        {
+            _emulation?.Update(activeProfile, activeSettings, RealOf(activeSlot?.Controller));
+        }
 
         if (sleepMac is not null)
         {
@@ -527,7 +594,7 @@ public sealed class AppCore : IDisposable
     }
 
     /// <summary>Writes a computed state unless a newer one was computed meanwhile. True when the controller write went out.</summary>
-    private bool Send(OutputState? toSend, long version)
+    private bool Send(OutputState? toSend, long version, ControllerSlot? slot)
     {
         if (toSend is null)
         {
@@ -537,7 +604,7 @@ public sealed class AppCore : IDisposable
         lock (_sendLock)
         {
             // A newer tick may have computed a later state already; never send an older one after it.
-            return version == Interlocked.Read(ref _outputVersion) && Controllers.SetOutputAndSend(toSend);
+            return version == Interlocked.Read(ref _outputVersion) && Controllers.SetOutputAndSend(toSend, slot);
         }
     }
 
@@ -549,6 +616,7 @@ public sealed class AppCore : IDisposable
     {
         OutputState? toSend = null;
         long version = 0;
+        ControllerSlot? slot;
         lock (_lock)
         {
             if (_disposed)
@@ -557,6 +625,7 @@ public sealed class AppCore : IDisposable
             }
 
             SetLayerLocked(key, layer);
+            slot = Controllers.PrimarySlot;
             OutputState output = Build(Now());
             if (!output.Equals(_lastOutput))
             {
@@ -566,7 +635,7 @@ public sealed class AppCore : IDisposable
             }
         }
 
-        return Send(toSend, version);
+        return Send(toSend, version, slot);
     }
 
     private void SetLayerLocked(string key, Func<OutputState, OutputState>? layer)
@@ -610,21 +679,48 @@ public sealed class AppCore : IDisposable
         return real;
     }
 
-    internal void OnInput(InputState s)
+    internal void OnInput(InputState s) => OnPrimaryInput(Controllers.PrimarySlot, s);
+
+    private void OnPrimaryInput(ControllerSlot? slot, InputState s)
     {
         TimeSpan now = Now();
-        bool firstInput;
-        Vector3 gyro;
-        lock (_lock)
+        bool refresh;
+        lock (_primaryInputLock)
         {
-            if (_disposed)
+            if (_disposed || !ReferenceEquals(slot, Controllers.PrimarySlot))
             {
                 return;
             }
 
+            SynchronizePrimary(slot);
+            refresh = ProcessPrimaryInput(slot, s, now);
+        }
+
+        if (refresh)
+        {
+            Refresh();
+        }
+
+        Flush();
+    }
+
+    private bool ProcessPrimaryInput(ControllerSlot? slot, InputState s, TimeSpan now)
+    {
+        bool firstInput;
+        Vector3 gyro;
+        EdgeShortcut? shortcut;
+        lock (_lock)
+        {
+            if (_disposed || !ReferenceEquals(slot, Controllers.PrimarySlot))
+            {
+                return false;
+            }
+
             firstInput = _latestInput is null;
+            shortcut = Settings.Current.EdgeShortcuts && slot is not null && _latestInput is { } previous
+                ? EdgeShortcuts.Read(slot.Controller.Details.Model, previous.Buttons, s.Buttons) : null;
             _latestInput = s;
-            ImuCalibration imu = Controllers.Controller?.Details.Calibration ?? ImuCalibration.Identity;
+            ImuCalibration imu = slot?.Controller.Details.Calibration ?? ImuCalibration.Identity;
             gyro = GyroCalibrationResult.Apply(imu.GyroDegPerSec(s.GyroRaw), _gyroBias);
             _idle.Observe(s, now);
 
@@ -635,12 +731,16 @@ public sealed class AppCore : IDisposable
 
             if (_calibrator is not null)
             {
-                ImuCalibration cal = Controllers.Controller?.Details.Calibration ?? ImuCalibration.Identity;
-                if (_calibrator.Add(cal.GyroDegPerSec(s.GyroRaw), now) is { } result)
+                if (_calibrator.Add(imu.GyroDegPerSec(s.GyroRaw), now) is { } result)
                 {
                     Finish(result);
                 }
             }
+        }
+
+        if (!ReferenceEquals(slot, Controllers.PrimarySlot))
+        {
+            return false;
         }
 
         _haptics.Observe(s);
@@ -652,8 +752,26 @@ public sealed class AppCore : IDisposable
             UpdateMapping();
         }
 
+        if (!ReferenceEquals(slot, Controllers.PrimarySlot))
+        {
+            return false;
+        }
+
         _mapper.OnInput(s, gyro, now);
-        Flush();
+        if (shortcut is { } action && EdgeShortcuts.Resolve(action, Profiles.All, ActiveProfile.Id) is { } profile)
+        {
+            lock (_lock)
+            {
+                if (ReferenceEquals(slot, Controllers.PrimarySlot) && Profiles.Get(profile.Id) is not null)
+                {
+                    _selector.Pin(profile.Id);
+                    _outbox.Enqueue(EdgeShortcuts.Changed(profile, 0));
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void Finish(GyroCalibrationResult result)
@@ -672,21 +790,8 @@ public sealed class AppCore : IDisposable
 
     private OutputState Build(TimeSpan now)
     {
-        Profile p = _active.Profile;
-        (Rgb color, LedBrightness brightness) = LightbarEngine.Evaluate(
-            p.Lightbar, now.TotalSeconds, _latestInput?.Battery.Percent, p.PlayerLeds.Number);
-
-        OutputState o = OutputState.Default with
-        {
-            Lightbar = color,
-            Brightness = brightness,
-            PlayerLeds = PlayerLeds.Mask(p.PlayerLeds),
-            MicLed = p.MicLed,
-            LeftTrigger = _leftEffect,
-            RightTrigger = _rightEffect,
-            RumbleLeft = 0,
-            RumbleRight = 0,
-        };
+        OutputState o = ProfileOutput.Build(_active.Profile, (_leftEffect, _rightEffect), now,
+            _latestInput?.Battery.Percent, Settings.Current.AutoPlayerLeds && Controllers.Slots.Count >= 2 ? 1 : null);
 
         foreach ((string _, Func<OutputState, OutputState> layer) in _overrides.OrderBy(kv => IntegrationLayers.Order(kv.Key)))
         {
@@ -698,17 +803,36 @@ public sealed class AppCore : IDisposable
 
     private void ApplyTriggers(Profile p)
     {
-        // Stored profiles are validated, so these only fall back for hand-edited files.
-        Triggers.TryToEffect(p.Triggers.Left, out _leftEffect, out _);
-        Triggers.TryToEffect(p.Triggers.Right, out _rightEffect, out _);
+        (_leftEffect, _rightEffect) = ProfileOutput.TriggersFor(p);
     }
 
     private void OnSettingsChanged()
     {
         // First, so everything this change produces is already in the new language.
         Text.Current = Settings.Current.Language;
+        ConfigureControllers();
         ConfigureIntegration();
         Refresh();
+    }
+
+    private void ConfigureControllers()
+    {
+        AppSettings settings = Settings.Current;
+        if (settings.MaxControllers > 1)
+        {
+            _secondary ??= new SecondaryControllers(Controllers, Profiles, Settings, _udpApi.StateAt,
+                Now, () => ActiveProfile, Refresh, Queue);
+        }
+
+        Controllers.Configure(settings);
+        if (settings.MaxControllers == 1)
+        {
+            _secondary?.Dispose();
+            _secondary = null;
+        }
+
+        // Emulation per slot
+        _emulation?.BindSecondary(Controllers, _secondary);
     }
 
     private void ConfigureIntegration()
@@ -725,8 +849,8 @@ public sealed class AppCore : IDisposable
         _telemetry.Configure(settings);
     }
 
-    private UdpControllerStatus GetUdpControllerStatus() =>
-        Controllers.Controller is { Connected: true } controller
+    private UdpControllerStatus GetUdpControllerStatus(int index) =>
+        Controllers.Slots.FirstOrDefault(s => s.Index == index)?.Controller is { Connected: true } controller
             ? new(controller.Details.Link, controller.Latest?.Battery.Percent)
             : default;
 
@@ -868,14 +992,51 @@ public sealed class AppCore : IDisposable
 
     internal void OnConnection(DualSenseController? controller)
     {
-        lock (_lock)
+        lock (_primaryInputLock)
         {
-            _idle.Reset(Now());
-            _battery.Reset();
-            _latestInput = null;
+            ControllerSlot? slot = Controllers.PrimarySlot;
+            if (_disposed || !ReferenceEquals(controller, slot?.Controller))
+            {
+                return;
+            }
+
+            SynchronizePrimary(slot, disconnected: slot is null);
         }
 
         Refresh();
+    }
+
+    private void SynchronizePrimary(ControllerSlot? slot, bool disconnected = false)
+    {
+        if (ReferenceEquals(_inputSlot, slot) && !disconnected)
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            _inputSlot = slot;
+            _idle.Reset(Now());
+            _battery.Reset();
+            _latestInput = null;
+            _lastOutput = null;
+            if (_calibrator is not null)
+            {
+                Finish(_calibrator.Fail(Text.Pick("Gyro calibration cancelled because the primary controller changed.", "Birincil kontrolcü değiştiği için gyro kalibrasyonu iptal edildi.")));
+            }
+
+            if (slot is not null)
+            {
+                string device = slot.Mac ?? slot.Controller.DevicePath;
+                if (!string.Equals(_gyroDevice, device, StringComparison.OrdinalIgnoreCase))
+                {
+                    _gyroBias = default;
+                    _gyroDevice = device;
+                }
+            }
+        }
+
+        _mapper.ResetController();
     }
 
     private void TimerTick()

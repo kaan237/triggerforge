@@ -51,29 +51,34 @@ internal partial class VirtualDualSense : VirtualUsbDevice
     private byte _sequence;
 
     private readonly bool _audio;
+    private static readonly byte[] DeviceWithSerial = WithSerial();
 
-    public VirtualDualSense(UsbIpServer server, int busNum, DualSenseIdentity? identity)
-        : this(server, busNum, identity, audio: false)
+    public VirtualDualSense(UsbIpServer server, int busNum, DualSenseIdentity? identity, int slot = 0)
+        : this(server, busNum, identity, audio: false, slot: slot)
     {
     }
 
-    private VirtualDualSense(UsbIpServer server, int busNum, DualSenseIdentity? identity, bool audio)
+    private VirtualDualSense(UsbIpServer server, int busNum, DualSenseIdentity? identity, bool audio, int slot = 0)
         : base(server, busNum)
     {
         _audio = audio;
+        if (slot != 0)
+        {
+            Strings = [.. Strings, SecondaryPads.Serial(slot)];
+        }
         foreach ((byte id, int size) in FeatureSizes)
         {
             _features[id] = Feature(id, size, null);
         }
 
         _features[0x05] = Feature(0x05, 41, identity?.Calibration ?? DefaultCalibration());
-        _features[0x09] = Feature(0x09, 20, identity?.Pairing ?? DefaultPairing());
+        _features[0x09] = Feature(0x09, 20, identity?.Pairing ?? DefaultPairing(slot));
         _features[0x20] = Feature(0x20, 64, identity?.Firmware);
     }
 
     public override VirtualKind Kind => VirtualKind.DualSense;
     public override int Speed => _audio ? SpeedFull : SpeedHigh;
-    public override byte[] DeviceDescriptor => Device;
+    public override byte[] DeviceDescriptor => Strings.Length == 3 ? DeviceWithSerial : Device;
     public override byte[] ConfigDescriptor => _audio ? AudioConfig : Config;
     public override int InEndpoint => 4;
     public override int OutEndpoint => 3;
@@ -260,10 +265,17 @@ internal partial class VirtualDualSense : VirtualUsbDevice
     }
 
     // Stable, locally administered fake MAC (stored reversed), then the two bytes seen after it.
-    private static byte[] DefaultPairing()
+    private static byte[] WithSerial()
+    {
+        byte[] descriptor = (byte[])Device.Clone();
+        descriptor[16] = 3;
+        return descriptor;
+    }
+
+    private static byte[] DefaultPairing(int slot)
     {
         byte[] f = new byte[20];
-        byte[] mac = [0x02, 0x54, 0x41, 0x43, 0x54, 0x01];
+        byte[] mac = [0x02, 0x54, 0x41, 0x43, 0x54, (byte)(slot + 1)];
         for (int i = 0; i < 6; i++)
         {
             f[1 + i] = mac[5 - i];

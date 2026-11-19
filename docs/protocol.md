@@ -281,3 +281,17 @@ presents a virtual USB DualSense:
 
 Disconnect a controller (idle sleep): `IOCTL_BTH_DISCONNECT_DEVICE`
 (`0x0041000C`) on a radio handle with the 6-byte address.
+
+## DualSense Edge
+
+| Fact | Value | Source |
+|---|---|---|
+| Identity | VID `054C`, PID `0DF2` | Linux `hid-playstation.c`; DualSenseClient `ControllerFactory.cs` |
+| Extra buttons | input byte 9: FnL `0x10`, FnR `0x20`, left rear (L4) `0x40`, right rear (R4) `0x80` | DualSenseClient `DualSense/Input/InputState.cs` (byte 9 properties) |
+| USB output report `0x02` | 64 bytes on the wire (63 + ID); our writer pads every report to the device's output report length, so no Edge case is needed | DualSenseClient `DualSense/Output/OutputReport.cs`; our `DualSenseController.Write` |
+| Player LED patterns (console) | player 1 `0x04`, 2 `0x0A`, 3 `0x15`, 4 `0x1B` (5 LEDs, bit 0 = left outer) | Linux `hid-playstation.c` player id table |
+
+**Not supported (phase 8), no public verifiable protocol facts:** profiles stored on the
+controller, trigger stop levels (mechanical switches, not reported in input), the replaceable
+stick module's data. The Edge's Fn buttons on PC arrive as plain buttons; TriggerForge uses
+them for its own profile shortcuts (`docs/contract-phase8.md`).

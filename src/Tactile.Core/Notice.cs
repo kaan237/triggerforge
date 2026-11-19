@@ -4,6 +4,8 @@ namespace Tactile.Core;
 /// <param name="Progress">0-1 for long running work, otherwise null.</param>
 public sealed record Notice(string Kind, string Message, double? Progress = null)
 {
+    public int? Controller { get; init; }
+
     public Notice(string kind, string en, string tr) : this(kind, Text.Pick(en, tr)) => EnglishMessage = en;
 
     internal string EnglishMessage { get; } = Message;

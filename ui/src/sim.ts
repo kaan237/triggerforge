@@ -1,8 +1,8 @@
 import { L } from "./i18n";
 // Browser-only stand-in for the host. Keeps profiles and settings in memory and fakes
-// a controller so every screen can be used without hardware.
+// controller input so every screen can be used without hardware.
 
-import type { Action, AppSettings, AudioApp, Binding, DriverKind, DriverState, EmulationStatus, HapticStatus, HostMessage, Output, Profile, TelemetryConfig, TelemetryRule, TelemetryValues, TriggerConfig, UdpStatus, UpdateStatus } from "./host";
+import type { Action, AppSettings, AudioApp, Binding, ControllerStatus, DriverKind, DriverState, EmulationStatus, HapticStatus, HostMessage, Output, Profile, TelemetryConfig, TelemetryRule, TelemetryValues, TriggerConfig, UdpStatus, UpdateStatus } from "./host";
 import {
   clone,
   defaultBinding,
@@ -106,17 +106,25 @@ function sampleTelemetry(time: number): TelemetryValues {
 }
 
 export function createSimulator(emit: (m: HostMessage) => void) {
+  const devices = [
+    { mac: "A0:AB:51:12:34:56", model: "DualSense", link: "Bluetooth", battery: 85, charging: false },
+    { mac: "A0:AB:51:12:34:57", model: "DualSenseEdge", link: "Usb", battery: 63, charging: true },
+    { mac: "A0:AB:51:12:34:58", model: "DualSense", link: "Bluetooth", battery: 48, charging: false },
+  ] satisfies Omit<ControllerStatus, "index" | "primary" | "profileId" | "profileName">[];
+  const slots: (typeof devices[number] | undefined)[] = [devices[0], devices[1], undefined, undefined];
+  const sessionProfiles = new Map<string, string>();
+  let thirdConnected = false;
   let profiles = sampleProfiles();
   let settings = normalizeSettings({
     ...defaultSettings(profiles[0].id),
-    controllerDefaults: { "A0:AB:51:12:34:56": profiles[0].id },
+    controllerDefaults: { [devices[0].mac]: profiles[0].id, [devices[1].mac]: profiles[1].id },
   });
   settings.integration = { ...settings.integration, udpEnabled: true, forzaEnabled: true };
   const previewOptions = new URLSearchParams(window.location.search);
-  const nextVersion = "0.9.0";
+  const nextVersion = "0.10.0";
   let failNextCheck = previewOptions.get("update") === "error";
   let update: UpdateStatus = {
-    type: "update.status", state: "idle", current: "0.8.0",
+    type: "update.status", state: "idle", current: "0.9.0",
     latest: null, notes: null, released: null, progress: null,
     portable: previewOptions.get("portable") === "1",
     error: null, message: null, lastCheck: null,
@@ -135,7 +143,6 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   const preview: { left: TriggerConfig | null; right: TriggerConfig | null } = { left: null, right: null };
   let reports = 0;
   let tick = 0;
-  let battery = 85;
   let mappingPaused = false;
   // Virtual controller: usbip-win2 starts missing so the install flow can be tried.
   const drivers: Record<DriverKind, { state: DriverState; version: string | null }> = {
@@ -161,22 +168,64 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     rightTrigger: "off",
   };
 
-  const status = () =>
+  function status() {
+    const primary = slots[0];
     emit({
       type: "status",
-      connected: true,
-      model: "DualSense",
-      link: "Simulated",
-      mac: "A0:AB:51:12:34:56",
-      firmware: "0x0430",
+      connected: !!primary,
+      controllers: slots.flatMap((device, index) => {
+        if (!device) return [];
+        const profile = index === 0 ? active() :
+          profiles.find((p) => p.id === sessionProfiles.get(device.mac)) ??
+          profiles.find((p) => p.id === settings.controllerDefaults[device.mac]) ??
+          active();
+        return [{ ...device, index, primary: index === 0, profileId: profile.id, profileName: profile.name }];
+      }),
+      model: primary?.model,
+      link: primary?.link,
+      mac: primary?.mac,
+      firmware: primary ? "0x0430" : undefined,
       version: update.current,
       activeProfileId: activeId,
       activeReason,
-      mapping: { active: active().mapping.enabled && !mappingPaused, paused: mappingPaused, blockedBy: null },
+      mapping: { active: !!primary && active().mapping.enabled && !mappingPaused, paused: mappingPaused, blockedBy: null },
       elevated: false,
       portable: update.portable,
     });
+  }
   const sendProfiles = () => emit({ type: "profiles", list: clone(profiles), activeId });
+
+  function syncSlots() {
+    const previousPrimary = slots[0];
+    let secondaryCount = 0;
+    for (const [index, device] of slots.entries()) {
+      if (!device) continue;
+      if ((index > 0 && secondaryCount >= settings.maxControllers - 1) || (device === devices[2] && !thirdConnected)) {
+        sessionProfiles.delete(device.mac);
+        slots[index] = undefined;
+      } else if (index > 0) {
+        secondaryCount++;
+      }
+    }
+    for (const device of thirdConnected ? devices : devices.slice(0, 2)) {
+      if (slots.includes(device)) continue;
+      if (!slots[0] && (settings.maxControllers === 1 || device.mac === settings.primaryController)) {
+        slots[0] = device;
+      } else if (secondaryCount < settings.maxControllers - 1) {
+        const index = slots.findIndex((slot, i) => i > 0 && !slot);
+        slots[index] = device;
+        secondaryCount++;
+      }
+    }
+    if (slots[0] && slots[0] !== previousPrimary) selectPrimaryProfile();
+    else status();
+  }
+
+  function selectPrimaryProfile() {
+    const id = slots[0] ? settings.controllerDefaults[slots[0].mac] : undefined;
+    if (id && profiles.some((p) => p.id === id)) activate(id, "controllerDefault");
+    else activate(settings.defaultProfileId, "default");
+  }
 
   function sendUpdate() {
     emit({
@@ -281,6 +330,17 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       drivers: (Object.keys(drivers) as DriverKind[]).map((kind) => ({ kind, state: drivers[kind].state, version: drivers[kind].version, detail: null })),
       latency: attached ? { p50Ms: 2.1 + Math.random() * 0.4, p95Ms: 3.8 + Math.random() * 0.8, samples: 512 } : { p50Ms: 0, p95Ms: 0, samples: 0 },
       error: emuError,
+      slots: [
+        { index: 0, mode: attached ? mode : "off", attached, hidden: attached && settings.emulation.hideController, error: emuError },
+        ...slots.flatMap((device, index): EmulationStatus["slots"] => {
+          if (!device || index === 0) return [];
+          const selected = profiles.find((p) => p.id === sessionProfiles.get(device.mac)) ??
+            profiles.find((p) => p.id === settings.controllerDefaults[device.mac]) ?? profile;
+          const mode = selected.emulation.mode;
+          const attached = settings.emulation.enabled && ready && mode !== "off";
+          return [{ index, mode: attached ? mode : "off", attached, hidden: attached && settings.emulation.hideController }];
+        }),
+      ],
     };
   }
 
@@ -316,7 +376,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     const t = performance.now() / 1000;
     return {
       ...output,
-      lightbar: effectColor(p.lightbar, t, battery, p.playerLeds.number),
+      lightbar: effectColor(p.lightbar, t, slots[0]?.battery ?? 0, p.playerLeds.number),
       brightness: { high: 0, medium: 1, low: 2 }[p.lightbar.brightness],
       playerLeds: ledMask(p.playerLeds),
       micLed: { off: 0, on: 1, pulse: 2 }[p.micLed],
@@ -363,6 +423,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   function simTick() {
     const t = performance.now() / 1000;
     const wave = (f: number, ph = 0) => Math.sin(t * f + ph);
+    const primary = slots[0];
     reports += 26;
     tick++;
     const buttons: string[] = [];
@@ -370,11 +431,18 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     if (wave(0.9, 2) > 0.9) buttons.push("R1");
     if (wave(0.45, 1) > 0.94) buttons.push("Up");
     if (wave(0.7, 4) > 0.95) buttons.push("Triangle");
+    if (primary?.model === "DualSenseEdge") {
+      if (wave(1.2, 1) > 0.7) buttons.push("Fn1");
+      if (wave(1.1, 3) > 0.7) buttons.push("Fn2");
+      if (wave(1.6, 2) > 0.7) buttons.push("PaddleLeft");
+      if (wave(1.4, 4) > 0.7) buttons.push("PaddleRight");
+    }
     const left: [number, number] = [128 + Math.round(wave(1.1) * 100), 128 + Math.round(wave(1.7) * 100)];
     const right: [number, number] = [128 + Math.round(wave(0.6, 1) * 60), 128 + Math.round(wave(0.8, 1) * 60)];
     const p = active();
-    emit({
+    if (primary) emit({
       type: "input",
+      mac: primary.mac,
       buttons,
       left,
       right,
@@ -383,8 +451,8 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       gyro: [wave(2) * 40, wave(1.5) * 20, wave(1) * 10],
       accel: [wave(0.3) * 0.2, 0.98, wave(0.4) * 0.15],
       touch: wave(0.4) > 0.3 ? [{ id: 1, x: 960 + Math.round(wave(1.2) * 700), y: 540 + Math.round(wave(0.9) * 400) }] : [],
-      battery,
-      charging: false,
+      battery: primary.battery,
+      charging: primary.charging,
       headphones: false,
       reports,
       badCrc: 0,
@@ -403,8 +471,9 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       sendIntegration();
     }
     // Slow drain so the low battery notice shows up once in a long session.
-    if (tick % 1800 === 0 && battery > 5) {
-      battery--;
+    if (tick % 1800 === 0 && primary && !primary.charging && primary.battery > 5) {
+      const battery = --primary.battery;
+      status();
       if (settings.lowBatteryWarnings.includes(battery)) emit({ type: "notice", kind: "lowBattery", message: L(`Battery ${battery}%`, `Pil %${battery}`) });
     }
   }
@@ -430,7 +499,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         if (i >= 0) profiles[i] = p;
         else profiles = [...profiles, p];
         sendProfiles();
-        if (p.id === activeId) status();
+        status();
         sendHaptics();
         pushOutput();
         sendEmulation();
@@ -439,9 +508,13 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       case "profile.delete": {
         if (profiles.length <= 1) return emit({ type: "error", message: L("The last profile cannot be deleted.", "Son profil silinemez.") });
         profiles = profiles.filter((p) => p.id !== m.id);
+        for (const [mac, id] of sessionProfiles) if (id === m.id) sessionProfiles.delete(mac);
         if (settings.defaultProfileId === m.id) settings = { ...settings, defaultProfileId: profiles[0].id };
         if (activeId === m.id) activate(settings.defaultProfileId, "default");
-        else sendProfiles();
+        else {
+          sendProfiles();
+          status();
+        }
         return;
       }
       case "profile.duplicate": {
@@ -502,6 +575,36 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         preview[m.side === "left" ? "left" : "right"] = (m.config as TriggerConfig | null) ?? null;
         pushOutput();
         return;
+      case "controller.setPrimary": {
+        const index = slots.findIndex((device) => device && device.mac === m.mac);
+        const device = slots[index];
+        if (!device || index === 0) return;
+        slots[index] = slots[0];
+        slots[0] = device;
+        sessionProfiles.delete(device.mac);
+        settings = { ...settings, primaryController: device.mac };
+        emit({ type: "settings", settings: clone(settings) });
+        selectPrimaryProfile();
+        sendEmulation();
+        return;
+      }
+      case "controller.setProfile": {
+        if (typeof m.index !== "number" || m.index === 0) return;
+        const device = slots[m.index];
+        if (!device || device.mac !== m.mac) return;
+        const profile = profiles.find((p) => p.id === m.profileId);
+        if (!profile) return;
+        sessionProfiles.set(device.mac, profile.id);
+        status();
+        sendEmulation();
+        return;
+      }
+      case "sim.toggleThirdController":
+        if (settings.maxControllers < 3) return;
+        thirdConnected = !thirdConnected;
+        syncSlots();
+        sendEmulation();
+        return;
       case "settings.save": {
         const before = settings.integration;
         const language = settings.language;
@@ -514,6 +617,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
           udpFormat = after.dsx ? "dsx" : "native";
         }
         emit({ type: "settings", settings: clone(settings) });
+        syncSlots();
         if (language !== settings.language) sendUpdate();
         sendEmulation();
         sendIntegration();

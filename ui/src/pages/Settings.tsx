@@ -1,6 +1,6 @@
 import { L } from "../i18n";
 import { useEffect, useState } from "react";
-import { send, subscribe, type AppSettings } from "../host";
+import { inHost, send, subscribe, type AppSettings } from "../host";
 import { Live } from "../Live";
 import { deepEqual } from "../model";
 import { Outputs } from "../Outputs";
@@ -34,15 +34,22 @@ function NumberField({ label, value, min, max, step = 1, suffix, onChange, hint 
 }
 
 function DevTools() {
-  const { output, status } = useApp();
+  const { output, status, settings } = useApp();
   const input = useInput();
   return (
     <div className="dev-tools">
       <p className="hint">{L("These test controls temporarily override the profile. Select Reset all to restore it.", "Faz 1 test ekranı. Buradaki komutlar profilin üstüne geçici olarak yazılır; “Hepsini sıfırla” profile döner.")}</p>
       <div className="controller-page">
-        <Live input={input} />
+        <Live input={input} edge={status?.model === "DualSenseEdge"} />
         <Outputs output={output} link={status?.link} />
       </div>
+      {!inHost && (
+        <div className="setting-row">
+          <button className="button" disabled={(settings?.maxControllers ?? 0) < 3} onClick={() => send({ type: "sim.toggleThirdController" })}>
+            {L("Toggle third simulated controller", "Üçüncü simüle kontrolcüyü bağla veya ayır")}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -72,12 +79,14 @@ export function Settings() {
     setDraft({ ...draft, ...patch });
   };
   const save = () => {
-    send({ type: "settings.save", settings: draft });
+    send({ type: "settings.save", settings: { ...draft, primaryController: settings.primaryController } });
     setTouched(false);
   };
 
-  const mac = status?.connected ? status.mac : undefined;
-  const macs = Array.from(new Set([...(mac ? [mac] : []), ...Object.keys(draft.controllerDefaults)]));
+  const controllers = status?.controllers ?? [];
+  const connectedMacs = new Set(controllers.flatMap((c) => c.mac ? [c.mac] : []));
+  if (!status?.controllers && status?.connected && status.mac) connectedMacs.add(status.mac);
+  const macs = Array.from(new Set([...connectedMacs, ...Object.keys(draft.controllerDefaults)]));
   const warnings = [draft.lowBatteryWarnings[0] ?? 20, draft.lowBatteryWarnings[1] ?? 10];
 
   return (
@@ -153,32 +162,59 @@ export function Settings() {
               ))}
             </select>
           </label>
-          {macs.length > 0 && (
+        </section>
+
+        <section className="settings-group">
+          <h2>{L("Controllers", "Kontrolcüler")}</h2>
+          <label className="setting-row">
+            <span>{L("Maximum controllers", "En fazla kontrolcü sayısı")}</span>
+            <select value={draft.maxControllers} onChange={(e) => set({ maxControllers: Number(e.target.value) })}>
+              {[1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}
+            </select>
+          </label>
+          <Toggle label={L("Automatic player LEDs", "Otomatik oyuncu LED’leri")} checked={draft.autoPlayerLeds} onChange={(autoPlayerLeds) => set({ autoPlayerLeds })} />
+          <Toggle label={L("Edge shortcuts", "Edge kısayolları")} checked={draft.edgeShortcuts} onChange={(edgeShortcuts) => set({ edgeShortcuts })} />
+          <ul className="hint">
+            <li>{L("FnL + R1 · Next profile", "FnL + R1 · Sonraki profil")}</li>
+            <li>{L("FnL + L1 · Previous profile", "FnL + L1 · Önceki profil")}</li>
+            <li>{L("FnR + Triangle / Circle / Cross / Square · Profiles 1 / 2 / 3 / 4", "FnR + Üçgen / Daire / Çarpı / Kare · Profil 1 / 2 / 3 / 4")}</li>
+          </ul>
+          <p className="hint">{L("Secondary controllers get profiles, lighting, triggers and virtual controllers. Mapping, macros, haptics and telemetry are available on the primary controller only.", "İkincil kontrolcüler profil, ışık, tetik ve sanal kontrolcü desteği alır. Tuş eşleme, makrolar, haptik efektler ve telemetri yalnızca birincil kontrolcüde çalışır.")}</p>
+          {(macs.length > 0 || controllers.length > 0) && (
             <div className="controller-defaults">
-              <span className="sub-label">{L("Per controller", "Kontrolcüye göre")}</span>
-              {macs.map((m) => (
-                <label key={m} className="setting-row">
-                  <span className="toggle-text">
-                    <span className="num">{m}</span>
-                    {m === mac && <span className="hint">{L("connected controller", "bağlı kontrolcü")}</span>}
-                  </span>
-                  <select
-                    value={draft.controllerDefaults[m] ?? ""}
-                    onChange={(e) => {
-                      const next = { ...draft.controllerDefaults };
-                      if (e.target.value) next[m] = e.target.value;
-                      else delete next[m];
-                      set({ controllerDefaults: next });
-                    }}
-                  >
-                    <option value="">{L("Global default", "Genel varsayılan")}</option>
-                    {profiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              <span className="sub-label">{L("Default profile per controller", "Kontrolcüye göre varsayılan profil")}</span>
+              {macs.map((m) => {
+                const controller = controllers.find((c) => c.mac === m);
+                return (
+                  <label key={m} className="setting-row">
+                    <span className="toggle-text">
+                      <span className="num">{m}</span>
+                      {connectedMacs.has(m) && <span className="hint">{controller ? L(`Controller ${controller.index + 1}`, `Kontrolcü ${controller.index + 1}`) : L("connected controller", "bağlı kontrolcü")}</span>}
+                    </span>
+                    <select
+                      value={draft.controllerDefaults[m] ?? ""}
+                      onChange={(e) => {
+                        const next = { ...draft.controllerDefaults };
+                        if (e.target.value) next[m] = e.target.value;
+                        else delete next[m];
+                        set({ controllerDefaults: next });
+                      }}
+                    >
+                      <option value="">{controller && !controller.primary ? L("Use primary profile", "Birincil profili kullan") : L("Global default", "Genel varsayılan")}</option>
+                      {profiles.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                );
+              })}
+              {controllers.filter((c) => !c.mac).map((c) => (
+                <div key={c.index} className="setting-row">
+                  <span>{L(`Controller ${c.index + 1}`, `Kontrolcü ${c.index + 1}`)}</span>
+                  <span className="hint">{L("MAC address unavailable", "MAC adresi alınamadı")}</span>
+                </div>
               ))}
             </div>
           )}

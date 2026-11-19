@@ -192,6 +192,7 @@ export type EmulationStatus = {
   drivers: DriverStatus[];
   latency: { p50Ms: number; p95Ms: number; samples: number };
   error: string | null;
+  slots: { index: number; mode: EmulationMode; attached: boolean; hidden: boolean; error?: string | null }[];
 };
 
 export type DriverProgress = { type: "driver.progress"; kind: DriverKind; message: string; done: boolean; ok: boolean };
@@ -293,6 +294,10 @@ export type AppSettings = {
   autoProfileDelayMs: number;
   defaultProfileId: string;
   controllerDefaults: Record<string, string>;
+  primaryController: string | null;
+  autoPlayerLeds: boolean;
+  edgeShortcuts: boolean;
+  maxControllers: number;
   idleSleepMinutes: number;
   lowBatteryWarnings: number[];
   runAsAdminHint: boolean;
@@ -323,9 +328,22 @@ export type UpdateStatus = {
   lastCheck: string | null;
 };
 
+export type ControllerStatus = {
+  index: number;
+  mac: string | null;
+  model: "DualSense" | "DualSenseEdge";
+  link: "Bluetooth" | "Usb";
+  battery: number | null;
+  charging: boolean;
+  primary: boolean;
+  profileId: string;
+  profileName: string;
+};
+
 export type Status = {
   type: "status";
   connected: boolean;
+  controllers: ControllerStatus[];
   model?: string;
   link?: string;
   mac?: string;
@@ -340,6 +358,7 @@ export type Status = {
 
 export type Input = {
   type: "input";
+  mac?: string | null;
   buttons: string[];
   left: [number, number];
   right: [number, number];
@@ -405,6 +424,8 @@ export type UiMessage =
   | { type: "profile.export"; id: string }
   | { type: "trigger.preview"; side: "left" | "right"; config: TriggerConfig | null }
   | { type: "settings.save"; settings: AppSettings }
+  | { type: "controller.setPrimary"; mac: string }
+  | { type: "controller.setProfile"; index: number; mac: string; profileId: string }
   | { type: "update.check" | "update.download" | "update.install" | "update.openPage" }
   | { type: "logs.export" | "logs.open" }
   | { type: "gyro.calibrate" }

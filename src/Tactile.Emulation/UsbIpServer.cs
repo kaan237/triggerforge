@@ -14,6 +14,7 @@ public sealed class UsbIpServer : IUsbIpServer
     private readonly Lock _gate = new();
     private readonly List<VirtualUsbDevice> _pads = [];
     private readonly List<UsbIpConnection> _connections = [];
+    private int _nextSecondaryBus = 2;
     private int _open;
     private volatile bool _disposed;
 
@@ -35,27 +36,36 @@ public sealed class UsbIpServer : IUsbIpServer
 
     public IVirtualPad Create(VirtualKind kind, DualSenseIdentity? identity) => Create(kind, identity, audio: false);
 
-    private IVirtualPad Create(VirtualKind kind, DualSenseIdentity? identity, bool audio)
+    private IVirtualPad Create(VirtualKind kind, DualSenseIdentity? identity, bool audio, int slot = 0)
     {
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            int busNum = 1;
+            int busNum = slot == 0 ? 1 : _nextSecondaryBus;
             while (_pads.Exists(p => p.BusNum == busNum))
             {
                 busNum++;
             }
 
+            if (slot != 0)
+            {
+                // A pending VHCI retry must never import a later pad from the same slot.
+                _nextSecondaryBus = busNum + 1;
+            }
+
             VirtualUsbDevice pad = kind switch
             {
                 VirtualKind.DualSense when audio => new VirtualDualSense.WithAudio(this, busNum, identity),
-                VirtualKind.DualSense => new VirtualDualSense(this, busNum, identity),
-                _ => new VirtualXbox360(this, busNum),
+                VirtualKind.DualSense => new VirtualDualSense(this, busNum, identity, slot),
+                _ => new VirtualXbox360(this, busNum, slot),
             };
             _pads.Add(pad);
             return pad;
         }
     }
+
+    internal IVirtualPad CreateSecondary(int slot, VirtualKind kind, DualSenseIdentity? identity) =>
+        Create(kind, identity, audio: false, slot: slot);
 
     public void Remove(IVirtualPad pad)
     {
@@ -160,10 +170,15 @@ public sealed class UsbIpServer : IUsbIpServer
             lock (_gate)
             {
                 pad = _disposed ? null : _pads.Find(p => p.BusId == busId);
+                if (pad is not null && pad.TryAttach())
+                {
+                    connection = new UsbIpConnection(stream, pad, _isoClock);
+                    _connections.Add(connection);
+                }
             }
 
             byte[] reply = new byte[UsbIpCodec.OpCommonSize + UsbIpCodec.DeviceRecordSize];
-            if (pad is null || !pad.TryAttach())
+            if (connection is null)
             {
                 uint status = (uint)(pad is null ? UsbIpCodec.StatusNoSuchBusId : UsbIpCodec.StatusBusy);
                 UsbIpCodec.WriteOpCommon(reply, UsbIpCodec.OpRepImport, status);
@@ -172,14 +187,9 @@ public sealed class UsbIpServer : IUsbIpServer
                 return;
             }
 
-            connection = new UsbIpConnection(stream, pad, _isoClock);
-            lock (_gate)
-            {
-                _connections.Add(connection);
-            }
-
             try
             {
+                pad = connection.Device;
                 UsbIpCodec.WriteOpCommon(reply, UsbIpCodec.OpRepImport, UsbIpCodec.StatusOk);
                 UsbIpCodec.WriteDeviceRecord(reply.AsSpan(UsbIpCodec.OpCommonSize), pad.BusId, pad.BusNum, VirtualUsbDevice.DevNum, pad.Speed, pad.DeviceDescriptor, pad.ConfigDescriptor);
                 stream.Write(reply);
