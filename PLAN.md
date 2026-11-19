@@ -309,7 +309,8 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 - Profil: `haptics` (ses kaynağı, uygulama, mod, şiddet, rumble → haptik, tık, hoparlör kaynağı ve sesi). Eski profiller varsayılanlarla açılıyor.
 - Arayüz: "Haptik" sayfası (sesten haptik, rumble, tık hissi, kontrolcü hoparlörü, çalan uygulamalar listesi, USB uyarısı). Tarayıcı önizlemesinde kontrol edildi.
 - Testler 369/369. İnceleme düzeltmeleri: ses yakalamanın başlatılması ana döngüyü bloklamıyor; uygulama sesi için 20 ms tampon süresi; akış yazma hatasıyla durursa en fazla saniyede bir yeniden kuruluyor; şiddet DSP'nin yumuşak kırpmasından önce uygulanıyor; uygulama listesi arayüz iş parçacığı dışında alınıyor.
-- Denenmeyenler (hepsi donanım): müzikle ritim, tek uygulama yakalama, `0x36` hoparlör sesi (durum bloklu ve bloksuz düzenin hangisinin çalıştığı: `HapticReport.IncludeStateBlock`), rumble dalgasının hissi, tık hissi, 30 dk kesintisizlik, hoparlör ses seviyesi aralığı (0-100 varsayıldı).
+- Donanım testi (2026-11-19, KH, Bluetooth): sistem sesi → haptik Müzik modunda ritim tutuyor, gecikme hissedilmiyor, şiddet kaydırıcısı çalışıyor. `0x36` hoparlör **durum bloksuz** düzenle çalışıyor (haptik aynı anda sürüyor); ses anlaşılır ama küçük mono hoparlör yüzünden kulaklık kadar net değil, bu yüzden Opus karmaşıklığı 10'a çıkarıldı ve müzik ipucu verildi (`bdc0576`). Tık hissi yönüyle birlikte, rumble → haptik dalga çalışıyor. Bulunan arayüz hatası: sayfanın altındaki anahtara basınca tüm pencere kayıyordu (gizli input konumlanmamış kapsayıcıya göre yerleşiyordu), düzeltildi (`6b2f660`).
+- Kalan: 30 dk kesintisiz koşu, tek uygulama yakalama (Uygulama seçeneği), Oyun ve Film modlarının karşılaştırması.
 
 ### Faz 5b — Sanal DualSense ses arayüzü (3-5 hafta) ⚠ en riskli faz
 
