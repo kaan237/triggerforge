@@ -1,3 +1,4 @@
+using Tactile.Core;
 using System.ComponentModel;
 using System.Diagnostics;
 using static Tactile.Audio.CoreAudioInterop;
@@ -7,6 +8,8 @@ namespace Tactile.Audio;
 /// <summary>Creates the Windows loopback audio system.</summary>
 public static class AudioSystemFactory
 {
+    public static LocalizedMessage? CaptureFailure(IAudioCapture capture) => (capture as WasapiLoopback)?.Failure;
+
     /// <summary>Creates an audio system without opening a device.</summary>
     public static IAudioSystem Create() => new WindowsAudioSystem();
 
@@ -15,11 +18,11 @@ public static class AudioSystemFactory
         public IAudioCapture Start(AudioTarget target)
         {
             if (!OperatingSystem.IsWindows())
-                throw new AudioUnavailableException("Ses yakalama yalnızca Windows'ta kullanılabilir.");
+                throw new AudioUnavailableException(new LocalizedMessage("Audio capture is only available on Windows.", "Ses yakalama yalnızca Windows'ta kullanılabilir."));
             if (target is AppAudio && !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348))
-                throw new AudioUnavailableException("Uygulama sesi yakalama bu Windows sürümünde yok.");
+                throw new AudioUnavailableException(new LocalizedMessage("App audio capture is unavailable on this version of Windows.", "Uygulama sesi yakalama bu Windows sürümünde yok."));
             if (target is not (SystemAudio or AppAudio))
-                throw new AudioUnavailableException("Ses yakalama kaynağı geçersiz.");
+                throw new AudioUnavailableException(new LocalizedMessage("Invalid audio capture source.", "Ses yakalama kaynağı geçersiz."));
 
             return WasapiLoopback.Start(target);
         }
@@ -38,8 +41,8 @@ public static class AudioSystemFactory
                 devices = (IMMDeviceEnumerator)new MMDeviceEnumerator();
                 device = DefaultRender(devices);
                 manager = Activate<IAudioSessionManager2>(device);
-                Check(manager.GetSessionEnumerator(out sessions), "Ses oturumları açılamadı.");
-                Check(sessions.GetCount(out int count), "Ses oturumları sayılamadı.");
+                Check(manager.GetSessionEnumerator(out sessions), new LocalizedMessage("Could not open audio sessions.", "Ses oturumları açılamadı."));
+                Check(sessions.GetCount(out int count), new LocalizedMessage("Could not count audio sessions.", "Ses oturumları sayılamadı."));
                 Dictionary<string, AudioApp> apps = new(StringComparer.OrdinalIgnoreCase);
                 for (int i = 0; i < count; i++)
                 {
@@ -65,7 +68,7 @@ public static class AudioSystemFactory
 
         private static AudioApp? ReadApp(IAudioSessionEnumerator sessions, int index)
         {
-            const string error = "Ses oturumu okunamadı.";
+            LocalizedMessage error = new LocalizedMessage("Could not read the audio session.", "Ses oturumu okunamadı.");
             Check(sessions.GetSession(index, out var value), error);
             try
             {

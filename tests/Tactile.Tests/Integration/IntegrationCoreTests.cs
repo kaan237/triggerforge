@@ -7,6 +7,7 @@ using Tactile.Device.DualSense;
 
 namespace Tactile.Tests.Integration;
 
+[Collection("Localization")]
 public sealed class IntegrationCoreTests
 {
     [Fact]

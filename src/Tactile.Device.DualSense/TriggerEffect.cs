@@ -1,3 +1,5 @@
+using Tactile.Core;
+
 namespace Tactile.Device.DualSense;
 
 /// <summary>
@@ -26,7 +28,7 @@ public readonly struct TriggerEffect : IEquatable<TriggerEffect>
     {
         if (bytes.Length != Size)
         {
-            throw new ArgumentException($"Expected {Size} bytes.", nameof(bytes));
+            throw new ArgumentException(Text.Pick($"Expected {Size} bytes.", $"{Size} bayt gerekli."), nameof(bytes));
         }
 
         return new TriggerEffect(bytes.ToArray());
@@ -199,7 +201,7 @@ public readonly struct TriggerEffect : IEquatable<TriggerEffect>
     {
         if (levels.Length != Zones)
         {
-            throw new ArgumentException($"Expected {Zones} zones.", nameof(levels));
+            throw new ArgumentException(Text.Pick($"Expected {Zones} zones.", $"{Zones} bölge gerekli."), nameof(levels));
         }
 
         int mask = 0;
@@ -246,7 +248,7 @@ public readonly struct TriggerEffect : IEquatable<TriggerEffect>
     {
         if (value < min || value > max)
         {
-            throw new ArgumentOutOfRangeException(name, value, $"Must be {min}-{max}.");
+            throw new ArgumentOutOfRangeException(name, value, Text.Pick($"{name} must be between {min} and {max}.", $"{name} {min}-{max} arası olmalı."));
         }
     }
 }

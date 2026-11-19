@@ -1,6 +1,9 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using Tactile.Core;
 using Tactile.Core.Integration;
+using Tactile.Core.Logging;
 using Tactile.Device.DualSense;
 using Tactile.Drivers;
 using Tactile.Input.Windows;
@@ -18,16 +21,18 @@ internal sealed class Bridge
     private readonly AppCore _core;
     private readonly Control _owner;
     private readonly Action<string> _postRaw;
+    private readonly AppPaths _paths;
     private readonly List<string> _queued = [];
     private OutputState? _lastOutput;
     private HapticStatus? _lastHaptics;
     private bool _ready;
 
-    public Bridge(AppCore core, Control owner, Action<string> postRaw)
+    public Bridge(AppCore core, Control owner, Action<string> postRaw, AppPaths paths)
     {
         _core = core;
         _owner = owner;
         _postRaw = postRaw;
+        _paths = paths;
     }
 
     public bool Ready => _ready;
@@ -35,7 +40,7 @@ internal sealed class Bridge
     /// <summary>The UI asked to restart as administrator. Raised on the UI thread, outside any WebView2 event.</summary>
     public event Action? RestartElevatedRequested;
 
-    /// <summary>The UI asked for "Kontrolcüyü geri getir". Raised on the UI thread.</summary>
+    /// <summary>The UI requested controller restoration. Raised on the UI thread.</summary>
     public event Action? RestoreRequested;
 
     /// <summary>The page is going away; hold posts until the next hello.</summary>
@@ -55,7 +60,7 @@ internal sealed class Bridge
             JsonElement m = doc.RootElement;
             if (m.ValueKind != JsonValueKind.Object)
             {
-                throw new BadMessage("Mesaj bir nesne olmalı.");
+                throw new BadMessage(new LocalizedMessage("The message must be an object.", "Mesaj bir nesne olmalı."));
             }
 
             type = m.TryGetProperty("type", out JsonElement t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
@@ -63,6 +68,7 @@ internal sealed class Bridge
         }
         catch (Exception e)
         {
+            Log.Warn("Could not handle a UI message.", e);
             PostError(Describe(e));
         }
 
@@ -78,11 +84,11 @@ internal sealed class Bridge
         {
             case "hello":
                 _ready = true;
+                PostSettings();
                 PostStatus();
                 _lastOutput = null;
                 PostOutputIfChanged();
                 PostProfiles();
-                PostSettings();
                 PostEmulation();
                 PostIntegration();
                 _lastHaptics = null;
@@ -101,7 +107,7 @@ internal sealed class Bridge
                 _core.Profiles.Save(p, out IReadOnlyList<string> issues);
                 if (issues.Count > 0)
                 {
-                    PostNotice(new Notice(NoticeKinds.Info, "Profil kaydedildi, düzeltilenler: " + string.Join("; ", issues)));
+                    PostNotice(new Notice(NoticeKinds.Info, Text.Pick("Profile saved with corrections: ", "Profil kaydedildi, düzeltilenler: ") + string.Join("; ", issues)));
                 }
 
                 break;
@@ -112,12 +118,12 @@ internal sealed class Bridge
                 string id = Str(m, "id");
                 if (_core.Profiles.Get(id) is null)
                 {
-                    throw new BadMessage("Profil bulunamadı.");
+                    throw new BadMessage(new LocalizedMessage("Profile not found.", "Profil bulunamadı."));
                 }
 
                 if (!_core.Profiles.Delete(id))
                 {
-                    throw new BadMessage("Son profil silinemez.");
+                    throw new BadMessage(new LocalizedMessage("The last profile cannot be deleted.", "Son profil silinemez."));
                 }
 
                 break;
@@ -126,7 +132,7 @@ internal sealed class Bridge
             case "profile.duplicate":
             {
                 string id = Str(m, "id");
-                Profile source = _core.Profiles.Get(id) ?? throw new BadMessage("Profil bulunamadı.");
+                Profile source = _core.Profiles.Get(id) ?? throw new BadMessage(new LocalizedMessage("Profile not found.", "Profil bulunamadı."));
                 string name = OptStr(m, "name") is { Length: > 0 } n ? n : source.Name + " (kopya)";
                 _core.Profiles.Duplicate(id, name);
                 break;
@@ -140,8 +146,8 @@ internal sealed class Bridge
             {
                 Profile p = _core.Profiles.Import(Str(m, "json"), out int removed);
                 string message = removed > 0
-                    ? $"“{p.Name}” içe aktarıldı. Güvenlik için {removed} program çalıştırma eylemi kaldırıldı."
-                    : $"“{p.Name}” içe aktarıldı.";
+                    ? Text.Pick($"Imported “{p.Name}”. Removed {removed} launch actions for safety.", $"“{p.Name}” içe aktarıldı. Güvenlik için {removed} program çalıştırma eylemi kaldırıldı.")
+                    : Text.Pick($"Imported “{p.Name}”.", $"“{p.Name}” içe aktarıldı.");
                 PostNotice(new Notice(NoticeKinds.Info, message));
                 break;
             }
@@ -151,7 +157,7 @@ internal sealed class Bridge
                 string id = Str(m, "id");
                 if (_core.Profiles.Get(id) is null)
                 {
-                    throw new BadMessage("Profil bulunamadı.");
+                    throw new BadMessage(new LocalizedMessage("Profile not found.", "Profil bulunamadı."));
                 }
 
                 Post(new { type = "export", id, json = _core.Profiles.Export(id) });
@@ -172,10 +178,18 @@ internal sealed class Bridge
                 SaveSettings(Read<AppSettings>(m, "settings"));
                 break;
 
+            case "logs.export":
+                _owner.BeginInvoke(ExportLogs);
+                break;
+
+            case "logs.open":
+                OpenLogs();
+                break;
+
             case "gyro.calibrate":
                 if (_core.Controllers.Controller is null)
                 {
-                    throw new BadMessage("Kontrolcü bağlı değil.");
+                    throw new BadMessage(new LocalizedMessage("No controller connected.", "Kontrolcü bağlı değil."));
                 }
 
                 _core.StartGyroCalibration();
@@ -193,7 +207,7 @@ internal sealed class Bridge
             case "app.restartElevated":
                 if (WindowsInputPlatform.IsElevated)
                 {
-                    PostNotice(new Notice(NoticeKinds.Info, "Tactile zaten yönetici olarak çalışıyor."));
+                    PostNotice(new Notice(NoticeKinds.Info, Text.Pick("TriggerForge is already running as administrator.", "TriggerForge zaten yönetici olarak çalışıyor.")));
                     break;
                 }
 
@@ -216,10 +230,10 @@ internal sealed class Bridge
 
             case "telemetry.applyTemplate":
             {
-                Profile profile = _core.Profiles.Get(Str(m, "profileId")) ?? throw new BadMessage("Profil bulunamadı.");
+                Profile profile = _core.Profiles.Get(Str(m, "profileId")) ?? throw new BadMessage(new LocalizedMessage("Profile not found.", "Profil bulunamadı."));
                 if (Str(m, "template") != "forza")
                 {
-                    throw new BadMessage("Telemetri şablonu bulunamadı.");
+                    throw new BadMessage(new LocalizedMessage("Telemetry template not found.", "Telemetri şablonu bulunamadı."));
                 }
 
                 _core.Profiles.Save(profile with { Telemetry = TelemetryTemplates.Forza });
@@ -239,7 +253,7 @@ internal sealed class Bridge
                 {
                     "usbIp" => DriverKind.UsbIp,
                     "hidHide" => DriverKind.HidHide,
-                    _ => throw new BadMessage("kind usbIp ya da hidHide olmalı."),
+                    _ => throw new BadMessage(new LocalizedMessage("kind must be usbIp or hidHide.", "kind usbIp ya da hidHide olmalı.")),
                 });
                 break;
 
@@ -256,9 +270,9 @@ internal sealed class Bridge
                     {
                         _owner.BeginInvoke(() => Post(new { type = "audioApps", apps }));
                     }
-                    catch (InvalidOperationException)
+                    catch (InvalidOperationException e)
                     {
-                        // Window already closed.
+                        Log.Info("Window handle was unavailable for the audio app list.", e);
                     }
                 });
                 break;
@@ -334,14 +348,14 @@ internal sealed class Bridge
                 break;
 
             case null:
-                throw new BadMessage("Mesaj türü eksik.");
+                throw new BadMessage(new LocalizedMessage("The message type is missing.", "Mesaj türü eksik."));
 
             default:
-                throw new BadMessage($"Bilinmeyen mesaj: {type}");
+                throw new BadMessage(new LocalizedMessage($"Unknown message: {type}", $"Bilinmeyen mesaj: {type}"));
         }
     }
 
-    private const string Unavailable = "Sanal kontrolcü bu sistemde başlatılamadı.";
+    private static readonly LocalizedMessage Unavailable = new("Could not start a virtual controller on this system.", "Sanal kontrolcü bu sistemde başlatılamadı.");
 
     private readonly HashSet<DriverKind> _installing = [];
 
@@ -350,7 +364,7 @@ internal sealed class Bridge
         EmulationService emulation = _core.Emulation ?? throw new BadMessage(Unavailable);
         if (!_installing.Add(kind))
         {
-            throw new BadMessage("Kurulum zaten sürüyor.");
+            throw new BadMessage(new LocalizedMessage("An installation is already in progress.", "Kurulum zaten sürüyor."));
         }
 
         _ = InstallAsync(emulation, kind);
@@ -364,15 +378,26 @@ internal sealed class Bridge
         var progress = new Progress<string>(message => Post(new { type = "driver.progress", kind = name, message, done = false, ok = false }));
         try
         {
+            Log.Info($"Driver install started: {name}.");
             InstallResult result = await emulation.InstallAsync(kind, progress, CancellationToken.None);
+            if (result.Ok)
+            {
+                Log.Info($"Driver install succeeded: {name}; reboot required: {result.RebootRequired}.");
+            }
+            else
+            {
+                Log.Warn($"Driver install failed: {name}. {result.EnglishMessage}");
+            }
+
             string message = result.Ok && result.RebootRequired
-                ? $"{result.Message} Kurulumu bitirmek için bilgisayarı yeniden başlatın."
+                ? Text.Pick($"{result.Message} Restart your PC to finish driver setup.", $"{result.Message} Kurulumu bitirmek için bilgisayarı yeniden başlatın.")
                 : result.Message;
             Post(new { type = "driver.progress", kind = name, message, done = true, ok = result.Ok });
         }
         catch (Exception e)
         {
-            Post(new { type = "driver.progress", kind = name, message = $"Kurulum başarısız: {e.Message}", done = true, ok = false });
+            Log.Error($"Driver install failed: {name}.", e);
+            Post(new { type = "driver.progress", kind = name, message = Text.Pick($"Installation failed: {e.Message}", $"Kurulum başarısız: {e.Message}"), done = true, ok = false });
         }
         finally
         {
@@ -384,7 +409,7 @@ internal sealed class Bridge
     /// <summary>Also sent every second while the window is on screen.</summary>
     public void PostEmulation()
     {
-        EmulationStatus s = _core.Emulation?.Status ?? EmulationStatus.Unavailable with { Error = Unavailable };
+        EmulationStatus s = _core.Emulation?.Status ?? EmulationStatus.Unavailable with { Error = Unavailable.Value };
         Post(new
         {
             type = "emulation",
@@ -410,8 +435,8 @@ internal sealed class Bridge
     {
         using var dialog = new OpenFileDialog
         {
-            Title = "Çalıştırılacak program",
-            Filter = "Programlar (*.exe)|*.exe",
+            Title = Text.Pick("Choose a program", "Çalıştırılacak program"),
+            Filter = Text.Pick("Programs (*.exe)|*.exe", "Programlar (*.exe)|*.exe"),
             CheckFileExists = true,
             DereferenceLinks = true,
             RestoreDirectory = true,
@@ -425,7 +450,7 @@ internal sealed class Bridge
         bool before = _core.Settings.Current.StartWithWindows;
         _core.Settings.Save(s);
         bool after = _core.Settings.Current.StartWithWindows;
-        if (after == before)
+        if (_paths.Portable || after == before)
         {
             return;
         }
@@ -436,8 +461,69 @@ internal sealed class Bridge
         }
         catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or IOException)
         {
+            Log.Warn("Could not update the Windows startup entry.", e);
             _core.Settings.Save(_core.Settings.Current with { StartWithWindows = before });
-            throw new BadMessage("Windows ile başlatma ayarlanamadı.");
+            throw new BadMessage(new LocalizedMessage("Could not change the Windows startup setting.", "Windows ile başlatma ayarlanamadı."));
+        }
+    }
+
+    private void ExportLogs()
+    {
+        try
+        {
+            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture);
+            using var dialog = new SaveFileDialog
+            {
+                Title = Text.Pick("Export logs", "Logları dışa aktar"),
+                FileName = $"TriggerForge-logs-{stamp}.zip",
+                Filter = Text.Pick("ZIP archive (*.zip)|*.zip", "ZIP arşivi (*.zip)|*.zip"),
+                DefaultExt = "zip",
+                RestoreDirectory = true,
+            };
+            if (dialog.ShowDialog(_owner) != DialogResult.OK)
+            {
+                Post(new { type = "logs.exported", ok = false });
+                return;
+            }
+
+            List<string> system =
+            [
+                $"TriggerForge: {Application.ProductVersion}",
+                $"Windows: {Environment.OSVersion.VersionString}",
+                $"Portable: {(_paths.Portable ? "yes" : "no")}",
+            ];
+            IReadOnlyList<DriverStatus> drivers = _core.Emulation?.Status.Drivers ?? [];
+            foreach (DriverStatus driver in drivers)
+            {
+                system.Add($"{driver.Kind}: {driver.State} {driver.Version} {driver.EnglishDetail}".TrimEnd());
+            }
+
+            if (drivers.Count == 0)
+            {
+                system.Add("Driver states unavailable.");
+            }
+
+            Log.Export(dialog.FileName, _paths.DataDirectory, _core.Settings.Current, string.Join(Environment.NewLine, system));
+            Post(new { type = "logs.exported", ok = true, path = dialog.FileName });
+        }
+        catch (Exception e)
+        {
+            Log.Error("Could not export logs.", e);
+            Post(new { type = "logs.exported", ok = false, error = Text.Pick("Could not export logs.", "Loglar dışa aktarılamadı.") });
+        }
+    }
+
+    private void OpenLogs()
+    {
+        try
+        {
+            Directory.CreateDirectory(_paths.LogDirectory);
+            using Process? explorer = Process.Start(new ProcessStartInfo(_paths.LogDirectory) { UseShellExecute = true });
+        }
+        catch (Exception e)
+        {
+            Log.Warn("Could not open the log folder.", e);
+            PostError(Text.Pick("Could not open the log folder.", "Log klasörü açılamadı."));
         }
     }
 
@@ -458,6 +544,7 @@ internal sealed class Bridge
             activeReason = _core.ActiveReason,
             mapping = new { active = mapping.Active, paused = mapping.Paused, blockedBy = mapping.BlockedBy },
             elevated = WindowsInputPlatform.IsElevated,
+            portable = _paths.Portable,
         });
     }
 
@@ -568,15 +655,15 @@ internal sealed class Bridge
 
     private static string Describe(Exception e) => e switch
     {
-        BadMessage => e.Message,
-        JsonException j => string.IsNullOrEmpty(j.Path) ? "Mesaj okunamadı." : $"Geçersiz alan: {j.Path}",
-        // Core throws with Turkish text; the device library does not.
+        LocalizedException => e.Message,
+        JsonException j => string.IsNullOrEmpty(j.Path) ? Text.Pick("Could not read the message.", "Mesaj okunamadı.") : Text.Pick($"Invalid field: {j.Path}", $"Geçersiz alan: {j.Path}"),
+        // Core validation supplies its own user-facing message.
         ArgumentException or KeyNotFoundException or InvalidOperationException
             when e.TargetSite?.DeclaringType?.Assembly == typeof(AppCore).Assembly => e.Message,
-        ArgumentOutOfRangeException a => $"Değer aralık dışında: {a.ParamName}",
-        ArgumentException => "Geçersiz değer.",
-        IOException or UnauthorizedAccessException => "Dosya yazılamadı.",
-        _ => $"Beklenmeyen hata ({e.GetType().Name}).",
+        ArgumentOutOfRangeException a => Text.Pick($"Value out of range: {a.ParamName}", $"Değer aralık dışında: {a.ParamName}"),
+        ArgumentException => Text.Pick("Invalid value.", "Geçersiz değer."),
+        IOException or UnauthorizedAccessException => Text.Pick("Could not write the file.", "Dosya yazılamadı."),
+        _ => Text.Pick($"Unexpected error ({e.GetType().Name}).", $"Beklenmeyen hata ({e.GetType().Name})."),
     };
 
     private static T Read<T>(JsonElement m, string name)
@@ -584,14 +671,14 @@ internal sealed class Bridge
     {
         if (!m.TryGetProperty(name, out JsonElement v) || v.ValueKind != JsonValueKind.Object)
         {
-            throw new BadMessage($"Eksik alan: {name}");
+            throw new BadMessage(new LocalizedMessage($"Missing field: {name}", $"Eksik alan: {name}"));
         }
 
-        return v.Deserialize<T>(TactileJson.Options) ?? throw new BadMessage($"Eksik alan: {name}");
+        return v.Deserialize<T>(TactileJson.Options) ?? throw new BadMessage(new LocalizedMessage($"Missing field: {name}", $"Eksik alan: {name}"));
     }
 
     private static string Str(JsonElement m, string name) =>
-        OptStr(m, name) ?? throw new BadMessage($"Eksik alan: {name}");
+        OptStr(m, name) ?? throw new BadMessage(new LocalizedMessage($"Missing field: {name}", $"Eksik alan: {name}"));
 
     private static string? OptStr(JsonElement m, string name) =>
         m.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
@@ -600,12 +687,12 @@ internal sealed class Bridge
     {
         if (!m.TryGetProperty(name, out JsonElement v) || v.ValueKind != JsonValueKind.Number || !v.TryGetDouble(out double d))
         {
-            throw new BadMessage($"Eksik alan: {name}");
+            throw new BadMessage(new LocalizedMessage($"Missing field: {name}", $"Eksik alan: {name}"));
         }
 
         if (double.IsNaN(d) || d < min || d > max)
         {
-            throw new BadMessage($"{name} {min}-{max} arası olmalı.");
+            throw new BadMessage(new LocalizedMessage($"{name} must be between {min} and {max}.", $"{name} {min}-{max} arası olmalı."));
         }
 
         return (int)Math.Round(d);
@@ -614,18 +701,18 @@ internal sealed class Bridge
     private static float Float(JsonElement m, string name) =>
         m.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.Number && v.TryGetSingle(out float f) && float.IsFinite(f)
             ? f
-            : throw new BadMessage($"Eksik alan: {name}");
+            : throw new BadMessage(new LocalizedMessage($"Missing field: {name}", $"Eksik alan: {name}"));
 
     private static bool Bool(JsonElement m, string name) =>
         m.TryGetProperty(name, out JsonElement v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False
             ? v.GetBoolean()
-            : throw new BadMessage($"Eksik alan: {name}");
+            : throw new BadMessage(new LocalizedMessage($"Missing field: {name}", $"Eksik alan: {name}"));
 
     private static bool Side(JsonElement m) => Str(m, "side") switch
     {
         "left" => true,
         "right" => false,
-        _ => throw new BadMessage("side left ya da right olmalı."),
+        _ => throw new BadMessage(new LocalizedMessage("side must be left or right.", "side left ya da right olmalı.")),
     };
 
     private static Rgb ParseColor(string hex)
@@ -636,10 +723,10 @@ internal sealed class Bridge
         }
         catch (Exception e) when (e is FormatException or ArgumentException or IndexOutOfRangeException)
         {
-            throw new BadMessage("Geçersiz renk.");
+            throw new BadMessage(new LocalizedMessage("Invalid color.", "Geçersiz renk."));
         }
     }
 
     /// <summary>A message the UI got wrong; the text goes back as is.</summary>
-    private sealed class BadMessage(string message) : Exception(message);
+    private sealed class BadMessage(LocalizedMessage translation) : LocalizedException(translation, null);
 }

@@ -1,3 +1,4 @@
+using Tactile.Core;
 namespace Tactile.Audio;
 
 public sealed class GameAudio
@@ -98,7 +99,7 @@ public sealed class GameAudio
     {
         if (payload64.Length != BlockSamples)
         {
-            throw new ArgumentException("Haptik paketi 64 örnek olmalı.", nameof(payload64));
+            throw new ArgumentException(Text.Pick("The haptics packet must contain 64 samples.", "Haptik paketi 64 örnek olmalı."), nameof(payload64));
         }
 
         lock (_gate)
@@ -112,7 +113,7 @@ public sealed class GameAudio
     {
         if (payload64.Length != BlockSamples)
         {
-            throw new ArgumentException("Haptik paketi 64 örnek olmalı.", nameof(payload64));
+            throw new ArgumentException(Text.Pick("The haptics packet must contain 64 samples.", "Haptik paketi 64 örnek olmalı."), nameof(payload64));
         }
 
         lock (_gate)

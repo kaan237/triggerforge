@@ -1,6 +1,7 @@
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Tactile.Core;
+using Tactile.Core.Logging;
 
 namespace Tactile.Host;
 
@@ -11,17 +12,19 @@ internal sealed class MainWindow : Form
     private static readonly Color Background = Color.FromArgb(0x16, 0x17, 0x19);
 
     private readonly WebView2 _view = new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Background };
+    private readonly AppPaths _paths;
 
-    public MainWindow(AppCore core, Icon icon)
+    public MainWindow(AppCore core, Icon icon, AppPaths paths)
     {
-        Text = "Tactile";
+        _paths = paths;
+        Text = "TriggerForge";
         Icon = icon;
         BackColor = Background;
         MinimumSize = new Size(960, 620);
         Size = new Size(1240, 780);
         StartPosition = FormStartPosition.CenterScreen;
         Controls.Add(_view);
-        Bridge = new Bridge(core, this, PostRaw);
+        Bridge = new Bridge(core, this, PostRaw, paths);
         Load += async (_, _) => await InitializeViewAsync();
     }
 
@@ -56,7 +59,7 @@ internal sealed class MainWindow : Form
         }
         catch (Exception e) when (e is InvalidOperationException or System.Runtime.InteropServices.COMException)
         {
-            // View torn down while closing.
+            Log.Warn("WebView2 could not receive a message.", e);
         }
     }
 
@@ -64,13 +67,13 @@ internal sealed class MainWindow : Form
     {
         try
         {
-            string dataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Tactile", "WebView2");
-            CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(userDataFolder: dataFolder);
+            CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(userDataFolder: _paths.WebViewDirectory);
             await _view.EnsureCoreWebView2Async(env);
         }
         catch (Exception e) when (e is WebView2RuntimeNotFoundException or InvalidOperationException or System.Runtime.InteropServices.COMException)
         {
-            MessageBox.Show(this, "WebView2 başlatılamadı. Microsoft Edge WebView2 Runtime kurulu olmalı.", "Tactile",
+            Log.Error("WebView2 failed to initialize.", e);
+            MessageBox.Show(this, Tactile.Core.Text.Pick("Could not start WebView2. Install the Microsoft Edge WebView2 Runtime.", "WebView2 başlatılamadı. Microsoft Edge WebView2 Runtime kurulu olmalı."), "TriggerForge",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }

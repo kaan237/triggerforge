@@ -4,6 +4,7 @@ using Tactile.Device.DualSense;
 
 namespace Tactile.Tests;
 
+[Collection("Localization")]
 public class ProfileJsonTests
 {
     private const string Sample = """
@@ -78,7 +79,7 @@ public class ProfileJsonTests
         Assert.Equal(800, s.AutoProfileDelayMs);
         Assert.Equal([20, 10], s.LowBatteryWarnings);
         Assert.Equal(15, s.IdleSleepMinutes);
-        Assert.Equal(Language.Tr, s.Language);
+        Assert.Equal(Language.En, s.Language);
     }
 
     [Fact]
@@ -117,6 +118,7 @@ public class ProfileJsonTests
     [Fact]
     public void Normalize_clamps_ranges_and_reports_bad_triggers()
     {
+        using var language = new TestLanguage(Language.Tr);
         var p = new Profile
         {
             Id = "not-an-id",

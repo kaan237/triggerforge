@@ -2,7 +2,12 @@ namespace Tactile.Core;
 
 /// <param name="Kind">One of <see cref="NoticeKinds"/>.</param>
 /// <param name="Progress">0-1 for long running work, otherwise null.</param>
-public sealed record Notice(string Kind, string Message, double? Progress = null);
+public sealed record Notice(string Kind, string Message, double? Progress = null)
+{
+    public Notice(string kind, string en, string tr) : this(kind, Text.Pick(en, tr)) => EnglishMessage = en;
+
+    internal string EnglishMessage { get; } = Message;
+}
 
 public static class NoticeKinds
 {

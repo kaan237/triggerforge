@@ -3,6 +3,7 @@ using Tactile.Core;
 
 namespace Tactile.Tests.EmulationCore;
 
+[Collection("Localization")]
 public sealed class AudioDefaultsTests
 {
     private static readonly Profile DualSense = EmulationRig.ProfileWith(EmulationMode.DualSense);
@@ -134,6 +135,7 @@ public sealed class AudioDefaultsTests
     [InlineData("restore", "geri yüklenemedi")]
     public void Audio_failure_reports_a_notice_and_keeps_the_pad(string failure, string message)
     {
+        using var language = new TestLanguage(Language.Tr);
         var rig = new EmulationRig();
         var audio = new FakeAudioDefaults(rig.Log) { Failure = failure };
         audio.Endpoints[Render] = new("headset", "Headset");

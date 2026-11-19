@@ -3,6 +3,7 @@ using Tactile.Drivers;
 
 namespace Tactile.Tests.EmulationCore;
 
+[Collection("Localization")]
 public class EmulationReviewFixTests
 {
     private static readonly Profile Xbox = EmulationRig.ProfileWith(EmulationMode.Xbox360);
@@ -26,6 +27,7 @@ public class EmulationReviewFixTests
     [Fact]
     public void Failed_unhide_is_retried_and_noticed_once()
     {
+        using var language = new TestLanguage(Language.Tr);
         var rig = new EmulationRig();
         using EmulationService e = rig.Create();
         e.Update(Xbox, EmulationRig.Settings(), EmulationRig.Bluetooth);

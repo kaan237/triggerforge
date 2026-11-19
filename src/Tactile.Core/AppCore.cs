@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Tactile.Audio;
 using Tactile.Core.Integration;
+using Tactile.Core.Logging;
 using Tactile.Device.DualSense;
 using Tactile.Drivers;
 using Tactile.Emulation;
@@ -78,9 +79,9 @@ public sealed class AppCore : IDisposable
     /// <param name="drivers">Driver layer for the virtual controller; null = emulation unavailable.</param>
     /// <param name="server">USB/IP server; null with drivers set = drivers shown, no virtual pad.</param>
     public AppCore(string? dataDir = null, IForegroundSource? foreground = null, InputPlatform? platform = null,
-        DriverPlatform? drivers = null, IUsbIpServer? server = null, IAudioSystem? audio = null)
+        DriverPlatform? drivers = null, IUsbIpServer? server = null, IAudioSystem? audio = null, bool portable = false)
         : this(dataDir, foreground, new ControllerService(autoConnect: true, drivers is null ? null : drivers.Tree.IsVirtual),
-            TimeProvider.System, runTimer: true, platform, drivers, server, audio: audio, audioDefaults: new AudioDefaults())
+            TimeProvider.System, runTimer: true, platform, drivers, server, audio: audio, audioDefaults: new AudioDefaults(), portable: portable)
     {
     }
 
@@ -90,14 +91,15 @@ public sealed class AppCore : IDisposable
     /// </param>
     internal AppCore(string? dataDir, IForegroundSource? foreground, ControllerService controllers, TimeProvider time, bool runTimer,
         InputPlatform? platform = null, DriverPlatform? drivers = null, IUsbIpServer? server = null, Func<bool>? steamRunning = null,
-        IAudioSystem? audio = null, IAudioDefaults? audioDefaults = null)
+        IAudioSystem? audio = null, IAudioDefaults? audioDefaults = null, bool portable = false)
     {
         _time = time;
         _platform = platform ?? InputPlatform.None;
         _mapper = new Mapper(_platform, new MappingHost(this), Now, threaded: runTimer);
         _startTimestamp = time.GetTimestamp();
         Controllers = controllers;
-        Settings = new SettingsStore(dataDir);
+        Settings = new SettingsStore(dataDir, portable);
+        Text.Current = Settings.Current.Language;
         _haptics = new HapticEngine(audio ?? AudioSystemFactory.Create(),
             source =>
             {
@@ -110,7 +112,7 @@ public sealed class AppCore : IDisposable
 
         foreach (string broken in Profiles.BrokenFiles.Concat(Settings.BrokenFiles))
         {
-            Queue(new Notice(NoticeKinds.BrokenFile, $"Bozuk dosya atlandı: {Path.GetFileName(broken)}"));
+            Queue(new Notice(NoticeKinds.BrokenFile, $"Skipped damaged file: {Path.GetFileName(broken)}", $"Bozuk dosya atlandı: {Path.GetFileName(broken)}"));
         }
 
         if (drivers is not null)
@@ -315,7 +317,7 @@ public sealed class AppCore : IDisposable
     {
         if (Profiles.Get(id) is null)
         {
-            throw new KeyNotFoundException($"Profil bulunamadı: {id}");
+            throw new LocalizedMessage($"Profile not found: {id}", $"Profil bulunamadı: {id}").CreateException(message => new KeyNotFoundException(message));
         }
 
         lock (_lock)
@@ -373,10 +375,10 @@ public sealed class AppCore : IDisposable
         {
             _calibrationStarted = Now();
             _calibrator = new GyroCalibrator(progress: p =>
-                _outbox.Enqueue(new Notice(NoticeKinds.GyroCalibration, "Gyro kalibrasyonu sürüyor; kontrolcüyü oynatmayın.", p)));
+                _outbox.Enqueue(new Notice(NoticeKinds.GyroCalibration, Text.Pick("Calibrating gyro. Keep the controller still.", "Gyro kalibrasyonu sürüyor; kontrolcüyü oynatmayın."), p)));
         }
 
-        _outbox.Enqueue(new Notice(NoticeKinds.GyroCalibration, "Gyro kalibrasyonu başladı.", 0));
+        _outbox.Enqueue(new Notice(NoticeKinds.GyroCalibration, Text.Pick("Gyro calibration started.", "Gyro kalibrasyonu başladı."), 0));
         Flush();
     }
 
@@ -468,7 +470,7 @@ public sealed class AppCore : IDisposable
 
             if (_calibrator is not null && now - _calibrationStarted > GyroCalibrator.DefaultDuration + TimeSpan.FromSeconds(1.5))
             {
-                Finish(_calibrator.Fail("Kontrolcüden gyro verisi gelmiyor."));
+                Finish(_calibrator.Fail(Text.Pick("No gyro data from the controller.", "Kontrolcüden gyro verisi gelmiyor.")));
             }
 
             if (mac is not null && _idle.ShouldSleep(now, settings.IdleSleepMinutes, controller?.Details.Link))
@@ -476,7 +478,7 @@ public sealed class AppCore : IDisposable
                 _idle.Reset(now);
                 sleepMac = mac;
                 _outbox.Enqueue(new Notice(NoticeKinds.IdleSleep,
-                    $"Kontrolcü {settings.IdleSleepMinutes} dakikadır kullanılmadı, kapatılıyor."));
+                    Text.Pick($"The controller is turning off after {settings.IdleSleepMinutes} minutes of inactivity.", $"Kontrolcü {settings.IdleSleepMinutes} dakikadır kullanılmadı, kapatılıyor.")));
             }
 
             activeProfile = _active.Profile;
@@ -628,7 +630,7 @@ public sealed class AppCore : IDisposable
 
             if (_battery.Update(s.Battery, Settings.Current.LowBatteryWarnings) is int threshold)
             {
-                _outbox.Enqueue(new Notice(NoticeKinds.LowBattery, $"Pil %{threshold} altına düştü (%{s.Battery.Percent})."));
+                _outbox.Enqueue(new Notice(NoticeKinds.LowBattery, Text.Pick($"Battery dropped below {threshold}% ({s.Battery.Percent}% remaining).", $"Pil %{threshold} altına düştü (%{s.Battery.Percent}).")));
             }
 
             if (_calibrator is not null)
@@ -660,11 +662,11 @@ public sealed class AppCore : IDisposable
         if (result.Success)
         {
             _gyroBias = result.Bias;
-            _outbox.Enqueue(new Notice(NoticeKinds.GyroCalibration, "Gyro kalibre edildi.", 1));
+            _outbox.Enqueue(new Notice(NoticeKinds.GyroCalibration, Text.Pick("Gyro calibrated.", "Gyro kalibre edildi."), 1));
         }
         else
         {
-            _outbox.Enqueue(new Notice(NoticeKinds.GyroCalibration, result.Reason ?? "Gyro kalibrasyonu başarısız."));
+            _outbox.Enqueue(new Notice(NoticeKinds.GyroCalibration, result.Reason ?? Text.Pick("Gyro calibration failed.", "Gyro kalibrasyonu başarısız.")));
         }
     }
 
@@ -703,6 +705,8 @@ public sealed class AppCore : IDisposable
 
     private void OnSettingsChanged()
     {
+        // First, so everything this change produces is already in the new language.
+        Text.Current = Settings.Current.Language;
         ConfigureIntegration();
         Refresh();
     }
@@ -774,7 +778,7 @@ public sealed class AppCore : IDisposable
         if (first)
         {
             Queue(new Notice(NoticeKinds.Elevated,
-                $"{exe} yönetici olarak çalışıyor; Windows bu pencereye tuş ve fare girdisi gönderilmesini engelliyor. Tactile'ı yönetici olarak yeniden başlatın."));
+                Text.Pick($"{exe} is running as administrator. Windows blocks keyboard and mouse input to this window. Restart TriggerForge as administrator.", $"{exe} yönetici olarak çalışıyor; Windows bu pencereye tuş ve fare girdisi gönderilmesini engelliyor. TriggerForge'u yönetici olarak yeniden başlatın.")));
         }
     }
 
@@ -835,7 +839,7 @@ public sealed class AppCore : IDisposable
 
         if (Profiles.Get(id) is null)
         {
-            Queue(new Notice(NoticeKinds.Mapping, "Eşlemedeki profil bulunamadı."));
+            Queue(new Notice(NoticeKinds.Mapping, "The mapped profile was not found.", "Eşlemedeki profil bulunamadı."));
             return;
         }
 
@@ -859,7 +863,7 @@ public sealed class AppCore : IDisposable
 
         public void ShowApp() => core.ShowAppRequested?.Invoke();
 
-        public void Report(string message) => core.Queue(new Notice(NoticeKinds.Mapping, message));
+        public void Report(Notice notice) => core.Queue(notice);
     }
 
     internal void OnConnection(DualSenseController? controller)
@@ -897,7 +901,7 @@ public sealed class AppCore : IDisposable
         {
             // Report once; the next tick tries again.
             _tickFailed = true;
-            Queue(new Notice(NoticeKinds.Info, $"Çıktı motoru hatası: {e.Message}"));
+            Queue(new Notice(NoticeKinds.Info, Text.Pick($"Output engine error: {e.Message}", $"Çıktı motoru hatası: {e.Message}")));
         }
         catch (Exception)
         {
@@ -926,6 +930,7 @@ public sealed class AppCore : IDisposable
 
     private void Queue(Notice n)
     {
+        Log.Notice(n);
         Action<Notice>? handler;
         lock (_noticeLock)
         {

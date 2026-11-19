@@ -42,7 +42,7 @@ public sealed class DualSenseController : IDisposable
         Details = details;
         Features = features;
         _writeBuffer = new byte[Math.Max(device.Info.OutputReportLength, HapticReport.SpeakerDoubleLength)];
-        _reader = new Thread(ReadLoop) { IsBackground = true, Name = "dualsense-reader", Priority = ThreadPriority.AboveNormal };
+        _reader = new Thread(ReadLoop) { IsBackground = true, Name = "TriggerForge: dualsense-reader", Priority = ThreadPriority.AboveNormal };
     }
 
     public ControllerDetails Details { get; }
@@ -301,7 +301,7 @@ public sealed class HapticStreamer : IDisposable
         _speakerPacket = speakerPacket;
         _nextBlock = nextBlock;
         _nextSpeaker = nextSpeaker;
-        _thread = new Thread(Run) { IsBackground = true, Name = "dualsense-haptics", Priority = ThreadPriority.Highest };
+        _thread = new Thread(Run) { IsBackground = true, Name = "TriggerForge: dualsense-haptics", Priority = ThreadPriority.Highest };
         _controller.HapticsActive = true;
         _controller.WriteRaw(_report.BuildPrime(_controller.LastSent, _controller.CurrentOptions()));
         _thread.Start();

@@ -4,8 +4,6 @@ namespace Tactile.Core;
 
 internal static class JsonFile
 {
-    public const string DataDirVariable = "TACTILE_DATA_DIR";
-
     public static string ResolveDataDir(string? dataDir)
     {
         if (!string.IsNullOrWhiteSpace(dataDir))
@@ -13,13 +11,7 @@ internal static class JsonFile
             return dataDir;
         }
 
-        string? env = Environment.GetEnvironmentVariable(DataDirVariable);
-        if (!string.IsNullOrWhiteSpace(env))
-        {
-            return env;
-        }
-
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Tactile");
+        return AppPaths.Resolve().DataDirectory;
     }
 
     /// <summary>Writes next to the target first so a crash never leaves a half-written file.</summary>

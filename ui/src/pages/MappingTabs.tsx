@@ -1,3 +1,4 @@
+import { L } from "../i18n";
 import { useState } from "react";
 import type { Binding, ButtonName, Direction, GyroMouse, Profile, StickMapping, TouchpadMapping } from "../host";
 import { ActionEditor, BindingEditor, KeyField } from "../MappingEditors";
@@ -13,7 +14,7 @@ const times = (v: number) => `${fixed(1)(v)}×`;
 
 // ---- touchpad ----
 
-const zoneNames = { halves: ["Sol yarı", "Sağ yarı"], quadrants: ["Sol üst", "Sağ üst", "Sol alt", "Sağ alt"] } as const;
+const zoneNames = { get halves() { return [L("Left half", "Sol yarı"), L("Right half", "Sağ yarı")]; }, get quadrants() { return [L("Top left", "Sol üst"), L("Top right", "Sağ üst"), L("Bottom left", "Sol alt"), L("Bottom right", "Sağ alt")]; } } as const;
 
 function PadDiagram({ tp, selected, onSelect }: { tp: TouchpadMapping; selected: number; onSelect: (i: number) => void }) {
   const input = useInput();
@@ -30,7 +31,7 @@ function PadDiagram({ tp, selected, onSelect }: { tp: TouchpadMapping; selected:
       ].map(([x, y]) => ({ x, y, w: W / 2, h: H / 2 }))
     : [0, W / 2].map((x) => ({ x, y: 0, w: W / 2, h: H }));
   return (
-    <svg viewBox={`-1 -1 ${W + 2} ${H + 2}`} className="pad-diagram" role="img" aria-label="Touchpad bölgeleri">
+    <svg viewBox={`-1 -1 ${W + 2} ${H + 2}`} className="pad-diagram" role="img" aria-label={L("Touchpad zones", "Touchpad bölgeleri")}>
       {rects.map((r, i) => (
         <g key={i} onClick={() => onSelect(i)} className={selected === i ? "zone sel" : "zone"}>
           <rect x={r.x} y={r.y} width={r.w} height={r.h} />
@@ -66,43 +67,43 @@ export function TouchpadTab({ draft, editMapping }: TabProps) {
     <div className="tab-grid">
       <Section title="Touchpad" className="tab-main">
         <div className="row-field">
-          <span className="label">Kullanım</span>
+          <span className="label">{L("Mode", "Kullanım")}</span>
           <Segmented
-            label="Touchpad kullanımı"
+            label={L("Touchpad mode", "Touchpad kullanımı")}
             value={tp.mode}
             onChange={(mode) => set({ mode })}
             options={[
-              { id: "off", label: "Kapalı" },
-              { id: "mouse", label: "Fare" },
-              { id: "zones", label: "Bölgeler" },
+              { id: "off", label: L("Off", "Kapalı") },
+              { id: "mouse", label: L("Mouse", "Fare") },
+              { id: "zones", label: L("Zones", "Bölgeler") },
             ]}
           />
         </div>
         <p className="hint mode-hint">
-          {tp.mode === "off" && "Touchpad yalnız tıklama tuşu olarak çalışır (Tuşlar sekmesindeki Touchpad tık)."}
-          {tp.mode === "mouse" && "Parmak imleci hareket ettirir. Pad tıklaması Tuşlar sekmesindeki Touchpad tık atamasını kullanır."}
-          {tp.mode === "zones" && "Pad tıklaması parmağın olduğu bölgenin atamasını çalıştırır; Touchpad tık ataması yok sayılır."}
+          {tp.mode === "off" && L("The touchpad acts as a click button using the Touchpad click mapping.", "Touchpad yalnız tıklama tuşu olarak çalışır (Tuşlar sekmesindeki Touchpad tık).")}
+          {tp.mode === "mouse" && L("Sliding moves the pointer. Clicking uses the Touchpad click mapping.", "Parmak imleci hareket ettirir. Pad tıklaması Tuşlar sekmesindeki Touchpad tık atamasını kullanır.")}
+          {tp.mode === "zones" && L("Clicking uses the mapping for the zone under your finger.", "Pad tıklaması parmağın olduğu bölgenin atamasını çalıştırır; Touchpad tık ataması yok sayılır.")}
         </p>
         {tp.mode === "mouse" && (
           <div className="tab-controls">
-            <Slider label="Hassasiyet" min={0.1} max={5} step={0.1} value={tp.sensitivity} format={times} onChange={(sensitivity) => set({ sensitivity })} />
-            <Slider label="İvme" min={0} max={2} step={0.05} value={tp.acceleration} format={fixed(2)} onChange={(acceleration) => set({ acceleration })} />
-            <Toggle label="Dokununca tıkla" hint="Tek parmak dokunuş sol tık, iki parmak sağ tık." checked={tp.tapToClick} onChange={(tapToClick) => set({ tapToClick })} />
-            <Toggle label="İki parmakla kaydır" checked={tp.scroll} onChange={(scroll) => set({ scroll })} />
-            {tp.scroll && <Slider label="Kaydırma hızı" min={0.1} max={5} step={0.1} value={tp.scrollSpeed} format={times} onChange={(scrollSpeed) => set({ scrollSpeed })} />}
+            <Slider label={L("Sensitivity", "Hassasiyet")} min={0.1} max={5} step={0.1} value={tp.sensitivity} format={times} onChange={(sensitivity) => set({ sensitivity })} />
+            <Slider label={L("Acceleration", "İvme")} min={0} max={2} step={0.05} value={tp.acceleration} format={fixed(2)} onChange={(acceleration) => set({ acceleration })} />
+            <Toggle label={L("Tap to click", "Dokununca tıkla")} hint={L("Tap with one finger to left-click or two to right-click.", "Tek parmak dokunuş sol tık, iki parmak sağ tık.")} checked={tp.tapToClick} onChange={(tapToClick) => set({ tapToClick })} />
+            <Toggle label={L("Two-finger scrolling", "İki parmakla kaydır")} checked={tp.scroll} onChange={(scroll) => set({ scroll })} />
+            {tp.scroll && <Slider label={L("Scroll speed", "Kaydırma hızı")} min={0.1} max={5} step={0.1} value={tp.scrollSpeed} format={times} onChange={(scrollSpeed) => set({ scrollSpeed })} />}
           </div>
         )}
         {tp.mode === "zones" && (
           <div className="zones-edit">
             <div className="row-field">
-              <span className="label">Bölgeler</span>
+              <span className="label">{L("Zones", "Bölgeler")}</span>
               <Segmented
-                label="Bölge düzeni"
+                label={L("Zone layout", "Bölge düzeni")}
                 value={tp.zoneLayout}
                 onChange={setLayout}
                 options={[
-                  { id: "halves", label: "İki yarı" },
-                  { id: "quadrants", label: "Dört çeyrek" },
+                  { id: "halves", label: L("Two halves", "İki yarı") },
+                  { id: "quadrants", label: L("Four quadrants", "Dört çeyrek") },
                 ]}
               />
             </div>
@@ -113,11 +114,11 @@ export function TouchpadTab({ draft, editMapping }: TabProps) {
 
       {tp.mode === "zones" && (
         <>
-          <Section title={`Bölge: ${zoneNames[tp.zoneLayout][z]}`}>
+          <Section title={L(`Zone: ${zoneNames[tp.zoneLayout][z]}`, `Bölge: ${zoneNames[tp.zoneLayout][z]}`)}>
             <BindingEditor binding={tp.zones[z]} onChange={(b) => setZoneBinding(z, b)} />
           </Section>
-          <Section title="Kaydırma hareketleri" className="tab-wide">
-            <p className="hint">Tek parmağı hızla padin dörtte birinden fazla kaydır. Kalkınca çalışır.</p>
+          <Section title={L("Swipe gestures", "Kaydırma hareketleri")} className="tab-wide">
+            <p className="hint">{L("Swipe quickly across more than a quarter of the pad. The action runs when you lift your finger.", "Tek parmağı hızla padin dörtte birinden fazla kaydır. Kalkınca çalışır.")}</p>
             <div className="swipe-list">
               {directions.map((d) => (
                 <div key={d.id} className="bind-row">
@@ -140,27 +141,27 @@ export function GyroMouseTab({ draft, editMapping }: TabProps) {
   const input = useInput();
   const set = (patch: Partial<GyroMouse>) => editMapping((m) => ({ ...m, gyroMouse: { ...m.gyroMouse, ...patch } }));
   const needsButton = g.mode === "whileHeld" || g.mode === "toggle";
-  const f = (n: number) => (n >= 0 ? "+" : "−") + Math.abs(n).toFixed(1).replace(".", ",");
+  const f = (n: number) => (n >= 0 ? "+" : "−") + Math.abs(n).toFixed(1).replace(".", L(".", ","));
 
   return (
     <div className="tab-grid">
-      <Section title="Gyro fare" className="tab-main">
+      <Section title={L("Gyro mouse", "Gyro fare")} className="tab-main">
         <div className="row-field">
-          <span className="label">Çalışma</span>
+          <span className="label">{L("Activation", "Çalışma")}</span>
           <Segmented
-            label="Gyro fare"
+            label={L("Gyro mouse", "Gyro fare")}
             value={g.mode}
             onChange={(mode) => set({ mode })}
             options={[
-              { id: "off", label: "Kapalı" },
-              { id: "always", label: "Hep açık" },
-              { id: "whileHeld", label: "Basılıyken" },
-              { id: "toggle", label: "Aç/kapa" },
+              { id: "off", label: L("Off", "Kapalı") },
+              { id: "always", label: L("Always on", "Hep açık") },
+              { id: "whileHeld", label: L("While held", "Basılıyken") },
+              { id: "toggle", label: L("Toggle", "Aç/kapa") },
             ]}
           />
         </div>
         <div className="row-field">
-          <span className="label">Tuş</span>
+          <span className="label">{L("Key", "Tuş")}</span>
           <select value={g.button} disabled={!needsButton} onChange={(e) => set({ button: e.target.value as ButtonName })}>
             {buttonDefs.map((b) => (
               <option key={b.id} value={b.id}>
@@ -168,38 +169,38 @@ export function GyroMouseTab({ draft, editMapping }: TabProps) {
               </option>
             ))}
           </select>
-          <span className="hint">{needsButton ? "Tuş kendi atamasını da çalıştırır." : "Basılıyken ya da aç/kapa için."}</span>
+          <span className="hint">{needsButton ? L("The button also runs its own mapping.", "Tuş kendi atamasını da çalıştırır.") : L("Used for hold and toggle modes.", "Basılıyken ya da aç/kapa için.")}</span>
         </div>
         <div className="row-field">
-          <span className="label">Yatay eksen</span>
+          <span className="label">{L("Horizontal axis", "Yatay eksen")}</span>
           <Segmented
-            label="Yatay eksen"
+            label={L("Horizontal axis", "Yatay eksen")}
             value={g.axis}
             onChange={(axis) => set({ axis })}
             options={[
-              { id: "yaw", label: "Sağa-sola çevir" },
-              { id: "roll", label: "Yana yatır" },
+              { id: "yaw", label: L("Turn left or right", "Sağa-sola çevir") },
+              { id: "roll", label: L("Tilt sideways", "Yana yatır") },
             ]}
           />
         </div>
         <div className="tab-controls">
-          <Slider label="Yatay hız" min={0.1} max={10} step={0.1} value={g.sensitivityX} format={times} onChange={(sensitivityX) => set({ sensitivityX })} />
-          <Slider label="Dikey hız" min={0.1} max={10} step={0.1} value={g.sensitivityY} format={times} onChange={(sensitivityY) => set({ sensitivityY })} />
-          <Slider label="Yumuşatma" min={0} max={0.9} step={0.01} value={g.smoothing} format={pct} onChange={(smoothing) => set({ smoothing })} />
-          <Slider label="Ölü bölge" min={0} max={5} step={0.1} value={g.deadzone} format={(v) => `${fixed(1)(v)}°/s`} onChange={(deadzone) => set({ deadzone })} />
+          <Slider label={L("Horizontal speed", "Yatay hız")} min={0.1} max={10} step={0.1} value={g.sensitivityX} format={times} onChange={(sensitivityX) => set({ sensitivityX })} />
+          <Slider label={L("Vertical speed", "Dikey hız")} min={0.1} max={10} step={0.1} value={g.sensitivityY} format={times} onChange={(sensitivityY) => set({ sensitivityY })} />
+          <Slider label={L("Smoothing", "Yumuşatma")} min={0} max={0.9} step={0.01} value={g.smoothing} format={pct} onChange={(smoothing) => set({ smoothing })} />
+          <Slider label={L("Deadzone", "Ölü bölge")} min={0} max={5} step={0.1} value={g.deadzone} format={(v) => `${fixed(1)(v)}°/s`} onChange={(deadzone) => set({ deadzone })} />
           <div className="row-field">
-            <span className="label">Ters çevir</span>
+            <span className="label">{L("Invert", "Ters çevir")}</span>
             <Check label="X" checked={g.invertX} onChange={(invertX) => set({ invertX })} />
             <Check label="Y" checked={g.invertY} onChange={(invertY) => set({ invertY })} />
           </div>
         </div>
       </Section>
-      <Section title="Canlı">
+      <Section title={L("Live", "Canlı")}>
         <dl className="kv compact">
           <dt>Gyro °/s</dt>
           <dd className="num">{input ? input.gyro.map(f).join("  ") : "—"}</dd>
         </dl>
-        <p className="hint mode-hint">1× hız derece başına 10 piksel. Kayma varsa Analoglar sayfasından gyroyu kalibre et.</p>
+        <p className="hint mode-hint">{L("At 1×, each degree moves the pointer 10 pixels. If it drifts, calibrate the gyro on the Sticks page.", "1× hız derece başına 10 piksel. Kayma varsa Analoglar sayfasından gyroyu kalibre et.")}</p>
       </Section>
     </div>
   );
@@ -209,7 +210,7 @@ export function GyroMouseTab({ draft, editMapping }: TabProps) {
 
 const keyPresets: { name: string; keys: Record<Direction, string> }[] = [
   { name: "WASD", keys: { up: "w", down: "s", left: "a", right: "d" } },
-  { name: "Ok tuşları", keys: { up: "up", down: "down", left: "left", right: "right" } },
+  { get name() { return L("Arrow keys", "Ok tuşları"); }, keys: { up: "up", down: "down", left: "left", right: "right" } },
   { name: "Numpad", keys: { up: "numpad8", down: "numpad2", left: "numpad4", right: "numpad6" } },
 ];
 
@@ -224,7 +225,7 @@ function StickPreview({ side, cfg }: { side: "left" | "right"; cfg: StickMapping
   const keys = cfg.mode === "keys";
   const lit = (d: Direction) => keys && ((d === "up" && y < -cfg.threshold) || (d === "down" && y > cfg.threshold) || (d === "left" && x < -cfg.threshold) || (d === "right" && x > cfg.threshold));
   return (
-    <svg viewBox="-60 -60 120 120" className="stick-preview" role="img" aria-label="Analog eşiği">
+    <svg viewBox="-60 -60 120 120" className="stick-preview" role="img" aria-label={L("Stick threshold", "Analog eşiği")}>
       <circle r={R} className="rim" />
       {keys && <rect x={-t} y={-t} width={t * 2} height={t * 2} className="thr" />}
       {keys &&
@@ -241,28 +242,28 @@ function StickMappingPanel({ side, cfg, onChange }: { side: "left" | "right"; cf
   const set = (patch: Partial<StickMapping>) => onChange({ ...cfg, ...patch });
   const preset = keyPresets.find((p) => directions.every((d) => p.keys[d.id] === cfg.keys[d.id]));
   return (
-    <Section title={side === "left" ? "Sol analog" : "Sağ analog"}>
+    <Section title={side === "left" ? L("Left stick", "Sol analog") : L("Right stick", "Sağ analog")}>
       <div className="row-field">
         <Segmented
-          label="Analog kullanımı"
+          label={L("Stick mode", "Analog kullanımı")}
           value={cfg.mode}
           onChange={(mode) => set({ mode })}
           options={[
-            { id: "off", label: "Kapalı" },
-            { id: "keys", label: "Tuşlar" },
-            { id: "mouse", label: "Fare" },
-            { id: "scroll", label: "Kaydırma" },
+            { id: "off", label: L("Off", "Kapalı") },
+            { id: "keys", label: L("Mapping", "Tuşlar") },
+            { id: "mouse", label: L("Mouse", "Fare") },
+            { id: "scroll", label: L("Scroll", "Kaydırma") },
           ]}
         />
       </div>
       <div className="stick-map">
         <StickPreview side={side} cfg={cfg} />
         <div className="stick-map-controls">
-          {cfg.mode === "off" && <p className="hint">Analog yalnız oyuna gider.</p>}
+          {cfg.mode === "off" && <p className="hint">{L("Stick input goes to the game only.", "Analog yalnız oyuna gider.")}</p>}
           {cfg.mode === "keys" && (
             <>
               <div className="row-field">
-                <span className="label">Hazır</span>
+                <span className="label">{L("Ready", "Hazır")}</span>
                 <div className="button-group">
                   {keyPresets.map((p) => (
                     <button key={p.name} className={preset === p ? "button on" : "button"} onClick={() => set({ keys: { ...p.keys } })}>
@@ -277,19 +278,19 @@ function StickMappingPanel({ side, cfg, onChange }: { side: "left" | "right"; cf
                   <KeyField compact max={1} value={cfg.keys[d.id] === "none" ? [] : [cfg.keys[d.id]]} onChange={(k) => set({ keys: { ...cfg.keys, [d.id]: k[0] ?? "none" } })} />
                   {cfg.keys[d.id] !== "none" && (
                     <button className="button ghost" onClick={() => set({ keys: { ...cfg.keys, [d.id]: "none" } })}>
-                      Yok
+                      {L("None", "Yok")}
                     </button>
                   )}
                 </div>
               ))}
-              <Slider label="Eşik" min={0.1} max={0.9} step={0.05} value={cfg.threshold} format={pct} onChange={(threshold) => set({ threshold })} />
-              <p className="hint">Analog ayarları (ölü bölge, eğri) uygulandıktan sonraki değer. Çaprazda iki tuş birden basılır.</p>
+              <Slider label={L("Threshold", "Eşik")} min={0.1} max={0.9} step={0.05} value={cfg.threshold} format={pct} onChange={(threshold) => set({ threshold })} />
+              <p className="hint">{L("Uses the stick value after deadzone and curve settings. Diagonals press two keys.", "Analog ayarları (ölü bölge, eğri) uygulandıktan sonraki değer. Çaprazda iki tuş birden basılır.")}</p>
             </>
           )}
           {(cfg.mode === "mouse" || cfg.mode === "scroll") && (
             <>
-              <Slider label="Hız" min={0.1} max={5} step={0.1} value={cfg.speed} format={times} onChange={(speed) => set({ speed })} />
-              <p className="hint">{cfg.mode === "mouse" ? "Tam eğimde saniyede 1200 piksel × hız." : "Tam eğimde saniyede 15 çentik × hız."}</p>
+              <Slider label={L("Speed", "Hız")} min={0.1} max={5} step={0.1} value={cfg.speed} format={times} onChange={(speed) => set({ speed })} />
+              <p className="hint">{cfg.mode === "mouse" ? L("At full tilt, 1,200 pixels per second × speed.", "Tam eğimde saniyede 1200 piksel × hız.") : L("At full tilt, 15 ticks per second × speed.", "Tam eğimde saniyede 15 çentik × hız.")}</p>
             </>
           )}
         </div>

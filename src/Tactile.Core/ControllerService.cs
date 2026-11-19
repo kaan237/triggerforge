@@ -79,12 +79,12 @@ public sealed class ControllerService : IDisposable
             DualSenseController? c = _controller;
             if (c is not { Connected: true })
             {
-                return "Kontrolcü bağlı değil.";
+                return Text.Pick("No controller connected.", "Kontrolcü bağlı değil.");
             }
 
             if (c.Details.Link != Link.Bluetooth)
             {
-                return "Haptik test şimdilik yalnız Bluetooth'ta.";
+                return Text.Pick("The haptics test currently requires Bluetooth.", "Haptik test şimdilik yalnız Bluetooth'ta.");
             }
 
             ClearToneLocked();

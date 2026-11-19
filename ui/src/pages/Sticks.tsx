@@ -1,3 +1,4 @@
+import { L } from "../i18n";
 import { useEffect, useRef } from "react";
 import { CurvePlot } from "../CurvePlot";
 import { send, type Input, type Profile, type StickConfig } from "../host";
@@ -12,7 +13,7 @@ function StickView({ cfg, raw, processed, trail }: { cfg: StickConfig; raw: [num
   const inner = cfg.innerDeadzone * R;
   const outer = (1 - cfg.outerDeadzone) * R;
   return (
-    <svg viewBox="-92 -92 184 184" className="stick-view" role="img" aria-label="Analog konumu">
+    <svg viewBox="-92 -92 184 184" className="stick-view" role="img" aria-label={L("Stick position", "Analog konumu")}>
       <circle r={R} className="rim" />
       <line x1={-R} x2={R} className="axis" />
       <line y1={-R} y2={R} className="axis" />
@@ -52,11 +53,11 @@ function StickPanel({ side, cfg, input, dirty, onChange }: { side: Side; cfg: St
 
   return (
     <Section
-      title={side === "left" ? "Sol analog" : "Sağ analog"}
+      title={side === "left" ? L("Left stick", "Sol analog") : L("Right stick", "Sağ analog")}
       aside={
         <span className="num faint small">
           {fixed(2)(processed[0])} · {fixed(2)(processed[1])}
-          {dirty && " · taslak"}
+          {dirty && L(" · draft", " · taslak")}
         </span>
       }
       className="stick-panel"
@@ -66,23 +67,23 @@ function StickPanel({ side, cfg, input, dirty, onChange }: { side: Side; cfg: St
         <CurvePlot shape={cfg} onChange={set} live={live} />
       </div>
       <div className="stick-controls">
-        <Slider label="İç ölü bölge" min={0} max={0.5} step={0.01} value={cfg.innerDeadzone} format={pct} onChange={(innerDeadzone) => set({ innerDeadzone })} />
-        <Slider label="Dış ölü bölge" min={0} max={0.5} step={0.01} value={cfg.outerDeadzone} format={pct} onChange={(outerDeadzone) => set({ outerDeadzone })} />
-        <Slider label="Anti ölü bölge" min={0} max={0.5} step={0.01} value={cfg.antiDeadzone} format={pct} onChange={(antiDeadzone) => set({ antiDeadzone })} />
+        <Slider label={L("Inner deadzone", "İç ölü bölge")} min={0} max={0.5} step={0.01} value={cfg.innerDeadzone} format={pct} onChange={(innerDeadzone) => set({ innerDeadzone })} />
+        <Slider label={L("Outer deadzone", "Dış ölü bölge")} min={0} max={0.5} step={0.01} value={cfg.outerDeadzone} format={pct} onChange={(outerDeadzone) => set({ outerDeadzone })} />
+        <Slider label={L("Anti-deadzone", "Anti ölü bölge")} min={0} max={0.5} step={0.01} value={cfg.antiDeadzone} format={pct} onChange={(antiDeadzone) => set({ antiDeadzone })} />
         <div className="row-field">
-          <span className="label">Ölü bölge şekli</span>
+          <span className="label">{L("Deadzone shape", "Ölü bölge şekli")}</span>
           <Segmented
-            label="Ölü bölge şekli"
+            label={L("Deadzone shape", "Ölü bölge şekli")}
             value={cfg.shape}
             onChange={(shape) => set({ shape })}
             options={[
-              { id: "round", label: "Yuvarlak" },
-              { id: "square", label: "Kare" },
+              { id: "round", label: L("Round", "Yuvarlak") },
+              { id: "square", label: L("Square", "Kare") },
             ]}
           />
         </div>
         <div className="row-field">
-          <span className="label">Ters çevir</span>
+          <span className="label">{L("Invert", "Ters çevir")}</span>
           <Check label="X" checked={cfg.invertX} onChange={(invertX) => set({ invertX })} />
           <Check label="Y" checked={cfg.invertY} onChange={(invertY) => set({ invertY })} />
         </div>
@@ -94,15 +95,15 @@ function StickPanel({ side, cfg, input, dirty, onChange }: { side: Side; cfg: St
 function GyroPanel({ draft, input, calibration, onChange }: { draft: Profile; input: Input | null; calibration?: Notice; onChange: (g: Profile["gyro"]) => void }) {
   const g = draft.gyro;
   const running = calibration && calibration.progress !== undefined && calibration.progress < 1;
-  const f = (n: number) => (n >= 0 ? "+" : "−") + Math.abs(n).toFixed(1).replace(".", ",");
+  const f = (n: number) => (n >= 0 ? "+" : "−") + Math.abs(n).toFixed(1).replace(".", L(".", ","));
   return (
     <Section title="Gyro" className="gyro-panel">
       <div className="gyro-grid">
         <div className="gyro-controls">
-          <Slider label="Hassasiyet" min={0.1} max={4} step={0.05} value={g.sensitivity} format={(v) => `${fixed(2)(v)}×`} onChange={(sensitivity) => onChange({ ...g, sensitivity })} />
-          <Slider label="Yumuşatma" min={0} max={1} step={0.01} value={g.smoothing} format={pct} onChange={(smoothing) => onChange({ ...g, smoothing })} />
+          <Slider label={L("Sensitivity", "Hassasiyet")} min={0.1} max={4} step={0.05} value={g.sensitivity} format={(v) => `${fixed(2)(v)}×`} onChange={(sensitivity) => onChange({ ...g, sensitivity })} />
+          <Slider label={L("Smoothing", "Yumuşatma")} min={0} max={1} step={0.01} value={g.smoothing} format={pct} onChange={(smoothing) => onChange({ ...g, smoothing })} />
           <div className="row-field">
-            <span className="label">Ters çevir</span>
+            <span className="label">{L("Invert", "Ters çevir")}</span>
             <Check label="X" checked={g.invertX} onChange={(invertX) => onChange({ ...g, invertX })} />
             <Check label="Y" checked={g.invertY} onChange={(invertY) => onChange({ ...g, invertY })} />
           </div>
@@ -114,7 +115,7 @@ function GyroPanel({ draft, input, calibration, onChange }: { draft: Profile; in
           </dl>
           <div className="cal-row">
             <button className="button" disabled={!!running || !input} onClick={() => send({ type: "gyro.calibrate" })}>
-              Kalibre et
+              {L("Calibrate", "Kalibre et")}
             </button>
             {calibration ? (
               <span className="cal-status">
@@ -126,7 +127,7 @@ function GyroPanel({ draft, input, calibration, onChange }: { draft: Profile; in
                 <span className="small">{calibration.message}</span>
               </span>
             ) : (
-              <span className="hint">Kontrolcüyü düz bir yüzeye koy, 3 saniye dokunma.</span>
+              <span className="hint">{L("Set the controller on a flat surface and leave it still for 3 seconds.", "Kontrolcüyü düz bir yüzeye koy, 3 saniye dokunma.")}</span>
             )}
           </div>
         </div>
@@ -138,12 +139,12 @@ function GyroPanel({ draft, input, calibration, onChange }: { draft: Profile; in
 export function Sticks() {
   const { draft, draftBase, edit, dirty, notices } = useApp();
   const input = useInput();
-  if (!draft) return <div className="page"><PageHead title="Analoglar" /></div>;
+  if (!draft) return <div className="page"><PageHead title={L("Sticks", "Analoglar")} /></div>;
   const calibration = [...notices].reverse().find((n) => n.kind === "gyroCalibration");
 
   return (
     <div className="page sticks-page">
-      <PageHead title="Analoglar">
+      <PageHead title={L("Sticks", "Analoglar")}>
         <DraftBar />
       </PageHead>
       <div className="sticks-grid">

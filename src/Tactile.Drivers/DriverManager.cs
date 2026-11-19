@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+﻿using Tactile.Core;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -24,7 +25,7 @@ internal sealed class DriverManager(IVhciControl vhci, IHidHideControl hidHide, 
         }
         catch (Exception e) when (e is not ArgumentOutOfRangeException)
         {
-            return new DriverStatus(kind, DriverState.Error, null, "Sürücü durumu okunamadı: " + e.Message);
+            return new DriverStatus(kind, DriverState.Error, null, $"Could not read driver status: {Text.English(e)}", $"Sürücü durumu okunamadı: {e.Message}");
         }
     }
 
@@ -35,16 +36,16 @@ internal sealed class DriverManager(IVhciControl vhci, IHidHideControl hidHide, 
         {
             return interfaceCount == 0
                 ? new DriverStatus(DriverKind.UsbIp, DriverState.Missing, null, null)
-                : new DriverStatus(DriverKind.UsbIp, DriverState.Unsupported, null, $"usbip-win2 sürümü belirlenemedi; {required} gerekli.");
+                : new DriverStatus(DriverKind.UsbIp, DriverState.Unsupported, null, $"Could not detect the usbip-win2 version. Version {required} is required.", $"usbip-win2 sürümü belirlenemedi; {required} gerekli.");
         }
 
         if (version != required)
-            return new DriverStatus(DriverKind.UsbIp, DriverState.Unsupported, version, $"usbip-win2 {version} desteklenmiyor; {required} gerekli.");
+            return new DriverStatus(DriverKind.UsbIp, DriverState.Unsupported, version, $"usbip-win2 {version} is unsupported. Version {required} is required.", $"usbip-win2 {version} desteklenmiyor; {required} gerekli.");
         return interfaceCount switch
         {
             1 => new DriverStatus(DriverKind.UsbIp, DriverState.Ready, version, null),
-            0 => new DriverStatus(DriverKind.UsbIp, DriverState.Error, version, "usbip-win2 yüklü ama sürücü etkin değil. Bilgisayarı yeniden başlatın."),
-            _ => new DriverStatus(DriverKind.UsbIp, DriverState.Error, version, "Birden fazla usbip-win2 denetleyicisi bulundu."),
+            0 => new DriverStatus(DriverKind.UsbIp, DriverState.Error, version, "usbip-win2 is installed but inactive. Restart your PC.", "usbip-win2 yüklü ama sürücü etkin değil. Bilgisayarı yeniden başlatın."),
+            _ => new DriverStatus(DriverKind.UsbIp, DriverState.Error, version, "Found more than one usbip-win2 controller.", "Birden fazla usbip-win2 denetleyicisi bulundu."),
         };
     }
 
@@ -52,9 +53,9 @@ internal sealed class DriverManager(IVhciControl vhci, IHidHideControl hidHide, 
     {
         HidHideProbe.Ok => new DriverStatus(DriverKind.HidHide, DriverState.Ready, version, null),
         HidHideProbe.NotFound when version is null => new DriverStatus(DriverKind.HidHide, DriverState.Missing, null, null),
-        HidHideProbe.NotFound => new DriverStatus(DriverKind.HidHide, DriverState.Error, version, "HidHide yüklü ama sürücü çalışmıyor. Bilgisayarı yeniden başlatın."),
-        HidHideProbe.Busy => new DriverStatus(DriverKind.HidHide, DriverState.Error, version, "HidHide başka bir uygulama tarafından kullanılıyor (ör. HidHide ayarları). Onu kapatıp tekrar deneyin."),
-        _ => new DriverStatus(DriverKind.HidHide, DriverState.Error, version, "HidHide sürücüsüne erişilemedi."),
+        HidHideProbe.NotFound => new DriverStatus(DriverKind.HidHide, DriverState.Error, version, "HidHide is installed but inactive. Restart your PC.", "HidHide yüklü ama sürücü çalışmıyor. Bilgisayarı yeniden başlatın."),
+        HidHideProbe.Busy => new DriverStatus(DriverKind.HidHide, DriverState.Error, version, "Another app is using HidHide, such as HidHide Settings. Close it and try again.", "HidHide başka bir uygulama tarafından kullanılıyor (ör. HidHide ayarları). Onu kapatıp tekrar deneyin."),
+        _ => new DriverStatus(DriverKind.HidHide, DriverState.Error, version, "Could not access the HidHide driver.", "HidHide sürücüsüne erişilemedi."),
     };
 
     private static string? ReadUninstallValue(string subKey, string name)
@@ -95,9 +96,9 @@ internal sealed class DriverManager(IVhciControl vhci, IHidHideControl hidHide, 
         {
             Directory.CreateDirectory(downloadDir);
             if (pkg.Url.Scheme != Uri.UriSchemeHttps)
-                return Fail("Yalnızca HTTPS üzerinden indirilebilir.");
+                return Fail("Downloads require HTTPS.", "Yalnızca HTTPS üzerinden indirilebilir.");
 
-            progress?.Report($"{pkg.Name} {pkg.Version} indiriliyor…");
+            progress?.Report(Text.Pick($"Downloading {pkg.Name} {pkg.Version}…", $"{pkg.Name} {pkg.Version} indiriliyor…"));
             try
             {
                 await DownloadAsync(pkg, file, progress, ct).ConfigureAwait(false);
@@ -105,24 +106,24 @@ internal sealed class DriverManager(IVhciControl vhci, IHidHideControl hidHide, 
             catch (OperationCanceledException)
             {
                 TryDelete(file);
-                return Fail("Kurulum iptal edildi.");
+                return Fail("Installation cancelled.", "Kurulum iptal edildi.");
             }
-            catch (Exception e) when (e is HttpRequestException or IOException or UnauthorizedAccessException)
+            catch (Exception e) when (e is HttpRequestException or IOException or UnauthorizedAccessException or DownloadFailure)
             {
                 TryDelete(file);
-                return Fail("İndirme başarısız: " + e.Message);
+                return Fail($"Download failed: {Text.English(e)}", $"İndirme başarısız: {e.Message}");
             }
 
-            progress?.Report("Dosya doğrulanıyor…");
+            progress?.Report(Text.Pick("Verifying file…", "Dosya doğrulanıyor…"));
             if (VerifyOrDelete(file, pkg) is { } error)
-                return Fail(error);
+                return Fail(error.En, error.Tr);
 
-            progress?.Report("Kurulum başlatılıyor; Windows yönetici izni isteyecek.");
+            progress?.Report(Text.Pick("Starting setup. Windows will ask for administrator permission.", "Kurulum başlatılıyor; Windows yönetici izni isteyecek."));
             return await RunInstallerAsync(file, pkg, progress, ct).ConfigureAwait(false);
         }
         catch (Exception e)
         {
-            return Fail("Kurulum başarısız: " + e.Message);
+            return Fail($"Installation failed: {Text.English(e)}", $"Kurulum başarısız: {e.Message}");
         }
     }
 
@@ -132,7 +133,7 @@ internal sealed class DriverManager(IVhciControl vhci, IHidHideControl hidHide, 
         using HttpResponseMessage resp = await Http.GetAsync(pkg.Url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
         if (resp.RequestMessage?.RequestUri?.Scheme is { } s && s != Uri.UriSchemeHttps)
-            throw new HttpRequestException("HTTPS olmayan bir adrese yönlendirildi.");
+            throw new DownloadFailure(new("The download redirected to a non-HTTPS address.", "HTTPS olmayan bir adrese yönlendirildi."));
         await using Stream src = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         await using var dst = new FileStream(file, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         var buf = new byte[81920];
@@ -143,40 +144,40 @@ internal sealed class DriverManager(IVhciControl vhci, IHidHideControl hidHide, 
         {
             total += n;
             if (total > pkg.Size)
-                throw new IOException("İndirilen dosya beklenenden büyük.");
+                throw new DownloadFailure(new("The download is larger than expected.", "İndirilen dosya beklenenden büyük."));
             await dst.WriteAsync(buf.AsMemory(0, n), ct).ConfigureAwait(false);
             int percent = (int)(total * 100 / pkg.Size);
             if (percent / 10 != lastPercent / 10)
             {
                 lastPercent = percent;
-                progress?.Report($"İndiriliyor… %{percent}");
+                progress?.Report(Text.Pick($"Downloading… {percent}%", $"İndiriliyor… %{percent}"));
             }
         }
     }
 
     /// <summary>Size, SHA-256, Authenticode and (if pinned) signer. Any failure deletes the file.</summary>
-    internal static string? VerifyOrDelete(string file, DriverPackage pkg)
+    internal static LocalizedMessage? VerifyOrDelete(string file, DriverPackage pkg)
     {
-        string? error = Verify(file, pkg);
+        LocalizedMessage? error = Verify(file, pkg);
         if (error is not null)
             TryDelete(file);
         return error;
     }
 
-    private static string? Verify(string file, DriverPackage pkg)
+    private static LocalizedMessage? Verify(string file, DriverPackage pkg)
     {
         var info = new FileInfo(file);
         if (!info.Exists || info.Length != pkg.Size)
-            return "İndirilen dosyanın boyutu beklenenden farklı; dosya silindi.";
+            return new LocalizedMessage("The download size did not match. The file was deleted.", "İndirilen dosyanın boyutu beklenenden farklı; dosya silindi.");
         string hash;
         using (FileStream fs = File.OpenRead(file))
             hash = Convert.ToHexString(SHA256.HashData(fs));
         if (!string.Equals(hash, pkg.Sha256, StringComparison.OrdinalIgnoreCase))
-            return "İndirilen dosyanın SHA-256 özeti eşleşmiyor; dosya silindi.";
+            return new LocalizedMessage("The SHA-256 checksum did not match. The file was deleted.", "İndirilen dosyanın SHA-256 özeti eşleşmiyor; dosya silindi.");
         if (!Authenticode.IsTrusted(file))
-            return "Dosyanın dijital imzası geçerli değil; dosya silindi.";
+            return new LocalizedMessage("The file's digital signature is invalid. The file was deleted.", "Dosyanın dijital imzası geçerli değil; dosya silindi.");
         if (pkg.ExpectedSigner is { } signer && !Authenticode.SignerMatches(file, signer))
-            return "Dosya beklenen yayıncı tarafından imzalanmamış; dosya silindi.";
+            return new LocalizedMessage("The file was signed by an unexpected publisher. The file was deleted.", "Dosya beklenen yayıncı tarafından imzalanmamış; dosya silindi.");
         return null;
     }
 
@@ -189,32 +190,35 @@ internal sealed class DriverManager(IVhciControl vhci, IHidHideControl hidHide, 
         }
         catch (Win32Exception e) when (e.NativeErrorCode == Native.ErrorCancelled)
         {
-            return Fail("Yönetici izni verilmedi.");
+            return Fail("Administrator permission was declined.", "Yönetici izni verilmedi.");
         }
 
         if (p is null)
-            return Fail("Kurulum başlatılamadı.");
+            return Fail("Could not start setup.", "Kurulum başlatılamadı.");
         using (p)
         {
-            progress?.Report("Kurulum sürüyor…");
+            progress?.Report(Text.Pick("Installing…", "Kurulum sürüyor…"));
             try
             {
                 await p.WaitForExitAsync(ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                return Fail("Kurulum arka planda sürüyor; bitince bilgisayarı yeniden başlatın.");
+                return Fail("Setup is still running in the background. Restart your PC when it finishes.", "Kurulum arka planda sürüyor; bitince bilgisayarı yeniden başlatın.");
             }
 
             int code = p.ExitCode;
             TryDelete(file);
             return code is 0 or 3010 or 1641
-                ? new InstallResult(true, true, $"{pkg.Name} kuruldu. Sürücünün çalışması için bilgisayarı yeniden başlatın.")
-                : Fail($"Kurulum başarısız oldu (çıkış kodu {code}).");
+                ? new InstallResult(true, true, Text.Pick($"{pkg.Name} was installed. Restart your PC to enable the driver.", $"{pkg.Name} kuruldu. Sürücünün çalışması için bilgisayarı yeniden başlatın."))
+                : Fail($"Installation failed (exit code {code}).", $"Kurulum başarısız oldu (çıkış kodu {code}).");
         }
     }
 
-    private static InstallResult Fail(string message) => new(false, false, message);
+    private static InstallResult Fail(string en, string tr) =>
+        new(false, false, Text.Pick(en, tr)) { Translation = new(en, tr) };
+
+    private sealed class DownloadFailure(LocalizedMessage translation) : LocalizedException(translation, null);
 
     private static void TryDelete(string file)
     {

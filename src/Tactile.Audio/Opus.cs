@@ -1,3 +1,4 @@
+using Tactile.Core;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
@@ -24,7 +25,7 @@ public sealed partial class OpusEncoder : IDisposable
             Check(error);
             if (encoder.IsInvalid)
             {
-                throw new AudioUnavailableException("Opus kodlayıcı başlatılamadı.");
+                throw new AudioUnavailableException(new LocalizedMessage("Could not start the Opus encoder.", "Opus kodlayıcı başlatılamadı."));
             }
 
             Check(Control(encoder, SetBitrate, 160_000));
@@ -37,7 +38,7 @@ public sealed partial class OpusEncoder : IDisposable
         catch (Exception e) when (e is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
         {
             encoder.Dispose();
-            throw new AudioUnavailableException("Kontrolcü hoparlörü için opus.dll yüklenemedi.", e);
+            throw new AudioUnavailableException(new LocalizedMessage("Could not load opus.dll for the controller speaker.", "Kontrolcü hoparlörü için opus.dll yüklenemedi."), e);
         }
         catch
         {
@@ -50,12 +51,12 @@ public sealed partial class OpusEncoder : IDisposable
     {
         if (stereo480.Length != FrameSamples * Channels)
         {
-            throw new ArgumentException("Opus için 480 stereo örnek gerekli.", nameof(stereo480));
+            throw new ArgumentException(Text.Pick("Opus requires 480 stereo samples.", "Opus için 480 stereo örnek gerekli."), nameof(stereo480));
         }
 
         if (frame200.Length != FrameBytes)
         {
-            throw new ArgumentException("Opus paketi 200 bayt olmalı.", nameof(frame200));
+            throw new ArgumentException(Text.Pick("The Opus packet must be 200 bytes.", "Opus paketi 200 bayt olmalı."), nameof(frame200));
         }
 
         fixed (float* pcm = stereo480)
@@ -76,7 +77,7 @@ public sealed partial class OpusEncoder : IDisposable
     {
         if (result < 0)
         {
-            throw new AudioUnavailableException($"Kontrolcü hoparlörü için Opus işlemi başarısız oldu ({result}).");
+            throw new AudioUnavailableException(new LocalizedMessage($"Opus failed for the controller speaker ({result}).", $"Kontrolcü hoparlörü için Opus işlemi başarısız oldu ({result})."));
         }
     }
 

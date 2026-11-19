@@ -161,7 +161,7 @@ internal sealed class MacroRunner : IDisposable
         {
             if (_thread is null && !_disposed)
             {
-                _thread = new Thread(Loop) { IsBackground = true, Name = "Tactile macros" };
+                _thread = new Thread(Loop) { IsBackground = true, Name = "TriggerForge: macros" };
                 _thread.Start();
             }
         }

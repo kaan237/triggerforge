@@ -4,4 +4,5 @@
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../Tactile.Device.Hid/Tactile.Device.Hid.csproj" /></ItemGroup>
   <ItemGroup><InternalsVisibleTo Include="Tactile.Tests" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../Tactile.Localization/Tactile.Localization.csproj" /></ItemGroup>
 </Project>

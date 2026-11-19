@@ -79,7 +79,7 @@ internal sealed class UdpApiServer(
             {
                 if (_worker is null)
                 {
-                    var worker = new Thread(Run) { IsBackground = true, Name = "Tactile UDP" };
+                    var worker = new Thread(Run) { IsBackground = true, Name = "TriggerForge: UDP" };
                     worker.Start();
                     _worker = worker;
                 }
@@ -281,7 +281,7 @@ internal sealed class UdpApiServer(
             if (firstFailure)
             {
                 report(new Notice(NoticeKinds.Info,
-                    $"UDP portu {_port} kullanımda. DSX açıksa kapatın ya da portu değiştirin."));
+                    Text.Pick($"UDP port {_port} is in use. Close DSX if it is running, or choose another port.", $"UDP portu {_port} kullanımda. DSX açıksa kapatın ya da portu değiştirin.")));
             }
 
             return;
@@ -310,7 +310,7 @@ internal sealed class UdpApiServer(
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or
             NotSupportedException or System.Security.SecurityException)
         {
-            report(new Notice(NoticeKinds.Info, "DSX port dosyası yazılamadı."));
+            report(new Notice(NoticeKinds.Info, Text.Pick("Could not write the DSX port file.", "DSX port dosyası yazılamadı.")));
         }
     }
 
@@ -462,7 +462,7 @@ internal sealed class UdpApiServer(
         UdpControllerStatus controller = controllerStatus();
         byte[] answer = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            Status = "Tactile: komutlar alındı",
+            Status = "TriggerForge: commands received",
             TimeReceived = DateTime.Now.ToString(),
             isControllerConnected = controller.Connected,
             BatteryLevel = controller.Battery ?? 0,

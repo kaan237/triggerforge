@@ -1,3 +1,4 @@
+import { L, locale } from "./i18n";
 // Key names (members of Tactile.Input.Key in camelCase), their labels, and the
 // KeyboardEvent.code → name mapping from docs/contract-phase3.md.
 
@@ -6,22 +7,22 @@ import type { KeyName } from "./host";
 export type KeyDef = { name: KeyName; label: string; group: string; capture: boolean };
 
 const letters = "abcdefghijklmnopqrstuvwxyz".split("");
-const groups: { group: string; keys: [KeyName, string][]; capture?: boolean }[] = [
-  { group: "Harfler", keys: letters.map((l) => [l, l.toUpperCase()]) },
-  { group: "Rakamlar", keys: "1234567890".split("").map((d) => [`digit${d}`, d]) },
-  { group: "Değiştiriciler", keys: [["leftCtrl", "Ctrl"], ["rightCtrl", "Sağ Ctrl"], ["leftShift", "Shift"], ["rightShift", "Sağ Shift"], ["leftAlt", "Alt"], ["rightAlt", "Sağ Alt"], ["leftWin", "Win"], ["rightWin", "Sağ Win"]] },
+const groups = (): { group: string; keys: [KeyName, string][] }[] => [
+  { group: L("Letters", "Harfler"), keys: letters.map((l) => [l, l.toUpperCase()]) },
+  { group: L("Numbers", "Rakamlar"), keys: "1234567890".split("").map((d) => [`digit${d}`, d]) },
+  { group: L("Modifiers", "Değiştiriciler"), keys: [["leftCtrl", "Ctrl"], ["rightCtrl", L("Right Ctrl", "Sağ Ctrl")], ["leftShift", "Shift"], ["rightShift", L("Right Shift", "Sağ Shift")], ["leftAlt", "Alt"], ["rightAlt", L("Right Alt", "Sağ Alt")], ["leftWin", "Win"], ["rightWin", L("Right Win", "Sağ Win")]] },
   {
-    group: "Düzen",
+    group: L("Navigation", "Düzen"),
     keys: [
-      ["escape", "Esc"], ["tab", "Tab"], ["capsLock", "Caps Lock"], ["space", "Boşluk"], ["enter", "Enter"], ["backspace", "Geri sil"],
+      ["escape", "Esc"], ["tab", "Tab"], ["capsLock", "Caps Lock"], ["space", L("Space", "Boşluk")], ["enter", "Enter"], ["backspace", L("Backspace", "Geri sil")],
       ["insert", "Insert"], ["delete", "Delete"], ["home", "Home"], ["end", "End"], ["pageUp", "Page Up"], ["pageDown", "Page Down"],
-      ["up", "Yukarı ok"], ["down", "Aşağı ok"], ["left", "Sol ok"], ["right", "Sağ ok"],
-      ["printScreen", "Print Screen"], ["scrollLock", "Scroll Lock"], ["menu", "Menü"],
+      ["up", L("Up arrow", "Yukarı ok")], ["down", L("Down arrow", "Aşağı ok")], ["left", L("Left arrow", "Sol ok")], ["right", L("Right arrow", "Sağ ok")],
+      ["printScreen", "Print Screen"], ["scrollLock", "Scroll Lock"], ["menu", L("Menu", "Menü")],
     ],
   },
-  { group: "İşlev", keys: Array.from({ length: 24 }, (_, i) => [`f${i + 1}`, `F${i + 1}`] as [KeyName, string]) },
+  { group: L("Function keys", "İşlev"), keys: Array.from({ length: 24 }, (_, i) => [`f${i + 1}`, `F${i + 1}`] as [KeyName, string]) },
   {
-    group: "Noktalama",
+    group: L("Punctuation", "Noktalama"),
     keys: [
       ["minus", "-"], ["equals", "="], ["leftBracket", "["], ["rightBracket", "]"], ["backslash", "\\"], ["semicolon", ";"],
       ["quote", "'"], ["backquote", "`"], ["comma", ","], ["period", "."], ["slash", "/"], ["intlBackslash", "< (ISO)"],
@@ -36,10 +37,10 @@ const groups: { group: string; keys: [KeyName, string][]; capture?: boolean }[] 
     ],
   },
   {
-    group: "Medya",
+    group: L("Media", "Medya"),
     keys: [
-      ["mediaPlayPause", "Oynat/Duraklat"], ["mediaNext", "Sonraki parça"], ["mediaPrevious", "Önceki parça"], ["mediaStop", "Durdur"],
-      ["volumeUp", "Ses aç"], ["volumeDown", "Ses kıs"], ["volumeMute", "Sesi kapat"],
+      ["mediaPlayPause", L("Play/Pause", "Oynat/Duraklat")], ["mediaNext", L("Next track", "Sonraki parça")], ["mediaPrevious", L("Previous track", "Önceki parça")], ["mediaStop", L("Stop", "Durdur")],
+      ["volumeUp", L("Volume up", "Ses aç")], ["volumeDown", L("Volume down", "Ses kıs")], ["volumeMute", L("Mute sound", "Sesi kapat")],
     ],
   },
 ];
@@ -47,13 +48,25 @@ const groups: { group: string; keys: [KeyName, string][]; capture?: boolean }[] 
 // Keys a browser page usually never sees (the OS takes them first).
 const hardToCapture = new Set(["leftWin", "rightWin", "printScreen", "mediaPlayPause", "mediaNext", "mediaPrevious", "mediaStop", "volumeUp", "volumeDown", "volumeMute"]);
 
-export const keyDefs: KeyDef[] = groups.flatMap((g) =>
+const buildKeyDefs = (): KeyDef[] => groups().flatMap((g) =>
   g.keys.map(([name, label]) => ({ name, label, group: g.group, capture: !hardToCapture.has(name) && !/^f(1[3-9]|2\d)$/.test(name) })),
 );
-const byName = new Map(keyDefs.map((k) => [k.name, k]));
+let keyLocale = locale();
+let definitions = buildKeyDefs();
+let byName = new Map(definitions.map((k) => [k.name, k]));
+
+function updateLabels() {
+  if (keyLocale === locale()) return;
+  keyLocale = locale();
+  definitions = buildKeyDefs();
+  byName = new Map(definitions.map((k) => [k.name, k]));
+}
 
 export const isKey = (name: string) => byName.has(name);
-export const keyLabel = (name: KeyName) => (name === "none" ? "—" : byName.get(name)?.label ?? name);
+export function keyLabel(name: KeyName): string {
+  updateLabels();
+  return name === "none" ? "—" : byName.get(name)?.label ?? name;
+}
 export const chordLabel = (keys: KeyName[] | undefined) => (keys && keys.length ? keys.map(keyLabel).join(" + ") : "—");
 
 export const modifierKeys = new Set(["leftCtrl", "rightCtrl", "leftShift", "rightShift", "leftAlt", "rightAlt", "leftWin", "rightWin"]);
@@ -85,7 +98,8 @@ export function codeToKey(code: string): KeyName | null {
 }
 
 export function searchKeys(query: string): KeyDef[] {
-  const q = query.trim().toLocaleLowerCase("tr");
-  if (!q) return keyDefs;
-  return keyDefs.filter((k) => k.label.toLocaleLowerCase("tr").includes(q) || k.name.toLowerCase().includes(q) || k.group.toLocaleLowerCase("tr").includes(q));
+  updateLabels();
+  const q = query.trim().toLocaleLowerCase(locale());
+  if (!q) return definitions;
+  return definitions.filter((k) => k.label.toLocaleLowerCase(locale()).includes(q) || k.name.toLowerCase().includes(q) || k.group.toLocaleLowerCase(locale()).includes(q));
 }

@@ -9,6 +9,7 @@ using Tactile.Device.DualSense;
 
 namespace Tactile.Tests.Integration;
 
+[Collection("Localization")]
 public sealed class UdpApiServerTests
 {
     private const string Status = """{"tactile":1,"commands":[{"cmd":"status"}]}""";
@@ -38,7 +39,7 @@ public sealed class UdpApiServerTests
         fixture.Controller = default;
         fixture.Advance(10);
         JsonElement dsx = await Reply(client, Dsx);
-        Assert.Equal("Tactile: komutlar alındı", dsx.GetProperty("Status").GetString());
+        Assert.Equal("TriggerForge: commands received", dsx.GetProperty("Status").GetString());
         Assert.True(DateTime.TryParse(dsx.GetProperty("TimeReceived").GetString(), out _));
         Assert.False(dsx.GetProperty("isControllerConnected").GetBoolean());
         Assert.Equal(0, dsx.GetProperty("BatteryLevel").GetInt32());
@@ -217,6 +218,7 @@ public sealed class UdpApiServerTests
     [Fact]
     public async Task File_write_failure_notices_and_keeps_listening()
     {
+        using var language = new TestLanguage(Language.Tr);
         using var fixture = new Fixture(start: false);
         File.WriteAllText(Path.GetDirectoryName(fixture.PortFile)!, "blocked");
         fixture.Server.Configure(fixture.Settings);

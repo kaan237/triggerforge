@@ -1,3 +1,4 @@
+import { L } from "./i18n";
 // Browser-only stand-in for the host. Keeps profiles and settings in memory and fakes
 // a controller so every screen can be used without hardware.
 
@@ -21,7 +22,7 @@ import {
 type Msg = { type: string; [key: string]: unknown };
 
 function sampleProfiles(): Profile[] {
-  const base = defaultProfile("Varsayılan", "0d1f6c2a8e4b4c39a1f05e7d3b2c9a10");
+  const base = defaultProfile(L("Default", "Varsayılan"), "0d1f6c2a8e4b4c39a1f05e7d3b2c9a10");
 
   const ghost = defaultProfile("Ghost of Tsushima", "7a2e91c4d05f4b8e9c3a1d6f2e8b4a57");
   ghost.games = ["GhostOfTsushima.exe"];
@@ -30,7 +31,7 @@ function sampleProfiles(): Profile[] {
   ghost.triggers.right = { mode: "bow", params: { start: 1, end: 6, strength: 6, snap: 4 }, zones: null, frequency: 0 };
   ghost.sticks.right = { ...ghost.sticks.right, innerDeadzone: 0.08, curve: "exponential", exponent: 1.6 };
 
-  const race = defaultProfile("Yarış", "c3b8f0e1a2d94f6b8e7c5a3d1f9b2e46");
+  const race = defaultProfile(L("Racing", "Yarış"), "c3b8f0e1a2d94f6b8e7c5a3d1f9b2e46");
   race.games = ["ForzaHorizon5.exe", "ACC.exe"];
   race.lightbar = { effect: "battery", color: "#20E040", color2: "#000000", speed: 1, brightness: "high" };
   race.playerLeds = { mode: "custom", number: 1, mask: 0b10001 };
@@ -41,7 +42,7 @@ function sampleProfiles(): Profile[] {
   race.macros = [
     {
       id: "5e1d7c3a9b2f4e60a8c4d2b1f0e9a736",
-      name: "Fotoğraf modu",
+      name: L("Photo mode", "Fotoğraf modu"),
       repeat: "once",
       steps: [
         { op: "tap", key: "p" },
@@ -164,6 +165,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       activeReason,
       mapping: { active: active().mapping.enabled && !mappingPaused, paused: mappingPaused, blockedBy: null },
       elevated: false,
+      portable: false,
     });
   const sendProfiles = () => emit({ type: "profiles", list: clone(profiles), activeId });
 
@@ -198,7 +200,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         (gamePlaying && h.gameAudio !== "off"),
       source: source === "app" ? `app:${app}` : source,
       problem: missingApp !== undefined
-        ? missingApp ? `${missingApp} çalışmıyor.` : "Uygulamanın dosya adı boş."
+        ? missingApp ? L(`${missingApp} is not running.`, `${missingApp} çalışmıyor.`) : L("Enter an app file name.", "Uygulamanın dosya adı boş.")
         : null,
     };
     if (force || next.streaming !== lastHaptics?.streaming || next.source !== lastHaptics?.source || next.problem !== lastHaptics?.problem) {
@@ -233,21 +235,25 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     const e = emulationStatus();
     if (e.attached && !steamNoticed) {
       steamNoticed = true;
-      emit({ type: "notice", kind: "emulation", message: "Steam Input bu oyunda açıksa çift kontrolcü görünür; oyunun Steam ayarlarında Steam Input'u kapatın." });
+      emit({ type: "notice", kind: "emulation", message: L("If the game shows two controllers, turn off Steam Input in its Steam settings.", "Steam Input bu oyunda açıksa çift kontrolcü görünür; oyunun Steam ayarlarında Steam Input'u kapatın.") });
     }
     emit(e);
     sendHaptics(false, e.audio === "playing");
   }
 
   function install(kind: DriverKind) {
-    if (installing.has(kind)) return emit({ type: "error", message: "Kurulum zaten sürüyor." });
+    if (installing.has(kind)) return emit({ type: "error", message: L("An installation is already in progress.", "Kurulum zaten sürüyor.") });
     installing.add(kind);
-    const steps = ["Kurulum dosyası indiriliyor…", "İmza ve SHA-256 denetleniyor…", "Kurulum başlatıldı, Windows izin isteyebilir…"];
-    steps.forEach((message, i) => window.setTimeout(() => emit({ type: "driver.progress", kind, message, done: false, ok: false }), 400 + i * 900));
+    const steps = [
+      () => L("Downloading installer…", "Kurulum dosyası indiriliyor…"),
+      () => L("Checking signature and SHA-256…", "İmza ve SHA-256 denetleniyor…"),
+      () => L("Setup started. Windows may ask for permission…", "Kurulum başlatıldı, Windows izin isteyebilir…"),
+    ];
+    steps.forEach((step, i) => window.setTimeout(() => emit({ type: "driver.progress", kind, message: step(), done: false, ok: false }), 400 + i * 900));
     window.setTimeout(() => {
       installing.delete(kind);
       drivers[kind] = { state: "ready", version: kind === "usbIp" ? "0.9.8.1" : "1.5.230" };
-      emit({ type: "driver.progress", kind, message: "Kuruldu. Kurulumu bitirmek için bilgisayarı yeniden başlatın.", done: true, ok: true });
+      emit({ type: "driver.progress", kind, message: L("Installed. Restart your PC to finish setup.", "Kuruldu. Kurulumu bitirmek için bilgisayarı yeniden başlatın."), done: true, ok: true });
       sendEmulation();
     }, 400 + steps.length * 900);
   }
@@ -289,14 +295,14 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     const id = window.setInterval(() => {
       step++;
       if (step <= 10) {
-        emit({ type: "notice", kind: "gyroCalibration", message: "Kontrolcüyü masada sabit tut", progress: step / 10 });
+        emit({ type: "notice", kind: "gyroCalibration", message: L("Keep the controller still on a flat surface", "Kontrolcüyü masada sabit tut"), progress: step / 10 });
       }
       if (step === 10) {
         window.clearInterval(id);
-        window.setTimeout(() => emit({ type: "notice", kind: "gyroCalibration", message: "Gyro kalibre edildi. Kayma −0,3 °/s düzeltildi.", progress: 1 }), 150);
+        window.setTimeout(() => emit({ type: "notice", kind: "gyroCalibration", message: L("Gyro calibrated. Corrected −0.3 °/s drift.", "Gyro kalibre edildi. Kayma −0,3 °/s düzeltildi."), progress: 1 }), 150);
       }
     }, 300);
-    emit({ type: "notice", kind: "gyroCalibration", message: "Kontrolcüyü masada sabit tut", progress: 0 });
+    emit({ type: "notice", kind: "gyroCalibration", message: L("Keep the controller still on a flat surface", "Kontrolcüyü masada sabit tut"), progress: 0 });
   }
 
   function simTick() {
@@ -344,7 +350,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     // Slow drain so the low battery notice shows up once in a long session.
     if (tick % 1800 === 0 && battery > 5) {
       battery--;
-      if (settings.lowBatteryWarnings.includes(battery)) emit({ type: "notice", kind: "lowBattery", message: `Pil %${battery}` });
+      if (settings.lowBatteryWarnings.includes(battery)) emit({ type: "notice", kind: "lowBattery", message: L(`Battery ${battery}%`, `Pil %${battery}`) });
     }
   }
 
@@ -375,7 +381,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         return;
       }
       case "profile.delete": {
-        if (profiles.length <= 1) return emit({ type: "error", message: "Son profil silinemez." });
+        if (profiles.length <= 1) return emit({ type: "error", message: L("The last profile cannot be deleted.", "Son profil silinemez.") });
         profiles = profiles.filter((p) => p.id !== m.id);
         if (settings.defaultProfileId === m.id) settings = { ...settings, defaultProfileId: profiles[0].id };
         if (activeId === m.id) activate(settings.defaultProfileId, "default");
@@ -400,7 +406,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         try {
           const parsed = JSON.parse(String(m.json)) as Partial<Profile>;
           if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error();
-          const p = normalizeProfile({ ...parsed, id: newId(), name: parsed.name || "İçe aktarılan" });
+          const p = normalizeProfile({ ...parsed, id: newId(), name: parsed.name || L("Imported", "İçe aktarılan") });
           // Shared profiles must not start programs.
           let removed = 0;
           const strip = (a: Action | null): Action | null => (a && a.kind === "run" ? (removed++, { kind: "none" }) : a);
@@ -410,10 +416,10 @@ export function createSimulator(emit: (m: HostMessage) => void) {
           for (const d of ["up", "down", "left", "right"] as const) p.mapping.touchpad.swipes[d] = strip(p.mapping.touchpad.swipes[d])!;
           profiles = [...profiles, p];
           sendProfiles();
-          const note = removed > 0 ? ` ${removed} program çalıştırma eylemi kaldırıldı.` : "";
-          emit({ type: "notice", kind: "info", message: `“${p.name}” içe aktarıldı.${note}` });
+          const note = removed > 0 ? L(` Removed ${removed} launch actions.`, ` ${removed} program çalıştırma eylemi kaldırıldı.`) : "";
+          emit({ type: "notice", kind: "info", message: L(`Imported “${p.name}”.${note}`, `“${p.name}” içe aktarıldı.${note}`) });
         } catch {
-          emit({ type: "error", message: "JSON okunamadı. Dosyanın bir Tactile profili olduğundan emin ol." });
+          emit({ type: "error", message: L("Could not read the JSON. Choose a TriggerForge profile.", "JSON okunamadı. Dosyanın bir Tactile profili olduğundan emin ol.") });
         }
         return;
       }
@@ -422,10 +428,16 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         if (p) emit({ type: "export", id: p.id, json: JSON.stringify(p, null, 2) });
         return;
       }
+      case "logs.export":
+        emit({ type: "logs.exported", ok: false, error: L("Log export is unavailable in preview.", "Önizlemede log arşivi oluşturulmaz.") });
+        return;
+      case "logs.open":
+        emit({ type: "notice", kind: "info", message: L("The log folder is unavailable in preview.", "Önizlemede log klasörü açılmaz.") });
+        return;
       case "telemetry.applyTemplate": {
         const index = profiles.findIndex((p) => p.id === m.profileId);
-        if (index < 0) return emit({ type: "error", message: "Profil bulunamadı." });
-        if (m.template !== "forza") return emit({ type: "error", message: "Telemetri şablonu bulunamadı." });
+        if (index < 0) return emit({ type: "error", message: L("Profile not found.", "Profil bulunamadı.") });
+        if (m.template !== "forza") return emit({ type: "error", message: L("Telemetry template not found.", "Telemetri şablonu bulunamadı.") });
         profiles[index] = { ...profiles[index], telemetry: forzaTemplate() };
         sendProfiles();
         return;
@@ -466,7 +478,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       case "emulation.restore":
         settings = { ...settings, emulation: { ...settings.emulation, enabled: false } };
         emit({ type: "settings", settings: clone(settings) });
-        emit({ type: "notice", kind: "emulation", message: "Kontrolcü geri getirildi: sanal kontrolcü kaldırıldı, gizleme kapatıldı, sanal kontrolcü ayarı kapandı." });
+        emit({ type: "notice", kind: "emulation", message: L("Controller restored. The virtual controller was removed and emulation was turned off.", "Kontrolcü geri getirildi: sanal kontrolcü kaldırıldı, gizleme kapatıldı, sanal kontrolcü ayarı kapandı.") });
         sendEmulation();
         return;
       case "driver.install":
@@ -489,7 +501,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         window.setTimeout(() => emit({ type: "runPicked", path: String.raw`C:\Program Files\Example\example.exe` }), 200);
         return;
       case "app.restartElevated":
-        emit({ type: "notice", kind: "info", message: "Önizlemede yeniden başlatma yok. Uygulamada yönetici izni istenir." });
+        emit({ type: "notice", kind: "info", message: L("Restart is unavailable in preview. The app would ask for administrator permission.", "Önizlemede yeniden başlatma yok. Uygulamada yönetici izni istenir.") });
         return;
 
       // Phase 1 live overrides

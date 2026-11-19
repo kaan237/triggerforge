@@ -70,7 +70,7 @@ internal sealed class TelemetryListener(
             {
                 if (_worker is null)
                 {
-                    var worker = new Thread(Run) { IsBackground = true, Name = "Tactile Forza" };
+                    var worker = new Thread(Run) { IsBackground = true, Name = "TriggerForge: Forza" };
                     worker.Start();
                     _worker = worker;
                 }
@@ -235,7 +235,7 @@ internal sealed class TelemetryListener(
             _retryAt = time + RetryInterval;
             if (firstFailure)
             {
-                report(new Notice(NoticeKinds.Info, $"Forza telemetri portu {_port} kullanımda. Portu değiştirin."));
+                report(new Notice(NoticeKinds.Info, Text.Pick($"Forza telemetry port {_port} is in use. Choose another port.", $"Forza telemetri portu {_port} kullanımda. Portu değiştirin.")));
             }
 
             return;

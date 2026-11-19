@@ -87,18 +87,18 @@ public sealed class GyroCalibrator
     {
         if (Samples < MinSamples)
         {
-            return new(false, default, "Yeterli gyro verisi gelmedi.");
+            return new(false, default, Text.Pick("Not enough gyro data.", "Yeterli gyro verisi gelmedi."));
         }
 
         if (_axes.Any(a => a.StdDev > _maxStdDev))
         {
-            return new(false, default, "Kontrolcü hareket etti; düz bir yüzeye koyup tekrar deneyin.");
+            return new(false, default, Text.Pick("The controller moved. Set it on a flat surface and try again.", "Kontrolcü hareket etti; düz bir yüzeye koyup tekrar deneyin."));
         }
 
         var bias = new Vector3((float)_axes[0].Mean, (float)_axes[1].Mean, (float)_axes[2].Mean);
         if (_axes.Any(a => Math.Abs(a.Mean) > MaxBias))
         {
-            return new(false, default, "Kontrolcü dönüyor gibi; sabit durduğundan emin olun.");
+            return new(false, default, Text.Pick("The controller appears to be turning. Keep it still and try again.", "Kontrolcü dönüyor gibi; sabit durduğundan emin olun."));
         }
 
         return new(true, bias, null);

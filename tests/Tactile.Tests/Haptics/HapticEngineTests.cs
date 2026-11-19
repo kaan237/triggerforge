@@ -4,6 +4,7 @@ using Tactile.Device.DualSense;
 
 namespace Tactile.Tests;
 
+[Collection("Localization")]
 public sealed class HapticEngineTests
 {
     [Theory]
@@ -15,11 +16,14 @@ public sealed class HapticEngineTests
     [InlineData(AudioHapticSource.System, true, true, true)]
     public void Profile_features_keep_one_stream_only_on_bluetooth(AudioHapticSource source, bool clicks, bool rumble, bool expected)
     {
+        using var language = new TestLanguage(Language.Tr);
         using var rig = new Rig();
         var config = new HapticsConfig { Audio = source, App = "Player.exe", Clicks = clicks, RumbleToHaptics = rumble };
         rig.Configure(config, Link.Usb);
         Assert.False(rig.Engine.Status.Streaming);
         Assert.Equal(expected ? "Bluetooth gerekli." : null, rig.Engine.Status.Problem);
+        Text.Current = Language.En;
+        Assert.Equal(expected ? "Bluetooth required." : null, rig.Engine.Status.Problem);
         Assert.Empty(rig.Audio.Starts);
 
         rig.Configure(config);

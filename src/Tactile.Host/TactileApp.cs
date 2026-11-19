@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Tactile.Core;
+using Tactile.Core.Logging;
 using Tactile.Device.DualSense;
 using Tactile.Drivers;
 using Tactile.Emulation;
@@ -32,11 +33,12 @@ internal sealed class TactileApp : ApplicationContext
     private bool _toldAboutTray;
     private bool _exiting;
 
-    public TactileApp(bool startHidden, EventWaitHandle showSignal)
+    public TactileApp(bool startHidden, EventWaitHandle showSignal, AppPaths paths)
     {
-        (DriverPlatform? drivers, IUsbIpServer? server) = StartEmulation();
-        _core = new AppCore(platform: WindowsInputPlatform.Create(), drivers: drivers, server: server);
-        _window = new MainWindow(_core, _largeGlyph.Icon);
+        (DriverPlatform? drivers, IUsbIpServer? server) = StartEmulation(paths.DataDirectory);
+        _core = new AppCore(paths.DataDirectory, platform: WindowsInputPlatform.Create(),
+            drivers: drivers, server: server, portable: paths.Portable);
+        _window = new MainWindow(_core, _largeGlyph.Icon, paths);
         // A handle now, so core events can be marshalled even while the window was never shown.
         _ = _window.Handle;
         _window.FormClosing += OnWindowClosing;
@@ -75,7 +77,7 @@ internal sealed class TactileApp : ApplicationContext
         _emulationTimer.Start();
 
         _showWait = ThreadPool.RegisterWaitForSingleObject(showSignal, (_, _) => Ui(ShowWindow), null, Timeout.Infinite, executeOnlyOnce: false);
-        // `Tactile.exe --restore` started while we run: undo here, then say so.
+        // A restore command started while we run: undo here, then acknowledge it.
         _restoreSignal = new EventWaitHandle(false, EventResetMode.AutoReset, Program.RestoreEventName);
         _restoredSignal = new EventWaitHandle(false, EventResetMode.AutoReset, Program.RestoredEventName);
         _restoreWait = ThreadPool.RegisterWaitForSingleObject(_restoreSignal, (_, _) =>
@@ -84,7 +86,10 @@ internal sealed class TactileApp : ApplicationContext
             _restoredSignal.Set();
         }, null, Timeout.Infinite, executeOnlyOnce: false);
 
-        _ = Task.Run(StartMenu.EnsureRestoreShortcut);
+        if (!paths.Portable)
+        {
+            _ = Task.Run(StartMenu.EnsureRestoreShortcut);
+        }
 
         if (!startHidden)
         {
@@ -93,15 +98,16 @@ internal sealed class TactileApp : ApplicationContext
     }
 
     /// <summary>Any failure (including the placeholder factories) leaves emulation off; the app still runs.</summary>
-    private static (DriverPlatform?, IUsbIpServer?) StartEmulation()
+    private static (DriverPlatform?, IUsbIpServer?) StartEmulation(string dataDirectory)
     {
         DriverPlatform? drivers = null;
         try
         {
-            drivers = DriverPlatform.CreateWindows(AppCore.DataDirectory());
+            drivers = DriverPlatform.CreateWindows(dataDirectory);
         }
-        catch (Exception)
+        catch (Exception e)
         {
+            Log.Warn("Driver layer could not start.", e);
             return (null, null);
         }
 
@@ -109,8 +115,9 @@ internal sealed class TactileApp : ApplicationContext
         {
             return (drivers, UsbIpServerFactory.Start());
         }
-        catch (Exception)
+        catch (Exception e)
         {
+            Log.Warn("USB/IP server could not start.", e);
             return (drivers, null);
         }
     }
@@ -130,26 +137,28 @@ internal sealed class TactileApp : ApplicationContext
 
     private void RestoreNow()
     {
-        string message;
+        (string En, string Tr) message;
         try
         {
             message = _core.RestoreEmulation()
-                ? "Kontrolcü geri getirildi: sanal kontrolcü kaldırıldı, gizleme kapatıldı, sanal kontrolcü ayarı kapandı."
-                : "Sanal kontrolcü ayarı kapatıldı. Sürücü katmanı çalışmadığı için geri alınacak bir şey yoktu.";
+                ? ("Controller restored. The virtual controller was removed and emulation was turned off.", "Kontrolcü geri getirildi: sanal kontrolcü kaldırıldı, gizleme kapatıldı, sanal kontrolcü ayarı kapandı.")
+                : ("Emulation was turned off. No driver changes to undo.", "Sanal kontrolcü ayarı kapatıldı. Sürücü katmanı çalışmadığı için geri alınacak bir şey yoktu.");
         }
         catch (Exception e)
         {
-            message = $"Kontrolcü geri getirilemedi: {e.Message}";
+            Log.Error("Could not restore the controller.", e);
+            message = ($"Could not restore the controller: {Text.English(e)}", $"Kontrolcü geri getirilemedi: {e.Message}");
         }
 
-        var notice = new Notice(NoticeKinds.Emulation, message);
+        var notice = new Notice(NoticeKinds.Emulation, message.En, message.Tr);
+        Log.Notice(notice);
         Ui(() =>
         {
             _window.Bridge.PostNotice(notice);
             _window.Bridge.PostEmulation();
             if (!_window.OnScreen)
             {
-                _tray.Balloon(message);
+                _tray.Balloon(notice.Message);
             }
         });
     }
@@ -168,8 +177,9 @@ internal sealed class TactileApp : ApplicationContext
         {
             _core.ActivateProfile(id);
         }
-        catch (KeyNotFoundException)
+        catch (KeyNotFoundException e)
         {
+            Log.Warn("Tray profile was no longer available.", e);
             _tray.SetProfiles(_core.Profiles.All, _core.ActiveProfile.Id);
         }
     }
@@ -186,7 +196,7 @@ internal sealed class TactileApp : ApplicationContext
         if (!_toldAboutTray)
         {
             _toldAboutTray = true;
-            _tray.Balloon("Tactile arka planda çalışıyor");
+            _tray.Balloon(Text.Pick("TriggerForge is running in the background", "TriggerForge arka planda çalışıyor"));
         }
     }
 
@@ -229,12 +239,14 @@ internal sealed class TactileApp : ApplicationContext
         }
         catch (Win32Exception e) when (e.NativeErrorCode == ErrorCancelled)
         {
-            _window.Bridge.PostNotice(new Notice(NoticeKinds.Info, "Yönetici izni verilmedi."));
+            Log.Info("Elevation was cancelled.", e);
+            _window.Bridge.PostNotice(new Notice(NoticeKinds.Info, Text.Pick("Administrator permission was declined.", "Yönetici izni verilmedi.")));
             return;
         }
-        catch (Win32Exception)
+        catch (Win32Exception e)
         {
-            _window.Bridge.PostNotice(new Notice(NoticeKinds.Info, "Tactile yönetici olarak yeniden başlatılamadı."));
+            Log.Error("Elevated restart failed.", e);
+            _window.Bridge.PostNotice(new Notice(NoticeKinds.Info, Text.Pick("Could not restart TriggerForge as administrator.", "TriggerForge yönetici olarak yeniden başlatılamadı.")));
             return;
         }
 
@@ -242,7 +254,14 @@ internal sealed class TactileApp : ApplicationContext
         Exit();
     }
 
-    private void OnSettings() => Ui(_window.Bridge.PostSettings);
+    private void OnSettings() => Ui(() =>
+    {
+        _window.Bridge.PostSettings();
+        _tray.UpdateLanguage();
+        UpdateTrayStatus();
+        _window.Bridge.PostEmulation();
+        _window.Bridge.PostHapticsIfChanged();
+    });
 
     private void OnNotice(Notice n) => Ui(() =>
     {
@@ -303,9 +322,9 @@ internal sealed class TactileApp : ApplicationContext
                 }
             });
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException e)
         {
-            // Handle gone during shutdown.
+            Log.Info("Window handle was unavailable for an update.", e);
         }
     }
 

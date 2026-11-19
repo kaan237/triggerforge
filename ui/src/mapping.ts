@@ -1,3 +1,4 @@
+import { L } from "./i18n";
 // Labels, summaries and small helpers for the Tuşlar page.
 
 import { useEffect } from "react";
@@ -6,73 +7,73 @@ import { chordLabel } from "./keys";
 import { defaultBinding, defaultMapping } from "./model";
 
 export const buttonDefs: { id: ButtonName; label: string; group: string }[] = [
-  { id: "cross", label: "Çarpı", group: "Yüz" },
-  { id: "circle", label: "Daire", group: "Yüz" },
-  { id: "square", label: "Kare", group: "Yüz" },
-  { id: "triangle", label: "Üçgen", group: "Yüz" },
-  { id: "up", label: "Yön yukarı", group: "Yön" },
-  { id: "down", label: "Yön aşağı", group: "Yön" },
-  { id: "left", label: "Yön sol", group: "Yön" },
-  { id: "right", label: "Yön sağ", group: "Yön" },
-  { id: "l1", label: "L1", group: "Omuz" },
-  { id: "r1", label: "R1", group: "Omuz" },
-  { id: "l2", label: "L2", group: "Omuz" },
-  { id: "r2", label: "R2", group: "Omuz" },
-  { id: "l3", label: "L3", group: "Analog" },
-  { id: "r3", label: "R3", group: "Analog" },
-  { id: "create", label: "Create", group: "Orta" },
-  { id: "options", label: "Options", group: "Orta" },
-  { id: "ps", label: "PS", group: "Orta" },
-  { id: "touchpad", label: "Touchpad tık", group: "Orta" },
-  { id: "mic", label: "Mikrofon", group: "Orta" },
+  { id: "cross", get label() { return L("Cross", "Çarpı"); }, get group() { return L("Face", "Yüz"); } },
+  { id: "circle", get label() { return L("Circle", "Daire"); }, get group() { return L("Face", "Yüz"); } },
+  { id: "square", get label() { return L("Square", "Kare"); }, get group() { return L("Face", "Yüz"); } },
+  { id: "triangle", get label() { return L("Triangle", "Üçgen"); }, get group() { return L("Face", "Yüz"); } },
+  { id: "up", get label() { return L("D-pad up", "Yön yukarı"); }, get group() { return L("Direction", "Yön"); } },
+  { id: "down", get label() { return L("D-pad down", "Yön aşağı"); }, get group() { return L("Direction", "Yön"); } },
+  { id: "left", get label() { return L("D-pad left", "Yön sol"); }, get group() { return L("Direction", "Yön"); } },
+  { id: "right", get label() { return L("D-pad right", "Yön sağ"); }, get group() { return L("Direction", "Yön"); } },
+  { id: "l1", label: "L1", get group() { return L("Shoulders", "Omuz"); } },
+  { id: "r1", label: "R1", get group() { return L("Shoulders", "Omuz"); } },
+  { id: "l2", label: "L2", get group() { return L("Shoulders", "Omuz"); } },
+  { id: "r2", label: "R2", get group() { return L("Shoulders", "Omuz"); } },
+  { id: "l3", label: "L3", get group() { return L("Stick", "Analog"); } },
+  { id: "r3", label: "R3", get group() { return L("Stick", "Analog"); } },
+  { id: "create", label: "Create", get group() { return L("Medium", "Orta"); } },
+  { id: "options", label: "Options", get group() { return L("Medium", "Orta"); } },
+  { id: "ps", label: "PS", get group() { return L("Medium", "Orta"); } },
+  { id: "touchpad", get label() { return L("Touchpad click", "Touchpad tık"); }, get group() { return L("Medium", "Orta"); } },
+  { id: "mic", get label() { return L("Microphone", "Mikrofon"); }, get group() { return L("Medium", "Orta"); } },
   { id: "fn1", label: "Fn1", group: "Edge" },
   { id: "fn2", label: "Fn2", group: "Edge" },
-  { id: "paddleLeft", label: "Sol arka", group: "Edge" },
-  { id: "paddleRight", label: "Sağ arka", group: "Edge" },
+  { id: "paddleLeft", get label() { return L("Left rear", "Sol arka"); }, group: "Edge" },
+  { id: "paddleRight", get label() { return L("Right rear", "Sağ arka"); }, group: "Edge" },
 ];
 
-export const buttonLabel = (id: ButtonName | "none") => (id === "none" ? "Yok" : buttonDefs.find((b) => b.id === id)?.label ?? id);
+export const buttonLabel = (id: ButtonName | "none") => (id === "none" ? L("None", "Yok") : buttonDefs.find((b) => b.id === id)?.label ?? id);
 
 // The input message sends PascalCase ("Cross", "PS"); profile keys are camelCase.
 export const fromInput = (name: string): ButtonName | undefined => buttonDefs.find((b) => b.id.toLowerCase() === name.toLowerCase())?.id;
 export const toInput = (id: ButtonName): string => (id === "ps" ? "PS" : id[0].toUpperCase() + id.slice(1));
 
 export const actionKinds: { id: ActionKind; label: string }[] = [
-  { id: "none", label: "Yok" },
-  { id: "key", label: "Klavye tuşu" },
-  { id: "mouseButton", label: "Fare tuşu" },
-  { id: "wheel", label: "Fare tekerleği" },
-  { id: "macro", label: "Makro" },
-  { id: "profile", label: "Profil değiştir" },
-  { id: "run", label: "Program çalıştır" },
-  { id: "micMute", label: "Mikrofonu sustur" },
-  { id: "special", label: "Sistem" },
+  { id: "none", get label() { return L("None", "Yok"); } },
+  { id: "key", get label() { return L("Keyboard key", "Klavye tuşu"); } },
+  { id: "mouseButton", get label() { return L("Mouse button", "Fare tuşu"); } },
+  { id: "wheel", get label() { return L("Mouse wheel", "Fare tekerleği"); } },
+  { id: "macro", get label() { return L("Macro", "Makro"); } },
+  { id: "profile", get label() { return L("Switch profile", "Profil değiştir"); } },
+  { id: "run", get label() { return L("Launch program", "Program çalıştır"); } },
+  { id: "micMute", get label() { return L("Toggle microphone mute", "Mikrofonu sustur"); } },
+  { id: "special", get label() { return L("System", "Sistem"); } },
 ];
 
 export const mouseButtons: { id: MouseButtonName; label: string }[] = [
-  { id: "left", label: "Sol" },
-  { id: "right", label: "Sağ" },
-  { id: "middle", label: "Orta" },
-  { id: "x1", label: "Geri" },
-  { id: "x2", label: "İleri" },
+  { id: "left", get label() { return L("Left", "Sol"); } },
+  { id: "right", get label() { return L("Right", "Sağ"); } },
+  { id: "middle", get label() { return L("Medium", "Orta"); } },
+  { id: "x1", get label() { return L("Back", "Geri"); } },
+  { id: "x2", get label() { return L("Forward", "İleri"); } },
 ];
-const clickLabel: Record<MouseButtonName, string> = { left: "Sol tık", right: "Sağ tık", middle: "Orta tık", x1: "Geri tuşu", x2: "İleri tuşu" };
+const clickLabel: Record<MouseButtonName, string> = { get left() { return L("Left click", "Sol tık"); }, get right() { return L("Right click", "Sağ tık"); }, get middle() { return L("Middle click", "Orta tık"); }, get x1() { return L("Back button", "Geri tuşu"); }, get x2() { return L("Forward button", "İleri tuşu"); } };
 export const mouseLabel = (b?: MouseButtonName) => clickLabel[b ?? "left"];
 
 export const directions: { id: Direction; label: string }[] = [
-  { id: "up", label: "Yukarı" },
-  { id: "down", label: "Aşağı" },
-  { id: "left", label: "Sol" },
-  { id: "right", label: "Sağ" },
+  { id: "up", get label() { return L("Up", "Yukarı"); } },
+  { id: "down", get label() { return L("Down", "Aşağı"); } },
+  { id: "left", get label() { return L("Left", "Sol"); } },
+  { id: "right", get label() { return L("Right", "Sağ"); } },
 ];
-export const directionLabel = (d?: Direction) => directions.find((x) => x.id === d)?.label ?? "Aşağı";
+export const directionLabel = (d?: Direction) => directions.find((x) => x.id === d)?.label ?? L("Down", "Aşağı");
 
 export const specials: { id: Special; label: string; hint: string }[] = [
-  { id: "screenshot", label: "Ekran görüntüsü", hint: "Win + Print Screen" },
-  { id: "gameBar", label: "Oyun çubuğu", hint: "Win + G" },
-  { id: "taskView", label: "Görev görünümü", hint: "Win + Tab" },
-  { id: "desktop", label: "Masaüstünü göster", hint: "Win + D" },
-  { id: "showApp", label: "Tactile'ı aç", hint: "Bu pencereyi öne getirir" },
+  { id: "screenshot", get label() { return L("Screenshot", "Ekran görüntüsü"); }, hint: "Win + Print Screen" },
+  { id: "gameBar", get label() { return L("Game Bar", "Oyun çubuğu"); }, hint: "Win + G" },
+  { id: "taskView", get label() { return L("Task View", "Görev görünümü"); }, hint: "Win + Tab" },
+  { id: "desktop", get label() { return L("Show desktop", "Masaüstünü göster"); }, hint: "Win + D" },
+  { id: "showApp", get label() { return L("Show TriggerForge", "Tactile'ı aç"); }, get hint() { return L("Brings this window to the front", "Bu pencereyi öne getirir"); } },
 ];
 
 // A fresh action of that kind with its own fields filled.
@@ -105,19 +106,19 @@ export function actionSummary(a: Action | null | undefined, profiles: Profile[],
     case "mouseButton":
       return mouseLabel(a.button);
     case "wheel":
-      return `Tekerlek ${directionLabel(a.direction).toLocaleLowerCase("tr")} ×${a.amount ?? 1}`;
+      return L(`Scroll ${directionLabel(a.direction).toLowerCase()} ×${a.amount ?? 1}`, `Tekerlek ${directionLabel(a.direction).toLocaleLowerCase("tr")} ×${a.amount ?? 1}`);
     case "macro":
-      return `Makro: ${macros.find((m) => m.id === a.macroId)?.name ?? "seçilmedi"}`;
+      return L(`Macro: ${macros.find((m) => m.id === a.macroId)?.name ?? "not selected"}`, `Makro: ${macros.find((m) => m.id === a.macroId)?.name ?? "seçilmedi"}`);
     case "profile":
-      if (a.profileId === "next") return "Sonraki profil";
-      if (a.profileId === "previous") return "Önceki profil";
-      return `Profil: ${profiles.find((p) => p.id === a.profileId)?.name ?? "bilinmiyor"}`;
+      if (a.profileId === "next") return L("Next profile", "Sonraki profil");
+      if (a.profileId === "previous") return L("Previous profile", "Önceki profil");
+      return L(`Profile: ${profiles.find((p) => p.id === a.profileId)?.name ?? "unknown"}`, `Profil: ${profiles.find((p) => p.id === a.profileId)?.name ?? "bilinmiyor"}`);
     case "run":
-      return a.path ? `Çalıştır: ${a.path.split(/[\\/]/).pop()}` : "Çalıştır: seçilmedi";
+      return a.path ? L(`Launch: ${a.path.split(/[\\/]/).pop()}`, `Çalıştır: ${a.path.split(/[\\/]/).pop()}`) : L("Launch: no program selected", "Çalıştır: seçilmedi");
     case "micMute":
-      return "Mikrofonu sustur";
+      return L("Toggle microphone mute", "Mikrofonu sustur");
     case "special":
-      return specials.find((s) => s.id === a.special)?.label ?? "Sistem";
+      return specials.find((s) => s.id === a.special)?.label ?? L("System", "Sistem");
     default:
       return "—";
   }
@@ -126,8 +127,8 @@ export function actionSummary(a: Action | null | undefined, profiles: Profile[],
 export function bindingSummary(b: Binding | undefined, profiles: Profile[], macros: Macro[]): string {
   if (!b) return "—";
   const parts = [actionSummary(b.press, profiles, macros)];
-  if (b.hold) parts.push(`tut: ${actionSummary(b.hold, profiles, macros)}`);
-  if (b.double) parts.push(`çift: ${actionSummary(b.double, profiles, macros)}`);
+  if (b.hold) parts.push(L(`hold: ${actionSummary(b.hold, profiles, macros)}`, `tut: ${actionSummary(b.hold, profiles, macros)}`));
+  if (b.double) parts.push(L(`double: ${actionSummary(b.double, profiles, macros)}`, `çift: ${actionSummary(b.double, profiles, macros)}`));
   if (!b.hold && !b.double && b.turbo) parts.push("turbo");
   else if (!b.hold && !b.double && b.toggle) parts.push("kilit");
   return parts.join(" · ");

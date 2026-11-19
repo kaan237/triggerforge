@@ -23,7 +23,7 @@ public sealed class UsbIpServer : IUsbIpServer
         _listener = new TcpListener(IPAddress.Loopback, port);
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
-        new Thread(Accept) { IsBackground = true, Name = "usbip accept" }.Start();
+        new Thread(Accept) { IsBackground = true, Name = "TriggerForge: usbip accept" }.Start();
     }
 
     public int Port { get; }
@@ -119,7 +119,7 @@ public sealed class UsbIpServer : IUsbIpServer
                 continue;
             }
 
-            new Thread(() => Handle(socket)) { IsBackground = true, Name = "usbip connection" }.Start();
+            new Thread(() => Handle(socket)) { IsBackground = true, Name = "TriggerForge: usbip connection" }.Start();
         }
     }
 

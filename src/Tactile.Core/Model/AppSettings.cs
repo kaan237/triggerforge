@@ -2,8 +2,6 @@ using Tactile.Device.DualSense;
 
 namespace Tactile.Core;
 
-public enum Language { Tr, En }
-
 public sealed record AppSettings
 {
     public const int CurrentVersion = 1;
@@ -11,7 +9,7 @@ public sealed record AppSettings
     public int Version { get; init; } = CurrentVersion;
     public bool StartWithWindows { get; init; }
     public bool CloseToTray { get; init; } = true;
-    public Language Language { get; init; } = Language.Tr;
+    public Language Language { get; init; } = Language.En;
     public bool AutoProfile { get; init; } = true;
     /// <summary>The foreground app must stay this long before the profile follows it.</summary>
     public int AutoProfileDelayMs { get; init; } = 800;

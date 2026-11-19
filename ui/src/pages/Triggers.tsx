@@ -1,3 +1,4 @@
+import { L } from "../i18n";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { CurvePlot } from "../CurvePlot";
 import { send, type TriggerConfig, type TriggerMode, type TriggerResponse } from "../host";
@@ -113,7 +114,7 @@ function ZoneEditor({ config, onChange, pull }: { config: TriggerConfig; onChang
       onPointerUp={() => (drag.current = null)}
       onPointerCancel={() => (drag.current = null)}
       role="img"
-      aria-label="Tetik direnç grafiği"
+      aria-label={L("Trigger resistance graph", "Tetik direnç grafiği")}
     >
       <defs>
         <pattern id="vibe" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -188,17 +189,17 @@ function ParamSliders({ config, onChange }: { config: TriggerConfig; onChange: (
 
 function hint(config: TriggerConfig): string {
   const def = modeDef(config.mode);
-  if (def.edit === "zones") return "Grafikte tıkla ya da sürükle: her bölgenin gücü 0–8.";
-  if (config.mode === "feedback" || config.mode === "vibration") return "Grafiğe tıkla: başlangıç ve güç. Alttaki tutamak başlangıcı kaydırır.";
-  if (config.mode === "slope") return "Grafikte iki ucu sürükle. Alttaki tutamaklar aralığı belirler.";
-  if (config.mode === "off") return "Tetik serbest, direnç yok.";
-  return "Alttaki tutamaklarla aralığı seç, gücü kaydırıcılardan ayarla.";
+  if (def.edit === "zones") return L("Click or drag on the graph to set each zone's strength from 0 to 8.", "Grafikte tıkla ya da sürükle: her bölgenin gücü 0–8.");
+  if (config.mode === "feedback" || config.mode === "vibration") return L("Click the graph to set start and strength. Drag the bottom handle to move the start.", "Grafiğe tıkla: başlangıç ve güç. Alttaki tutamak başlangıcı kaydırır.");
+  if (config.mode === "slope") return L("Drag the two ends on the graph. The bottom handles set the range.", "Grafikte iki ucu sürükle. Alttaki tutamaklar aralığı belirler.");
+  if (config.mode === "off") return L("No trigger resistance.", "Tetik serbest, direnç yok.");
+  return L("Set the range with the handles and adjust strength with the sliders.", "Alttaki tutamaklarla aralığı seç, gücü kaydırıcılardan ayarla.");
 }
 
 export function TriggerModeSelect({ config, onChange }: { config: TriggerConfig; onChange: (c: TriggerConfig) => void }) {
   return (
     <label className="field-inline">
-      <span>Mod</span>
+      <span>{L("Mode", "Mod")}</span>
       <select value={config.mode} onChange={(e) => onChange(withMode(config, e.target.value as TriggerMode))}>
         {triggerModes.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
       </select>
@@ -211,11 +212,11 @@ export function TriggerEffectEditor({ config, onChange, raw }: { config: Trigger
   return (
     <>
       <div className="panel-head">
-        <h2>Direnç</h2>
+        <h2>{L("Resistance", "Direnç")}</h2>
         <span className="graph-meta num">
-          {def.edit === "range" && `aralık ${config.params.start + 1}–${config.params.end + 1}`}
-          {def.edit === "start" && `başlangıç ${config.params.start + 1}`}
-          {raw !== undefined && <span className="faint"> · basınç {raw}</span>}
+          {def.edit === "range" && L(`range ${config.params.start + 1}–${config.params.end + 1}`, `aralık ${config.params.start + 1}–${config.params.end + 1}`)}
+          {def.edit === "start" && L(`start ${config.params.start + 1}`, `başlangıç ${config.params.start + 1}`)}
+          {raw !== undefined && <span className="faint"> {L("· pressure", "· basınç")} {raw}</span>}
         </span>
       </div>
       <ZoneEditor config={config} onChange={onChange} pull={raw === undefined ? undefined : raw / 255} />
@@ -232,15 +233,15 @@ function ResponseEditor({ value, onChange, raw }: { value: TriggerResponse; onCh
     <div className="response">
       <CurvePlot shape={value} onChange={(s) => onChange({ ...value, ...s })} live={t} />
       <div className="response-side">
-        <Slider label="Ölü bölge" min={0} max={200} value={value.deadzone} onChange={(deadzone) => onChange({ ...value, deadzone, max: Math.max(value.max, deadzone + 1) })} />
-        <Slider label="Tam basış" min={56} max={255} value={value.max} onChange={(max) => onChange({ ...value, max: Math.max(max, value.deadzone + 1) })} />
+        <Slider label={L("Deadzone", "Ölü bölge")} min={0} max={200} value={value.deadzone} onChange={(deadzone) => onChange({ ...value, deadzone, max: Math.max(value.max, deadzone + 1) })} />
+        <Slider label={L("Full press", "Tam basış")} min={56} max={255} value={value.max} onChange={(max) => onChange({ ...value, max: Math.max(max, value.deadzone + 1) })} />
         <dl className="kv compact">
-          <dt>Ham</dt>
+          <dt>{L("Raw", "Ham")}</dt>
           <dd className="num">{raw}</dd>
-          <dt>Çıkış</dt>
+          <dt>{L("Output", "Çıkış")}</dt>
           <dd className="num">{fixed(2)(out)}</dd>
         </dl>
-        <p className="hint">Basınç eğrisi sanal kontrolcüyle (Faz 4) uygulanacak; şimdilik profile kaydedilir.</p>
+        <p className="hint">{L("The pressure curve is saved in the profile for use with the virtual controller.", "Basınç eğrisi sanal kontrolcüyle (Faz 4) uygulanacak; şimdilik profile kaydedilir.")}</p>
       </div>
     </div>
   );
@@ -263,7 +264,7 @@ export function Triggers() {
     return () => send({ type: "trigger.preview", side, config: null });
   }, [trying, side]);
 
-  if (!draft || !cfg) return <div className="page"><PageHead title="Tetikler" /></div>;
+  if (!draft || !cfg) return <div className="page"><PageHead title={L("Triggers", "Tetikler")} /></div>;
 
   const setCfg = (c: TriggerConfig) => edit((p) => ({ ...p, triggers: { ...p.triggers, [side]: c } }));
   const setResp = (r: TriggerResponse) => edit((p) => ({ ...p, triggerResponse: { ...p.triggerResponse, [side]: r } }));
@@ -271,7 +272,7 @@ export function Triggers() {
 
   return (
     <div className="page triggers-page">
-      <PageHead title="Tetikler">
+      <PageHead title={L("Triggers", "Tetikler")}>
         <DraftBar />
       </PageHead>
 
@@ -290,7 +291,7 @@ export function Triggers() {
             <span className="spacer" />
             <button className={trying ? "button try on" : "button try"} aria-pressed={trying} onClick={() => setTrying(!trying)}>
               <span className="try-dot" aria-hidden />
-              {trying ? "Deneniyor" : "Dene"}
+              {trying ? L("Testing", "Deneniyor") : L("Test", "Dene")}
             </button>
           </div>
 
@@ -300,15 +301,15 @@ export function Triggers() {
 
           <section className="panel">
             <div className="panel-head">
-              <h2>Analog tepki</h2>
-              <span className="faint small">{side === "left" ? "L2" : "R2"} basıncı nasıl okunur</span>
+              <h2>{L("Analog response", "Analog tepki")}</h2>
+              <span className="faint small">{side === "left" ? "L2" : "R2"} {L("pressure response", "basıncı nasıl okunur")}</span>
             </div>
             <ResponseEditor value={draft.triggerResponse[side]} onChange={setResp} raw={raw} />
           </section>
         </div>
 
         <aside className="presets">
-          <h2>Hazır ayarlar</h2>
+          <h2>{L("Presets", "Hazır ayarlar")}</h2>
           <ul>
             {presets.map((pr) => {
               const current = deepEqual(pr.config, cfg);
@@ -322,10 +323,10 @@ export function Triggers() {
               );
             })}
           </ul>
-          <p className="hint">Seçilen ayar {side === "left" ? "L2" : "R2"} editörünü doldurur; kaydetmeden profile yazılmaz.</p>
+          <p className="hint">{L("The preset fills the", "Seçilen ayar")} {side === "left" ? "L2" : "R2"} {L("editor. Save to keep it in the profile.", "editörünü doldurur; kaydetmeden profile yazılmaz.")}</p>
           {isZoneMode(cfg.mode) && (
             <button className="button ghost small-btn" onClick={() => setCfg({ ...cfg, zones: Array(10).fill(0) })}>
-              Bölgeleri sıfırla
+              {L("Reset zones", "Bölgeleri sıfırla")}
             </button>
           )}
         </aside>

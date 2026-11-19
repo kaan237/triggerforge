@@ -39,7 +39,7 @@ public sealed class ProfileSelector
     {
         if (profiles.Count == 0)
         {
-            throw new ArgumentException("En az bir profil gerekli.", nameof(profiles));
+            throw new ArgumentException(Text.Pick("At least one profile is required.", "En az bir profil gerekli."), nameof(profiles));
         }
 
         Settle(foreground, settings, now);

@@ -1,3 +1,4 @@
+using Tactile.Core;
 namespace Tactile.Drivers;
 
 /// <summary>
@@ -61,7 +62,7 @@ internal sealed class DeviceHider(IHidHideControl control, RecoveryJournal journ
         if (h is null || dev is null)
             return;
         using IHidHideSession? s = control.Open()
-            ?? throw new DriverException("HidHide şu an meşgul; gerçek kontrolcü yeniden görünür yapılamadı.");
+            ?? throw new DriverException(new LocalizedMessage("HidHide is busy. Could not make the physical controller visible again.", "HidHide şu an meşgul; gerçek kontrolcü yeniden görünür yapılamadı."));
         try
         {
             Undo(s, h, [dev]);
@@ -69,7 +70,7 @@ internal sealed class DeviceHider(IHidHideControl control, RecoveryJournal journ
         }
         catch (Exception e) when (e is not DriverException)
         {
-            throw new DriverException("Gerçek kontrolcü yeniden görünür yapılamadı.", e);
+            throw new DriverException(new LocalizedMessage("Could not make the physical controller visible again.", "Gerçek kontrolcü yeniden görünür yapılamadı."), e);
         }
     }
 

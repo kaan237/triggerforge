@@ -45,7 +45,7 @@ internal sealed class Mapper : IDisposable
         _threaded = threaded;
         _outputs = new HeldOutputs(platform.Injector);
         _pointer = new PointerOutput(platform.Injector);
-        _worker = new ActionWorker(threaded, e => host.Report($"Eşleme hatası: {e.Message}"));
+        _worker = new ActionWorker(threaded, e => host.Report(new Notice(NoticeKinds.Mapping, $"Mapping error: {Text.English(e)}", $"Eşleme hatası: {e.Message}")));
         _macros = new MacroRunner(_outputs, clock, threaded);
         _actions = new ActionDispatcher(_outputs, _macros, _worker, platform, host);
         foreach (Buttons b in ButtonNames.All)

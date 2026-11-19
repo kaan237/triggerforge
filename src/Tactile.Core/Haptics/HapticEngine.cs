@@ -18,7 +18,7 @@ internal sealed class HapticEngine : IDisposable
     private readonly Lock _captureLock = new();
     private readonly Lock _speakerLock = new();
     private readonly List<CaptureTarget> _captures = new(2);
-    private volatile State _state = new(new(false, "off", null), null, null, null, null, null);
+    private volatile State _state = new(false, "off", null, null, null, null, null, null);
     private volatile HapticsConfig _config = new();
     private volatile bool _disposed;
 
@@ -38,9 +38,9 @@ internal sealed class HapticEngine : IDisposable
         get
         {
             State state = _state;
-            string? problem = state.Status.Problem ?? state.Target?.Problem
+            LocalizedMessage? problem = state.Problem ?? state.Target?.Problem
                 ?? state.Game?.ActivePlayback?.Problem ?? state.Playback?.Problem ?? state.Speaker?.Problem;
-            return problem == state.Status.Problem ? state.Status : state.Status with { Problem = problem };
+            return new HapticStatus(state.Streaming, state.Source, problem?.Value);
         }
     }
 
@@ -86,16 +86,16 @@ internal sealed class HapticEngine : IDisposable
         string source = config.Audio == AudioHapticSource.Off
             ? SourceName(config.Speaker, config.SpeakerApp) : SourceName(config.Audio, config.App);
         _config = config;
-        string? problem = !needed ? null : link switch
+        LocalizedMessage? problem = !needed ? null : link switch
         {
-            Link.Usb => "Bluetooth gerekli.",
-            null => "Kontrolcü bağlı değil.",
+            Link.Usb => new("Bluetooth required.", "Bluetooth gerekli."),
+            null => new("No controller connected.", "Kontrolcü bağlı değil."),
             _ => null,
         };
         // The streamer can ask for silence as soon as it starts its preroll.
         if (previous.Target != target || previous.Speaker != speaker || previous.Game != game)
         {
-            Publish(new State(previous.Status, target, dsp, speaker, playback, game));
+            Publish(previous with { Target = target, Dsp = dsp, Speaker = speaker, Playback = playback, Game = game });
         }
 
         bool streaming = _setSource(needed ? _fill : null);
@@ -107,13 +107,13 @@ internal sealed class HapticEngine : IDisposable
 
         if (bluetooth && needed && !streaming)
         {
-            problem = "Haptik akışı başlatılamadı.";
+            problem = new("Could not start the haptics stream.", "Haptik akışı başlatılamadı.");
         }
 
         State current = _state;
-        if (current.Status.Streaming != streaming || current.Status.Source != source || current.Status.Problem != problem)
+        if (current.Streaming != streaming || current.Source != source || current.Problem != problem)
         {
-            _state = current with { Status = new HapticStatus(streaming, source, problem) };
+            _state = current with { Streaming = streaming, Source = source, Problem = problem };
         }
     }
 
@@ -153,7 +153,7 @@ internal sealed class HapticEngine : IDisposable
         catch (AudioUnavailableException e)
         {
             _notice(new Notice(NoticeKinds.Info, e.Message));
-            return new SpeakerPlayback(null) { Problem = e.Message };
+            return new SpeakerPlayback(null) { Problem = e.Translation };
         }
     }
 
@@ -196,7 +196,7 @@ internal sealed class HapticEngine : IDisposable
             }
             catch (AudioUnavailableException e)
             {
-                playback.Problem = e.Message;
+                playback.Problem = e.Translation;
                 _notice(new Notice(NoticeKinds.Info, e.Message));
                 return false;
             }
@@ -260,7 +260,7 @@ internal sealed class HapticEngine : IDisposable
                 return;
             }
 
-            string problem = attempt.Failure ?? "Ses yakalama durdu.";
+            LocalizedMessage problem = attempt.DescribeFailure();
             StopCapture(target);
             Fail(target, problem);
             return;
@@ -296,21 +296,21 @@ internal sealed class HapticEngine : IDisposable
             }
             else
             {
-                string problem = started.Failure ?? "Ses yakalama durdu.";
+                LocalizedMessage problem = started.DescribeFailure();
                 StopCapture(target);
                 Fail(target, problem);
             }
         }
         catch (AudioUnavailableException e)
         {
-            Fail(target, e.Message);
+            Fail(target, e.Translation);
         }
     }
 
     public void Dispose()
     {
         _disposed = true;
-        Publish(new State(new HapticStatus(false, "off", null), null, null, null, null, null));
+        Publish(new State(false, "off", null, null, null, null, null, null));
         _setSource(null);
         lock (_captureLock)
         {
@@ -345,7 +345,7 @@ internal sealed class HapticEngine : IDisposable
         _mixer.Mix(samples, 1f, (float)config.ClickStrength);
     }
 
-    private void Fail(CaptureTarget target, string problem)
+    private void Fail(CaptureTarget target, LocalizedMessage problem)
     {
         target.FailedAt = _time.GetTimestamp();
         if (_disposed || !_state.Uses(target))
@@ -357,7 +357,7 @@ internal sealed class HapticEngine : IDisposable
         target.Problem = problem;
         if (firstFailure)
         {
-            _notice(new Notice(NoticeKinds.Info, problem));
+            _notice(new Notice(NoticeKinds.Info, problem.Value));
         }
     }
 
@@ -396,11 +396,11 @@ internal sealed class HapticEngine : IDisposable
         }
     }
 
-    private sealed record State(HapticStatus Status, CaptureTarget? Target, AudioHaptics? Dsp,
+    private sealed record State(bool Streaming, string Source, LocalizedMessage? Problem, CaptureTarget? Target, AudioHaptics? Dsp,
         CaptureTarget? Speaker, SpeakerPlayback? Playback, GameInput? Game)
     {
         public bool Uses(CaptureTarget target) =>
-            Status.Streaming && (Target == target || (Speaker == target && Playback?.Problem is null));
+            Streaming && (Target == target || (Speaker == target && Playback?.Problem is null));
     }
 
     private sealed class GameInput : IDisposable
@@ -491,13 +491,13 @@ internal sealed class HapticEngine : IDisposable
         public AudioTarget Target { get; } = target;
         public CaptureAttempt? Attempt;
         public long? FailedAt;
-        public volatile string? Problem;
+        public volatile LocalizedMessage? Problem;
     }
 
     private sealed class SpeakerPlayback(SpeakerFeed? feed)
     {
         public SpeakerFeed? Feed { get; } = feed;
-        public volatile string? Problem;
+        public volatile LocalizedMessage? Problem;
     }
 
     private sealed class CaptureAttempt(IAudioCapture capture, AudioDataHandler data)
@@ -506,5 +506,9 @@ internal sealed class HapticEngine : IDisposable
         public AudioDataHandler Data { get; } = data;
         public volatile string? Failure;
         public void OnFailure(string problem) => Failure = problem;
+
+        public LocalizedMessage DescribeFailure() =>
+            AudioSystemFactory.CaptureFailure(Capture)
+            ?? (Failure is { } reason ? new(reason, reason) : new("Audio capture stopped.", "Ses yakalama durdu."));
     }
 }

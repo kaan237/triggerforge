@@ -42,7 +42,7 @@ internal sealed class UsbIpConnection
     public void Run()
     {
         _device.InputReady = Wake;
-        var pacer = new Thread(Pace) { IsBackground = true, Name = $"usbip pacer {_device.BusId}" };
+        var pacer = new Thread(Pace) { IsBackground = true, Name = $"TriggerForge: usbip pacer {_device.BusId}" };
         pacer.Start();
         Thread? audioPacer = null;
         try
@@ -52,7 +52,7 @@ internal sealed class UsbIpConnection
                 var thread = new Thread(() => PaceIso(iso))
                 {
                     IsBackground = true,
-                    Name = $"usbip audio {_device.BusId}",
+                    Name = $"TriggerForge: usbip audio {_device.BusId}",
                     Priority = ThreadPriority.AboveNormal,
                 };
                 thread.Start();

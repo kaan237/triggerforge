@@ -83,7 +83,7 @@ public static partial class Validation
         List<Macro> source = (macros ?? []).Where(m => m is not null).ToList();
         if (source.Count > MaxMacros)
         {
-            issues.Add($"En fazla {MaxMacros} makro olabilir; fazlası silindi.");
+            issues.Add(Text.Pick($"Maximum {MaxMacros} macros. Extra macros were removed.", $"En fazla {MaxMacros} makro olabilir; fazlası silindi."));
             source = source.Take(MaxMacros).ToList();
         }
 
@@ -94,7 +94,7 @@ public static partial class Validation
             string name = (m.Name ?? "").Trim();
             if (name.Length == 0)
             {
-                name = "Makro";
+                name = Text.Pick("Macro", "Makro");
             }
             else if (name.Length > MaxNameLength)
             {
@@ -107,7 +107,7 @@ public static partial class Validation
             List<MacroStep> steps = (m.Steps ?? []).Where(s => s is not null).ToList();
             if (steps.Count > MaxMacroSteps)
             {
-                issues.Add($"Makro \"{name}\": en fazla {MaxMacroSteps} adım olabilir; fazlası silindi.");
+                issues.Add(Text.Pick($"Macro \"{name}\": maximum {MaxMacroSteps} steps. Extra steps were removed.", $"Makro \"{name}\": en fazla {MaxMacroSteps} adım olabilir; fazlası silindi."));
                 steps = steps.Take(MaxMacroSteps).ToList();
             }
 
@@ -127,7 +127,7 @@ public static partial class Validation
 
             if (dropped > 0)
             {
-                issues.Add($"Makro \"{name}\": tuşu geçersiz {dropped} adım silindi.");
+                issues.Add(Text.Pick($"Macro \"{name}\": removed {dropped} steps with invalid keys.", $"Makro \"{name}\": tuşu geçersiz {dropped} adım silindi."));
             }
 
             result.Add(new Macro
@@ -182,7 +182,7 @@ public static partial class Validation
         }
         else
         {
-            issues.Add($"Katman tuşu bilinmiyor ({layer}), PS seçildi.");
+            issues.Add(Text.Pick($"Unknown layer button ({layer}). Switched to PS.", $"Katman tuşu bilinmiyor ({layer}), PS seçildi."));
             layer = "ps";
         }
 
@@ -199,7 +199,7 @@ public static partial class Validation
         string gyroButton = ButtonNames.TryParse(gyro.Button, out Buttons gb) ? ButtonNames.Name(gb) : "r1";
         if (gyro.Button is not null && !ButtonNames.TryParse(gyro.Button, out _))
         {
-            issues.Add($"Gyro fare tuşu bilinmiyor ({gyro.Button}), R1 seçildi.");
+            issues.Add(Text.Pick($"Unknown gyro mouse button ({gyro.Button}). Switched to R1.", $"Gyro fare tuşu bilinmiyor ({gyro.Button}), R1 seçildi."));
         }
 
         return new MappingConfig
@@ -217,13 +217,13 @@ public static partial class Validation
                 ScrollSpeed = Clamp(pad.ScrollSpeed, 0.1, 5, 1),
                 TapToClick = pad.TapToClick,
                 ZoneLayout = zoneLayout,
-                Zones = zones.Select((z, i) => BindingOf(z, $"Dokunmatik bölge {i + 1}", macroIds, issues)).ToArray(),
+                Zones = zones.Select((z, i) => BindingOf(z, Text.Pick($"Touchpad zone {i + 1}", $"Dokunmatik bölge {i + 1}"), macroIds, issues)).ToArray(),
                 Swipes = new SwipeActions
                 {
-                    Up = ActionOf(swipes.Up, "Yukarı kaydırma", macroIds, issues),
-                    Down = ActionOf(swipes.Down, "Aşağı kaydırma", macroIds, issues),
-                    Left = ActionOf(swipes.Left, "Sola kaydırma", macroIds, issues),
-                    Right = ActionOf(swipes.Right, "Sağa kaydırma", macroIds, issues),
+                    Up = ActionOf(swipes.Up, Text.Pick("Swipe up", "Yukarı kaydırma"), macroIds, issues),
+                    Down = ActionOf(swipes.Down, Text.Pick("Swipe down", "Aşağı kaydırma"), macroIds, issues),
+                    Left = ActionOf(swipes.Left, Text.Pick("Swipe left", "Sola kaydırma"), macroIds, issues),
+                    Right = ActionOf(swipes.Right, Text.Pick("Swipe right", "Sağa kaydırma"), macroIds, issues),
                 },
             },
             GyroMouse = new GyroMouseConfig
@@ -254,7 +254,7 @@ public static partial class Validation
         {
             if (!ButtonNames.TryParse(key, out Buttons button))
             {
-                issues.Add($"Bilinmeyen tuş adı \"{key}\"{suffix}, ataması silindi.");
+                issues.Add(Text.Pick($"Unknown button \"{key}\"{suffix}. Mapping removed.", $"Bilinmeyen tuş adı \"{key}\"{suffix}, ataması silindi."));
                 continue;
             }
 
@@ -276,8 +276,8 @@ public static partial class Validation
         return new Binding
         {
             Press = ActionOf(b.Press, label, macroIds, issues),
-            Hold = Optional(b.Hold, label + " (basılı tutma)", macroIds, issues),
-            Double = Optional(b.Double, label + " (çift basma)", macroIds, issues),
+            Hold = Optional(b.Hold, label + Text.Pick(" (hold)", " (basılı tutma)"), macroIds, issues),
+            Double = Optional(b.Double, label + Text.Pick(" (double press)", " (çift basma)"), macroIds, issues),
             HoldMs = Math.Clamp(b.HoldMs, 150, 2000),
             DoubleMs = Math.Clamp(b.DoubleMs, 100, 600),
             Turbo = b.Turbo,
@@ -318,7 +318,7 @@ public static partial class Validation
 
                 if (keys.Length != raw.Count && raw.Count > 0)
                 {
-                    issues.Add($"{label}: geçersiz, tekrarlanan ya da {MaxChordKeys} tuştan fazlası silindi.");
+                    issues.Add(Text.Pick($"{label}: removed invalid or duplicate keys and keys beyond the first {MaxChordKeys}.", $"{label}: geçersiz, tekrarlanan ya da {MaxChordKeys} tuştan fazlası silindi."));
                 }
 
                 return keys.Length == 0 ? ActionConfig.None : new ActionConfig { Kind = ActionKind.Key, Keys = keys };
@@ -341,7 +341,7 @@ public static partial class Validation
                     return new ActionConfig { Kind = ActionKind.Macro, MacroId = macroId };
                 }
 
-                issues.Add($"{label}: makro bulunamadı, eylem kaldırıldı.");
+                issues.Add(Text.Pick($"{label}: macro not found. Action removed.", $"{label}: makro bulunamadı, eylem kaldırıldı."));
                 return ActionConfig.None;
 
             case ActionKind.Profile:
@@ -357,7 +357,7 @@ public static partial class Validation
                     return new ActionConfig { Kind = ActionKind.Profile, ProfileId = target };
                 }
 
-                issues.Add($"{label}: profil geçersiz, eylem kaldırıldı.");
+                issues.Add(Text.Pick($"{label}: invalid profile. Action removed.", $"{label}: profil geçersiz, eylem kaldırıldı."));
                 return ActionConfig.None;
             }
 
@@ -366,14 +366,14 @@ public static partial class Validation
                 string path = (a.Path ?? "").Trim();
                 if (path.Length == 0 || path.Length > MaxRunPath || !IsAbsolutePath(path))
                 {
-                    issues.Add($"{label}: program yolu geçersiz (tam yol, en fazla {MaxRunPath} karakter), eylem kaldırıldı.");
+                    issues.Add(Text.Pick($"{label}: action removed. Enter a full program path of up to {MaxRunPath} characters.", $"{label}: program yolu geçersiz (tam yol, en fazla {MaxRunPath} karakter), eylem kaldırıldı."));
                     return ActionConfig.None;
                 }
 
                 string args = a.Args ?? "";
                 if (args.Length > MaxRunArgs)
                 {
-                    issues.Add($"{label}: program argümanları {MaxRunArgs} karaktere kısaltıldı.");
+                    issues.Add(Text.Pick($"{label}: program arguments shortened to {MaxRunArgs} characters.", $"{label}: program argümanları {MaxRunArgs} karaktere kısaltıldı."));
                     args = args[..MaxRunArgs];
                 }
 

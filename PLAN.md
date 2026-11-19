@@ -403,6 +403,18 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 - **Test:** KH donanım testlerini kendisi yaptı; ikinci makine yok, Faz 7 kabulünde temiz makine şartı aranmaz. Kaldırma sonrası iz kontrolü bir betikle yapılır.
 - **Bölme:** 7a = ad, iki dil, log ve "logları dışa aktar", installer + kaldırıcı, portable, `licenses.txt`, imzalama. 7b = public repo, imzalı güncelleme, ilk açılış sihirbazı, açık kaynak geçişi.
 
+**Faz 7a sonucu (2026-11-19, kod tamam, installer derlendi; kurulum denemesi KH'de)**
+- Sözleşme `docs/contract-phase7a.md`, 3 iş: 1. iş tek başına, 2. ve 3. iş aynı anda (dosyaları ayrı) Codex'te; her biri incelendi.
+- Ad **TriggerForge** 0.7.0: `TriggerForge.exe`, pencere, tepsi, Başlat menüsü, Run değeri, adlandırılmış nesneler. Veri `%APPDATA%\TriggerForge`; eski `%APPDATA%\Tactile` ilk açılışta bir kez kopyalanır, eskisi silinmez. Portable: exe yanında `portable.txt` → veri `data\`, Windows ile başlatma ve Başlat menüsü yok, emülasyon kapalı başlar.
+- `--restore --quiet`: pencere göstermez, 0/1 döner; yeni klasör yoksa eski Tactile kaydını geri alır, veri taşımaz.
+- Log: `%LOCALAPPDATA%\TriggerForge\logs`, 1 MB × 3 dosya, kullanıcı yolu/adı ve MAC maskeli; yakalanmayan hatalar, sürücü kurulumu, emülasyon bildirimleri. Ayarlar'da "Logları dışa aktar" (log + maskeli `settings.json` + `system.txt` zip) ve "Log klasörünü aç". Telemetri yok.
+- İki dil: arayüz, çekirdek bildirimleri, tepsi, MessageBox, sürücü durumları; varsayılan İngilizce, mevcut ayar korunur. Çeviri yardımcısı ayrı `Tactile.Localization` projesinde (alt katmanlar da kullanıyor). Dili ayar dosyası değil AppCore ve `--restore` belirler. Tarayıcıda iki dilde bütün sayfalar gezildi, kalıntı yok.
+- Paket: `build/publish.ps1` (arayüz build, self-contained publish, Wiaus imzası + DigiCert zaman damgası, portable zip, Inno Setup varsa installer). Installer: Program Files, İngilizce/Türkçe kurulum dili, masaüstü kısayolu isteğe bağlı, WebView2 kontrolü, sürücü kurmaz (uygulamadaki buton kurar). Kaldırıcı: önce `--restore --quiet`, başarısızsa sorar; ayarları ve sürücüleri silmeyi ayrı ayrı sorar (varsayılan Hayır). `tools/uninstall-check.ps1` kalıntıları salt okunur raporlar. `THIRD-PARTY-NOTICES.txt` (.NET, WebView2, Opus, React), README İngilizce + Türkçe.
+- İncelemede düzeltilenler: dışa aktarılan `settings.json` MAC'i açık veriyordu; zip yolları `\` ile yazılıyordu (7-Zip klasörsüz açar); `TriggerForge.dll` imzalanmıyordu; geri getirme başarısızsa kaldırma tamamen duruyordu; `.iss` BOM'suzdu; kurulu kopya ikinci bir geri getirme kısayolu açıyordu.
+- Code-review high: 5 bulgu, 5'i düzeltildi (dili değiştiren testler paralel koşuyordu → dil AppCore'a taşındı; kaldırıcı eski Tactile klasörünü bırakıyordu; installer'ın "Windows ile başlat" seçeneği yönetici hesabına yazabiliyordu → kaldırıldı, uygulamadaki ayar kalıyor; imza kontrolü her zincir hatasını kabul ediyordu → yalnız "güvenilmeyen kök").
+- Testler 549/549 (üç kez arka arkaya). Çıktılar: `artifacts/TriggerForge-0.7.0-setup.exe` (40,9 MB) ve `-portable.zip` (49 MB), imzalayan `CN=Wiaus`. Windows imzayı "güvenilmeyen kök" diye gösterir (kendinden imzalı); SmartScreen uyarısı sürer.
+- Kalan: installer'ı kurup kaldırma denemesi ve `uninstall-check.ps1` (KH), tepsi metinlerinin dil değişince değişmesi (uygulama açıkken), simge dosyası (exe'nin kendi simgesi yok; tepsi simgesi çalışırken çiziliyor).
+
 ---
 
 ### Faz 8 — DualSense Edge ve çoklu kontrolcü (1-2 hafta)

@@ -1,3 +1,4 @@
+import { L, locale } from "./i18n";
 import type { Input } from "./host";
 
 const face = [
@@ -51,7 +52,7 @@ function Trigger({ value, label }: { value: number; label: string }) {
 
 export function Live({ input }: { input: Input | null }) {
   if (!input) {
-    return <div className="panel live muted-text">Veri bekleniyor…</div>;
+    return <div className="panel live muted-text">{L("Waiting for input…", "Veri bekleniyor…")}</div>;
   }
 
   const down = new Set(input.buttons);
@@ -61,15 +62,15 @@ export function Live({ input }: { input: Input | null }) {
     <div className="panel live">
       <div className="live-row">
         <Trigger value={input.l2} label="L2" />
-        <Stick pos={input.left} pressed={down.has("L3")} label="Sol" />
+        <Stick pos={input.left} pressed={down.has("L3")} label={L("Left", "Sol")} />
 
-        <svg viewBox="-30 -30 60 60" width="64" height="64" className="cluster" aria-label="Yön tuşları">
+        <svg viewBox="-30 -30 60 60" width="64" height="64" className="cluster" aria-label={L("D-pad", "Yön tuşları")}>
           {dpad.map((d) => (
             <rect key={d.id} x={d.x * 18 - 7} y={d.y * 18 - 7} width="14" height="14" rx="2" className={down.has(d.id) ? "on" : ""} />
           ))}
         </svg>
 
-        <svg viewBox="-30 -30 60 60" width="64" height="64" className="cluster" aria-label="Ön tuşlar">
+        <svg viewBox="-30 -30 60 60" width="64" height="64" className="cluster" aria-label={L("Face buttons", "Ön tuşlar")}>
           {face.map((b) => (
             <g key={b.id} transform={`translate(${b.x * 18} ${b.y * 18})`}>
               <circle r="8" className={down.has(b.id) ? "on" : ""} />
@@ -78,7 +79,7 @@ export function Live({ input }: { input: Input | null }) {
           ))}
         </svg>
 
-        <Stick pos={input.right} pressed={down.has("R3")} label="Sağ" />
+        <Stick pos={input.right} pressed={down.has("R3")} label={L("Right", "Sağ")} />
         <Trigger value={input.r2} label="R2" />
       </div>
 
@@ -91,7 +92,7 @@ export function Live({ input }: { input: Input | null }) {
       </div>
 
       <div className="live-row bottom">
-        <div className="touchpad" aria-label="Dokunmatik yüzey">
+        <div className="touchpad" aria-label={L("Touchpad", "Dokunmatik yüzey")}>
           {input.touch.map((t) => (
             <span key={t.id} className="finger" style={{ left: `${(t.x / 1920) * 100}%`, top: `${(t.y / 1080) * 100}%` }} />
           ))}
@@ -102,14 +103,14 @@ export function Live({ input }: { input: Input | null }) {
           <dd className="num">
             {f(input.gyro[0])} {f(input.gyro[1])} {f(input.gyro[2])}
           </dd>
-          <dt>ivme g</dt>
+          <dt>{L("accel g", "ivme g")}</dt>
           <dd className="num">
             {f(input.accel[0])} {f(input.accel[1])} {f(input.accel[2])}
           </dd>
-          <dt>rapor</dt>
+          <dt>{L("reports", "rapor")}</dt>
           <dd className="num">
-            {input.reports.toLocaleString("tr-TR")}
-            {input.badCrc > 0 && <span className="faint"> · {input.badCrc} bozuk</span>}
+            {input.reports.toLocaleString(locale())}
+            {input.badCrc > 0 && <span className="faint"> · {input.badCrc} {L("bad", "bozuk")}</span>}
           </dd>
         </dl>
       </div>

@@ -5,7 +5,7 @@ namespace Tactile.Core;
 /// <summary>Profiles on disk, one file per profile in <c>profiles\&lt;id&gt;.json</c>. Thread-safe.</summary>
 public sealed class ProfileStore
 {
-    public const string DefaultName = "Varsayılan";
+    public static string DefaultName => Text.Pick("Default", "Varsayılan");
 
     private readonly Lock _lock = new();
     private readonly string _dir;
@@ -96,7 +96,7 @@ public sealed class ProfileStore
 
     public Profile Duplicate(string id, string newName)
     {
-        Profile source = Get(id) ?? throw new KeyNotFoundException($"Profil bulunamadı: {id}");
+        Profile source = Get(id) ?? throw new LocalizedMessage($"Profile not found: {id}", $"Profil bulunamadı: {id}").CreateException(message => new KeyNotFoundException(message));
         return Save(source with { Id = Validation.NewId(), Name = newName });
     }
 
@@ -115,12 +115,12 @@ public sealed class ProfileStore
         }
         catch (JsonException e)
         {
-            throw new ArgumentException($"Geçersiz profil dosyası: {e.Message}", nameof(json), e);
+            throw new LocalizedMessage($"Invalid profile file: {e.Message}", $"Geçersiz profil dosyası: {e.Message}").CreateException(message => new ArgumentException(message, nameof(json), e));
         }
 
         if (p is null)
         {
-            throw new ArgumentException("Geçersiz profil dosyası.", nameof(json));
+            throw new LocalizedMessage("Invalid profile file.", "Geçersiz profil dosyası.").CreateException(message => new ArgumentException(message, nameof(json)));
         }
 
         Profile cleaned = Validation.StripRunActions(Validation.Normalize(p with { Id = Validation.NewId() }), out removedRunActions);
@@ -129,7 +129,7 @@ public sealed class ProfileStore
 
     public string Export(string id)
     {
-        Profile p = Get(id) ?? throw new KeyNotFoundException($"Profil bulunamadı: {id}");
+        Profile p = Get(id) ?? throw new LocalizedMessage($"Profile not found: {id}", $"Profil bulunamadı: {id}").CreateException(message => new KeyNotFoundException(message));
         return JsonSerializer.Serialize(p, TactileJson.Options);
     }
 

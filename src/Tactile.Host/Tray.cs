@@ -12,22 +12,35 @@ internal sealed class Tray : IDisposable
     private readonly ToolStripSeparator _profilesEnd = new();
     private readonly List<ToolStripMenuItem> _profileItems = [];
     private readonly Action<string> _activate;
+    private readonly ToolStripMenuItem _showItem;
+    private readonly ToolStripMenuItem _restoreItem;
+    private readonly ToolStripMenuItem _exitItem;
     private string _text = "";
 
     public Tray(Icon icon, Action show, Action<string> activate, Action restore, Action exit)
     {
         _activate = activate;
-        var showItem = new ToolStripMenuItem("Göster", null, (_, _) => show());
-        showItem.Font = new Font(showItem.Font, FontStyle.Bold);
-        _menu.Items.Add(showItem);
+        _showItem = new ToolStripMenuItem("", null, (_, _) => show());
+        _showItem.Font = new Font(_showItem.Font, FontStyle.Bold);
+        _menu.Items.Add(_showItem);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(_profilesEnd);
-        _menu.Items.Add(new ToolStripMenuItem("Kontrolcüyü geri getir", null, (_, _) => restore()));
+        _restoreItem = new ToolStripMenuItem("", null, (_, _) => restore());
+        _menu.Items.Add(_restoreItem);
         _menu.Items.Add(new ToolStripSeparator());
-        _menu.Items.Add(new ToolStripMenuItem("Çıkış", null, (_, _) => exit()));
+        _exitItem = new ToolStripMenuItem("", null, (_, _) => exit());
+        _menu.Items.Add(_exitItem);
+        UpdateLanguage();
 
-        _icon = new NotifyIcon { Icon = icon, Text = "Tactile", ContextMenuStrip = _menu, Visible = true };
+        _icon = new NotifyIcon { Icon = icon, Text = "TriggerForge", ContextMenuStrip = _menu, Visible = true };
         _icon.DoubleClick += (_, _) => show();
+    }
+
+    public void UpdateLanguage()
+    {
+        _showItem.Text = Text.Pick("Show", "Göster");
+        _restoreItem.Text = Text.Pick("Restore controller", "Kontrolcüyü geri getir");
+        _exitItem.Text = Text.Pick("Exit", "Çıkış");
     }
 
     public void SetProfiles(IReadOnlyList<Profile> profiles, string activeId)
@@ -55,10 +68,11 @@ internal sealed class Tray : IDisposable
     public void SetStatus(string? controller, int? battery, bool charging)
     {
         string text = controller is null
-            ? "Tactile\nKontrolcü bağlı değil"
+            ? Text.Pick("TriggerForge\nNo controller connected", "TriggerForge\nKontrolcü bağlı değil")
             : battery is int b
-                ? $"Tactile\n{controller} · %{b}{(charging ? " (şarjda)" : "")}"
-                : $"Tactile\n{controller}";
+                ? Text.Pick($"TriggerForge\n{controller} · {b}%{(charging ? " (charging)" : "")}",
+                    $"TriggerForge\n{controller} · %{b}{(charging ? " (şarjda)" : "")}")
+                : $"TriggerForge\n{controller}";
         if (text.Length > 127)
         {
             text = text[..127];
@@ -72,7 +86,7 @@ internal sealed class Tray : IDisposable
     }
 
     public void Balloon(string text, ToolTipIcon kind = ToolTipIcon.Info) =>
-        _icon.ShowBalloonTip(5000, "Tactile", text, kind);
+        _icon.ShowBalloonTip(5000, "TriggerForge", text, kind);
 
     public void Dispose()
     {

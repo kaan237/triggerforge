@@ -1,3 +1,4 @@
+using Tactile.Core;
 using System.Runtime.InteropServices;
 using static Tactile.Audio.CoreAudioInterop;
 
@@ -44,10 +45,10 @@ public sealed class AudioDefaults : IAudioDefaults
                     if (result == NoEndpoint)
                         continue;
 
-                    Check(result, "Varsayılan ses cihazı okunamadı.");
+                    Check(result, new LocalizedMessage("Could not read the default audio device.", "Varsayılan ses cihazı okunamadı."));
                     try
                     {
-                        Check(device.GetId(out nint id), "Ses cihazının kimliği okunamadı.");
+                        Check(device.GetId(out nint id), new LocalizedMessage("Could not read the audio device ID.", "Ses cihazının kimliği okunamadı."));
                         string deviceId = TakeString(id);
                         defaults.Add(new(flow, role), new(deviceId, includeNames ? ReadName(device) : null));
                     }
@@ -71,7 +72,7 @@ public sealed class AudioDefaults : IAudioDefaults
         var policy = RequireInterface<IPolicyConfig>(new PolicyConfigClient());
         try
         {
-            Check(policy.SetDefaultEndpoint(deviceId, role), "Varsayılan ses cihazı değiştirilemedi.");
+            Check(policy.SetDefaultEndpoint(deviceId, role), new LocalizedMessage("Could not change the default audio device.", "Varsayılan ses cihazı değiştirilemedi."));
         }
         finally
         {
@@ -81,10 +82,10 @@ public sealed class AudioDefaults : IAudioDefaults
 
     private static string? ReadName(IMMDevice device)
     {
-        Check(device.OpenPropertyStore(0, out var store), "Ses cihazının özellikleri açılamadı.");
+        Check(device.OpenPropertyStore(0, out var store), new LocalizedMessage("Could not open the audio device properties.", "Ses cihazının özellikleri açılamadı."));
         try
         {
-            Check(store.GetValue(in FriendlyName, out PropertyVariant value), "Ses cihazının adı okunamadı.");
+            Check(store.GetValue(in FriendlyName, out PropertyVariant value), new LocalizedMessage("Could not read the audio device name.", "Ses cihazının adı okunamadı."));
             try
             {
                 return value.Type == WideString ? Marshal.PtrToStringUni(value.Pointer) : null;

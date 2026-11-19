@@ -1,3 +1,4 @@
+import { L } from "./i18n";
 import { useRef, useState, type KeyboardEvent } from "react";
 import type { Action, ActionKind, Binding, Direction, KeyName, Macro, MouseButtonName, Special } from "./host";
 import { codeToKey, keyLabel, modifierKeys, searchKeys } from "./keys";
@@ -81,7 +82,7 @@ export function KeyField({ value, onChange, max = 4, compact }: { value: KeyName
           className={focused ? "key-capture on" : "key-capture"}
           tabIndex={0}
           role="textbox"
-          aria-label="Tuş yakala"
+          aria-label={L("Capture key", "Tuş yakala")}
           onFocus={() => {
             held.current.clear();
             setRecorded([]);
@@ -102,15 +103,15 @@ export function KeyField({ value, onChange, max = 4, compact }: { value: KeyName
               </span>
             ))
           ) : (
-            <span className="faint">{focused ? "Tuşa bas…" : "Tıkla, tuşa bas"}</span>
+            <span className="faint">{focused ? L("Press a key…", "Tuşa bas…") : L("Click and press a key", "Tıkla, tuşa bas")}</span>
           )}
         </div>
         <button className={listOpen ? "button on" : "button"} onClick={() => setListOpen(!listOpen)} aria-expanded={listOpen}>
-          Listeden
+          {L("Choose from list", "Listeden")}
         </button>
         {value.length > 0 && !compact && (
           <button className="button ghost" onClick={() => onChange([])}>
-            Temizle
+            {L("Clear", "Temizle")}
           </button>
         )}
       </div>
@@ -126,10 +127,10 @@ function KeyList({ selected, onPick, onClose }: { selected: KeyName[]; onPick: (
   return (
     <div className="key-list">
       <div className="key-list-head">
-        <input type="text" value={q} autoFocus placeholder="Tuş ara: win, f13, ses…" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Escape" && onClose()} />
-        <span className="hint">Konumlar ABD klavye düzenine göre.</span>
+        <input type="text" value={q} autoFocus placeholder={L("Search keys: win, f13, volume…", "Tuş ara: win, f13, ses…")} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Escape" && onClose()} />
+        <span className="hint">{L("Key positions follow the US layout.", "Konumlar ABD klavye düzenine göre.")}</span>
         <button className="button ghost" onClick={onClose}>
-          Kapat
+          {L("Close", "Kapat")}
         </button>
       </div>
       <div className="key-list-body">
@@ -140,14 +141,14 @@ function KeyList({ selected, onPick, onClose }: { selected: KeyName[]; onPick: (
               {found
                 .filter((k) => k.group === g)
                 .map((k) => (
-                  <button key={k.name} className={selected.includes(k.name) ? "on" : ""} title={k.capture ? k.name : `${k.name} · yalnız listeden`} onClick={() => onPick(k.name)}>
+                  <button key={k.name} className={selected.includes(k.name) ? "on" : ""} title={k.capture ? k.name : L(`${k.name} · list only`, `${k.name} · yalnız listeden`)} onClick={() => onPick(k.name)}>
                     {k.label}
                   </button>
                 ))}
             </div>
           </div>
         ))}
-        {found.length === 0 && <p className="hint">Eşleşen tuş yok.</p>}
+        {found.length === 0 && <p className="hint">{L("No matching keys.", "Eşleşen tuş yok.")}</p>}
       </div>
     </div>
   );
@@ -163,7 +164,7 @@ export function ActionEditor({ action, onChange, kinds }: { action: Action; onCh
 
   return (
     <div className="action-editor">
-      <select value={action.kind} aria-label="Eylem türü" onChange={(e) => onChange(actionOfKind(e.target.value as ActionKind))}>
+      <select value={action.kind} aria-label={L("Action type", "Eylem türü")} onChange={(e) => onChange(actionOfKind(e.target.value as ActionKind))}>
         {options.map((k) => (
           <option key={k.id} value={k.id}>
             {k.label}
@@ -173,22 +174,22 @@ export function ActionEditor({ action, onChange, kinds }: { action: Action; onCh
       <div className="action-fields">
         {action.kind === "key" && <KeyField value={action.keys ?? []} onChange={(keys) => set({ keys })} />}
         {action.kind === "mouseButton" && (
-          <Segmented label="Fare tuşu" value={action.button ?? "left"} options={mouseButtons} onChange={(button: MouseButtonName) => set({ button })} />
+          <Segmented label={L("Mouse button", "Fare tuşu")} value={action.button ?? "left"} options={mouseButtons} onChange={(button: MouseButtonName) => set({ button })} />
         )}
         {action.kind === "wheel" && (
           <>
-            <Segmented label="Yön" value={action.direction ?? "down"} options={directions} onChange={(direction: Direction) => set({ direction })} />
+            <Segmented label={L("Direction", "Yön")} value={action.direction ?? "down"} options={directions} onChange={(direction: Direction) => set({ direction })} />
             <label className="number-field">
               <input type="number" min={1} max={10} value={action.amount ?? 1} onChange={(e) => set({ amount: Math.min(10, Math.max(1, Math.round(Number(e.target.value) || 1))) })} />
-              <span className="faint">çentik</span>
+              <span className="faint">{L("ticks", "çentik")}</span>
             </label>
           </>
         )}
         {action.kind === "macro" &&
           (macros.length > 0 ? (
-            <select value={action.macroId ?? ""} aria-label="Makro" onChange={(e) => set({ macroId: e.target.value })}>
+            <select value={action.macroId ?? ""} aria-label={L("Macro", "Makro")} onChange={(e) => set({ macroId: e.target.value })}>
               <option value="" disabled>
-                Makro seç
+                {L("Select a macro", "Makro seç")}
               </option>
               {macros.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -197,12 +198,12 @@ export function ActionEditor({ action, onChange, kinds }: { action: Action; onCh
               ))}
             </select>
           ) : (
-            <span className="hint">Bu profilde makro yok. Makrolar sekmesinden ekle.</span>
+            <span className="hint">{L("No macros in this profile. Add one on the Macros tab.", "Bu profilde makro yok. Makrolar sekmesinden ekle.")}</span>
           ))}
         {action.kind === "profile" && (
-          <select value={action.profileId ?? "next"} aria-label="Profil" onChange={(e) => set({ profileId: e.target.value })}>
-            <option value="next">Sonraki profil</option>
-            <option value="previous">Önceki profil</option>
+          <select value={action.profileId ?? "next"} aria-label={L("Profile", "Profil")} onChange={(e) => set({ profileId: e.target.value })}>
+            <option value="next">{L("Next profile", "Sonraki profil")}</option>
+            <option value="previous">{L("Previous profile", "Önceki profil")}</option>
             {profiles.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -215,16 +216,16 @@ export function ActionEditor({ action, onChange, kinds }: { action: Action; onCh
             <div className="key-row">
               <input type="text" className="grow" value={action.path ?? ""} maxLength={260} placeholder="C:\…\program.exe" spellCheck={false} onChange={(e) => set({ path: e.target.value })} />
               <button className="button" onClick={() => pickProgram((path) => set({ path }))}>
-                Seç…
+                {L("Browse…", "Seç…")}
               </button>
             </div>
-            <input type="text" value={action.args ?? ""} maxLength={512} placeholder="Argümanlar (isteğe bağlı)" spellCheck={false} onChange={(e) => set({ args: e.target.value })} />
+            <input type="text" value={action.args ?? ""} maxLength={512} placeholder={L("Arguments (optional)", "Argümanlar (isteğe bağlı)")} spellCheck={false} onChange={(e) => set({ args: e.target.value })} />
           </div>
         )}
-        {action.kind === "micMute" && <span className="hint">Windows varsayılan mikrofonunu susturur ya da açar. Mikrofon ışığı durumu gösterir.</span>}
+        {action.kind === "micMute" && <span className="hint">{L("Toggles the default Windows microphone. The microphone LED shows its state.", "Windows varsayılan mikrofonunu susturur ya da açar. Mikrofon ışığı durumu gösterir.")}</span>}
         {action.kind === "special" && (
           <>
-            <select value={action.special ?? "screenshot"} aria-label="Sistem eylemi" onChange={(e) => set({ special: e.target.value as Special })}>
+            <select value={action.special ?? "screenshot"} aria-label={L("System action", "Sistem eylemi")} onChange={(e) => set({ special: e.target.value as Special })}>
               {specials.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.label}
@@ -248,26 +249,26 @@ export function BindingEditor({ binding, onChange }: { binding: Binding; onChang
   return (
     <div className="binding">
       <div className="bind-row">
-        <span className="label">Basınca</span>
+        <span className="label">{L("On press", "Basınca")}</span>
         <ActionEditor action={binding.press} onChange={(press) => set({ press })} />
       </div>
 
       <div className="bind-row">
-        <Check label="Basılı tutunca" checked={!!binding.hold} onChange={(on) => set({ hold: on ? actionOfKind("key") : null })} />
+        <Check label={L("On hold", "Basılı tutunca")} checked={!!binding.hold} onChange={(on) => set({ hold: on ? actionOfKind("key") : null })} />
         {binding.hold && (
           <div className="bind-sub">
             <ActionEditor action={binding.hold} onChange={(hold) => set({ hold })} />
-            <Slider label="Tutma süresi" min={150} max={2000} step={10} value={binding.holdMs} format={(v) => `${v} ms`} onChange={(holdMs) => set({ holdMs })} />
+            <Slider label={L("Hold time", "Tutma süresi")} min={150} max={2000} step={10} value={binding.holdMs} format={(v) => `${v} ms`} onChange={(holdMs) => set({ holdMs })} />
           </div>
         )}
       </div>
 
       <div className="bind-row">
-        <Check label="Çift basınca" checked={!!binding.double} onChange={(on) => set({ double: on ? actionOfKind("key") : null })} />
+        <Check label={L("On double press", "Çift basınca")} checked={!!binding.double} onChange={(on) => set({ double: on ? actionOfKind("key") : null })} />
         {binding.double && (
           <div className="bind-sub">
             <ActionEditor action={binding.double} onChange={(double) => set({ double })} />
-            <Slider label="Aralık" min={100} max={600} step={10} value={binding.doubleMs} format={(v) => `${v} ms`} onChange={(doubleMs) => set({ doubleMs })} />
+            <Slider label={L("Interval", "Aralık")} min={100} max={600} step={10} value={binding.doubleMs} format={(v) => `${v} ms`} onChange={(doubleMs) => set({ doubleMs })} />
           </div>
         )}
       </div>
@@ -275,19 +276,19 @@ export function BindingEditor({ binding, onChange }: { binding: Binding; onChang
       <div className="bind-row">
         <div className="bind-flags">
           <Check label="Turbo" disabled={!plain} checked={binding.turbo} onChange={(turbo) => set({ turbo })} />
-          <Check label="Kilitle" disabled={!plain} checked={binding.toggle} onChange={(toggle) => set({ toggle })} />
+          <Check label={L("Latch", "Kilitle")} disabled={!plain} checked={binding.toggle} onChange={(toggle) => set({ toggle })} />
         </div>
         {plain && binding.turbo && (
           <div className="bind-sub">
-            <Slider label="Turbo hızı" min={1} max={30} step={1} value={binding.turboHz} format={(v) => `${v} Hz`} onChange={(turboHz) => set({ turboHz })} />
+            <Slider label={L("Turbo rate", "Turbo hızı")} min={1} max={30} step={1} value={binding.turboHz} format={(v) => `${v} Hz`} onChange={(turboHz) => set({ turboHz })} />
           </div>
         )}
         <p className="hint">
           {plain
             ? binding.turbo && binding.toggle
-              ? "İkisi birden açıksa turbo geçerli."
-              : "Turbo: basılıyken tekrarlar. Kilitle: ilk basış basılı tutar, ikincisi bırakır."
-            : "Turbo ve kilit yalnız tutma ve çift basma kapalıyken çalışır."}
+              ? L("Turbo takes priority when both are on.", "İkisi birden açıksa turbo geçerli.")
+              : L("Turbo repeats while held. Latch holds on the first press and releases on the second.", "Turbo: basılıyken tekrarlar. Kilitle: ilk basış basılı tutar, ikincisi bırakır.")
+            : L("Turbo and latch require hold and double press to be off.", "Turbo ve kilit yalnız tutma ve çift basma kapalıyken çalışır.")}
         </p>
       </div>
     </div>

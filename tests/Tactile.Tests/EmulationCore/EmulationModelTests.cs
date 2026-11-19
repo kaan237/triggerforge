@@ -5,6 +5,7 @@ using Tactile.Drivers;
 
 namespace Tactile.Tests.EmulationCore;
 
+[Collection("Localization")]
 public class EmulationModelTests
 {
     [Fact]
@@ -49,6 +50,7 @@ public class EmulationModelTests
     [Fact]
     public void Bad_values_are_dropped_with_issues()
     {
+        using var language = new TestLanguage(Language.Tr);
         const string json = """
             { "name": "x", "emulation": { "mode": "ps2", "remap": { "Cross": "CIRCLE", "jump": "cross", "square": "fly", "circle": "circle", "r2": "None" } } }
             """;

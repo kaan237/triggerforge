@@ -73,7 +73,7 @@ internal sealed class ActionWorker : IDisposable
             {
                 _queue = new BlockingCollection<Action>();
                 BlockingCollection<Action> q = _queue;
-                new Thread(() => Loop(q)) { IsBackground = true, Name = "Tactile mapping actions" }.Start();
+                new Thread(() => Loop(q)) { IsBackground = true, Name = "TriggerForge: mapping actions" }.Start();
             }
 
             return _queue;

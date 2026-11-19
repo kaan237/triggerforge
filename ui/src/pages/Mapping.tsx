@@ -1,3 +1,4 @@
+import { L } from "../i18n";
 import { useState } from "react";
 import { ControllerDrawing } from "../ControllerDrawing";
 import { send, type Binding, type ButtonName, type Mapping as MappingConfig, type Profile } from "../host";
@@ -13,11 +14,11 @@ type Tab = "buttons" | "touchpad" | "gyro" | "sticks" | "macros";
 type Layer = "base" | "layer";
 
 const tabs: { id: Tab; label: string }[] = [
-  { id: "buttons", label: "Tuşlar" },
+  { id: "buttons", get label() { return L("Mapping", "Tuşlar"); } },
   { id: "touchpad", label: "Touchpad" },
-  { id: "gyro", label: "Gyro fare" },
-  { id: "sticks", label: "Analoglar" },
-  { id: "macros", label: "Makrolar" },
+  { id: "gyro", get label() { return L("Gyro mouse", "Gyro fare"); } },
+  { id: "sticks", get label() { return L("Sticks", "Analoglar"); } },
+  { id: "macros", get label() { return L("Macros", "Makrolar"); } },
 ];
 
 export type EditMapping = (fn: (m: MappingConfig) => MappingConfig) => void;
@@ -28,13 +29,13 @@ function StatusLine({ draft }: { draft: Profile }) {
   let text: string;
   let warn = false;
   let restart = false;
-  if (draft.id !== activeId) text = "Bu profil etkin değil. Atamalar profil etkinleşince çalışır.";
-  else if (dirty && draftBase && draftBase.mapping.enabled !== draft.mapping.enabled) text = "Kaydedince geçerli olur.";
-  else if (!draft.mapping.enabled) text = "Kapalı.";
-  else if (!status?.connected) text = "Kontrolcü bağlı değil.";
-  else if (s?.paused) text = "Duraklatıldı. Tuş yakalanırken atamalar durur.";
+  if (draft.id !== activeId) text = L("Mappings take effect when this profile is active.", "Bu profil etkin değil. Atamalar profil etkinleşince çalışır.");
+  else if (dirty && draftBase && draftBase.mapping.enabled !== draft.mapping.enabled) text = L("Save to apply.", "Kaydedince geçerli olur.");
+  else if (!draft.mapping.enabled) text = L("Off.", "Kapalı.");
+  else if (!status?.connected) text = L("No controller connected.", "Kontrolcü bağlı değil.");
+  else if (s?.paused) text = L("Paused while capturing a key.", "Duraklatıldı. Tuş yakalanırken atamalar durur.");
   else if (s?.blockedBy) {
-    text = `${s.blockedBy} yönetici olarak çalışıyor, atamalar ona ulaşmıyor.`;
+    text = L(`${s.blockedBy} is running as administrator, so it cannot receive mappings.`, `${s.blockedBy} yönetici olarak çalışıyor, atamalar ona ulaşmıyor.`);
     warn = true;
     restart = !status.elevated;
   } else if (s?.active) text = "Aktif.";
@@ -46,7 +47,7 @@ function StatusLine({ draft }: { draft: Profile }) {
       <span className={warn ? "small warn" : "small muted-text"}>{text}</span>
       {restart && (
         <button className="button" onClick={() => send({ type: "app.restartElevated" })}>
-          Yönetici olarak yeniden başlat
+          {L("Restart as administrator", "Yönetici olarak yeniden başlat")}
         </button>
       )}
     </div>
@@ -64,8 +65,8 @@ function Head({ draft, editMapping }: { draft: Profile; editMapping: EditMapping
     <section className="panel map-head">
       <div className="map-head-main">
         <Toggle
-          label="Klavye/fare ataması"
-          hint="Oyun kontrolcüyü görmeye devam eder; atamalar ayrıca klavye ve fare girdisi üretir."
+          label={L("Keyboard and mouse mapping", "Klavye/fare ataması")}
+          hint={L("The game still sees the controller. Mappings also send keyboard and mouse input.", "Oyun kontrolcüyü görmeye devam eder; atamalar ayrıca klavye ve fare girdisi üretir.")}
           checked={m.enabled}
           onChange={(enabled) => editMapping((cur) => ({ ...cur, enabled }))}
         />
@@ -73,9 +74,9 @@ function Head({ draft, editMapping }: { draft: Profile; editMapping: EditMapping
       </div>
       <div className="map-head-side">
         <label className="field-inline">
-          Katman tuşu
+          {L("Layer button", "Katman tuşu")}
           <select value={m.layerButton} onChange={(e) => editMapping((cur) => ({ ...cur, layerButton: e.target.value as ButtonName | "none" }))}>
-            <option value="none">Yok</option>
+            <option value="none">{L("None", "Yok")}</option>
             {buttonDefs.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.label}
@@ -85,17 +86,17 @@ function Head({ draft, editMapping }: { draft: Profile; editMapping: EditMapping
         </label>
         {confirm ? (
           <span className="confirm-inline">
-            <span className="small warn">Mevcut tuş atamaları değişsin mi?</span>
+            <span className="small warn">{L("Replace the current mappings?", "Mevcut tuş atamaları değişsin mi?")}</span>
             <button className="button ghost" onClick={() => setConfirm(false)}>
-              Vazgeç
+              {L("Cancel", "Vazgeç")}
             </button>
             <button className="button danger" onClick={apply}>
-              Değiştir
+              {L("Replace", "Değiştir")}
             </button>
           </span>
         ) : (
-          <button className="button" title="Fare, ok tuşları, kaydırma ve kısayollarla masaüstü düzeni" onClick={() => (hasBindings(m) ? setConfirm(true) : apply())}>
-            Masaüstü şablonu
+          <button className="button" title={L("Desktop layout with mouse, arrow keys, scrolling, and shortcuts", "Fare, ok tuşları, kaydırma ve kısayollarla masaüstü düzeni")} onClick={() => (hasBindings(m) ? setConfirm(true) : apply())}>
+            {L("Desktop preset", "Masaüstü şablonu")}
           </button>
         )}
       </div>
@@ -142,12 +143,12 @@ function ButtonsTab({ draft, editMapping }: { draft: Profile; editMapping: EditM
         </div>
         <div className="layer-pick">
           <Segmented
-            label="Katman"
+            label={L("Layer", "Katman")}
             value={layer}
             onChange={setLayer}
             options={[
-              { id: "base", label: "Temel" },
-              { id: "layer", label: noLayer ? "Katman" : `Katman (${buttonLabel(m.layerButton)} basılı)` },
+              { id: "base", label: L("Base", "Temel") },
+              { id: "layer", label: noLayer ? L("Layer", "Katman") : L(`Layer (hold ${buttonLabel(m.layerButton)})`, `Katman (${buttonLabel(m.layerButton)} basılı)`) },
             ]}
           />
         </div>
@@ -164,7 +165,7 @@ function ButtonsTab({ draft, editMapping }: { draft: Profile; editMapping: EditM
                   <li key={b.id}>
                     <button className={cls} onClick={() => setSelected(b.id)}>
                       <span className="bl-name">{b.label}</span>
-                      <span className={inherited || text === "—" ? "bl-sum faint" : "bl-sum"}>{m.layerButton === b.id ? "katman tuşu" : text}</span>
+                      <span className={inherited || text === "—" ? "bl-sum faint" : "bl-sum"}>{m.layerButton === b.id ? L("layer button", "katman tuşu") : text}</span>
                     </button>
                   </li>
                 );
@@ -177,38 +178,38 @@ function ButtonsTab({ draft, editMapping }: { draft: Profile; editMapping: EditM
         <div className="panel-head">
           <h2>
             {buttonLabel(selected)}
-            {layer === "layer" && <span className="tag">katman</span>}
+            {layer === "layer" && <span className="tag">{L("layer", "katman")}</span>}
           </h2>
           {layer === "base" ? (
             base && (
               <button className="button ghost" onClick={() => setBase(defaultBinding())}>
-                Temizle
+                {L("Clear", "Temizle")}
               </button>
             )
           ) : (
             own && (
               <button className="button ghost" onClick={() => setLayerBinding(null)}>
-                Temel atamaya dön
+                {L("Use base mapping", "Temel atamaya dön")}
               </button>
             )
           )}
         </div>
         {isLayerButton ? (
-          <p className="hint">Bu tuş katman tuşu. Basılıyken diğer tuşlar katman atamasını kullanır; kendi ataması yok sayılır. Katman tuşunu sayfanın üstünden değiştirebilirsin.</p>
+          <p className="hint">{L("Holding this button activates the other buttons' layer mappings. Its own mapping is ignored. Change the layer button at the top of the page.", "Bu tuş katman tuşu. Basılıyken diğer tuşlar katman atamasını kullanır; kendi ataması yok sayılır. Katman tuşunu sayfanın üstünden değiştirebilirsin.")}</p>
         ) : layer === "base" ? (
           <BindingEditor binding={base ?? defaultBinding()} onChange={setBase} />
         ) : noLayer ? (
-          <p className="hint">Katman tuşu seçilmedi. Sayfanın üstünden bir tuş seç.</p>
+          <p className="hint">{L("No layer button selected. Choose one at the top of the page.", "Katman tuşu seçilmedi. Sayfanın üstünden bir tuş seç.")}</p>
         ) : own ? (
           <BindingEditor binding={own} onChange={(b) => setLayerBinding(b)} />
         ) : (
           <div className="inherit">
             <p className="hint">
-              Katmanda ayrı atama yok; temel atama kullanılır: <span className="muted-text">{summary(base)}</span>
+              {L("This layer uses the base mapping:", "Katmanda ayrı atama yok; temel atama kullanılır:")} <span className="muted-text">{summary(base)}</span>
             </p>
             <div className="button-row">
               <button className="button" onClick={() => setLayerBinding(defaultBinding())}>
-                Katmanda ayrı ata
+                {L("Add layer mapping", "Katmanda ayrı ata")}
               </button>
             </div>
           </div>
@@ -221,12 +222,12 @@ function ButtonsTab({ draft, editMapping }: { draft: Profile; editMapping: EditM
 export function Mapping() {
   const { draft, edit } = useApp();
   const [tab, setTab] = useState<Tab>("buttons");
-  if (!draft) return <div className="page"><PageHead title="Tuşlar" /></div>;
+  if (!draft) return <div className="page"><PageHead title={L("Mapping", "Tuşlar")} /></div>;
   const editMapping: EditMapping = (fn) => edit((p) => ({ ...p, mapping: fn(p.mapping) }));
 
   return (
     <div className="page mapping-page">
-      <PageHead title="Tuşlar">
+      <PageHead title={L("Mapping", "Tuşlar")}>
         <DraftBar />
       </PageHead>
       <Head draft={draft} editMapping={editMapping} />

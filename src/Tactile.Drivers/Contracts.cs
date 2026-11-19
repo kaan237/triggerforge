@@ -1,13 +1,38 @@
 // Fixed in phase 4 (docs/contract-phase4.md). Do not edit.
+using Tactile.Core;
+
 namespace Tactile.Drivers;
 
 public enum DriverKind { UsbIp, HidHide }
 
 public enum DriverState { Missing, Ready, Unsupported, Error }
 
-public sealed record DriverStatus(DriverKind Kind, DriverState State, string? Version, string? Detail);
+public sealed record DriverStatus(DriverKind Kind, DriverState State, string? Version, string? Detail)
+{
+    private readonly LocalizedMessage? _translation;
+    private readonly string? _detail = Detail;
 
-public sealed record InstallResult(bool Ok, bool RebootRequired, string Message);
+    public string? Detail
+    {
+        get => _translation?.Value ?? _detail;
+        init
+        {
+            _detail = value;
+            _translation = null;
+        }
+    }
+
+    public string? EnglishDetail => _translation?.En ?? _detail;
+
+    internal DriverStatus(DriverKind kind, DriverState state, string? version, string en, string tr)
+        : this(kind, state, version, en) => _translation = new(en, tr);
+}
+
+public sealed record InstallResult(bool Ok, bool RebootRequired, string Message)
+{
+    internal LocalizedMessage? Translation { get; init; }
+    public string EnglishMessage => Translation?.En ?? Message;
+}
 
 public interface IDriverManager
 {

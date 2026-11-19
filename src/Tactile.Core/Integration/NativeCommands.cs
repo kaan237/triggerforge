@@ -32,7 +32,7 @@ internal static class NativeCommands
     }
 
     public static string ErrorMessage(Exception error) => error is JsonException or ArgumentOutOfRangeException
-        ? "Tetik yapılandırması geçersiz."
+        ? Text.Pick("Invalid trigger configuration.", "Tetik yapılandırması geçersiz.")
         : error.Message;
 
     public static string? ApplyUntilProfile(ref JsonElement.ArrayEnumerator remaining, ref UdpState state)
@@ -70,7 +70,7 @@ internal static class NativeCommands
                         "off" => MicLed.Off,
                         "on" => MicLed.On,
                         "pulse" => MicLed.Pulse,
-                        _ => throw new ArgumentException("Mikrofon LED modu geçersiz."),
+                        _ => throw new ArgumentException(Text.Pick("Invalid microphone LED mode.", "Mikrofon LED modu geçersiz.")),
                     },
                 };
             case "rumble":
@@ -80,7 +80,7 @@ internal static class NativeCommands
             case "status":
                 return state;
             default:
-                throw new ArgumentException("Bilinmeyen UDP komutu.");
+                throw new ArgumentException(Text.Pick("Unknown UDP command.", "Bilinmeyen UDP komutu."));
         }
     }
 
@@ -90,7 +90,7 @@ internal static class NativeCommands
         {
             "left" => true,
             "right" => false,
-            _ => throw new ArgumentException("Tetik tarafı geçersiz."),
+            _ => throw new ArgumentException(Text.Pick("Invalid trigger side.", "Tetik tarafı geçersiz.")),
         };
 
         JsonElement value = Read(command, "config");
@@ -103,7 +103,7 @@ internal static class NativeCommands
                 !string.Equals(mode, JsonNamingPolicy.CamelCase.ConvertName(config.Mode.ToString()), StringComparison.OrdinalIgnoreCase) ||
                 config.Params.Values.Any(p => !double.IsFinite(p) || p < int.MinValue || p > int.MaxValue))
             {
-                throw new ArgumentException("Tetik yapılandırması geçersiz.");
+                throw new ArgumentException(Text.Pick("Invalid trigger configuration.", "Tetik yapılandırması geçersiz."));
             }
 
             effect = Triggers.ToEffect(config);
@@ -115,15 +115,15 @@ internal static class NativeCommands
     private static JsonElement Read(JsonElement command, string name) =>
         command.ValueKind == JsonValueKind.Object && command.TryGetProperty(name, out JsonElement value)
             ? value
-            : throw new ArgumentException($"UDP alanı eksik: {name}.");
+            : throw new ArgumentException(Text.Pick($"Missing UDP field: {name}.", $"UDP alanı eksik: {name}."));
 
     private static string ReadString(JsonElement command, string name) =>
         Read(command, name) is { ValueKind: JsonValueKind.String } value
             ? value.GetString()!
-            : throw new ArgumentException($"UDP metin alanı geçersiz: {name}.");
+            : throw new ArgumentException(Text.Pick($"Invalid UDP text field: {name}.", $"UDP metin alanı geçersiz: {name}."));
 
     private static byte ReadByte(JsonElement command, string name, byte max = byte.MaxValue) =>
         Read(command, name) is { ValueKind: JsonValueKind.Number } value && value.TryGetByte(out byte result) && result <= max
             ? result
-            : throw new ArgumentException($"UDP sayı alanı 0–{max} aralığında olmalı: {name}.");
+            : throw new ArgumentException(Text.Pick($"UDP field {name} must be between 0 and {max}.", $"UDP sayı alanı 0–{max} aralığında olmalı: {name}."));
 }

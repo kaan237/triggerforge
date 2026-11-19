@@ -13,7 +13,7 @@ internal interface IMappingHost
     void ShowApp();
 
     /// <summary>A runtime failure, shown as a <c>mapping</c> notice.</summary>
-    void Report(string message);
+    void Report(Notice notice);
 }
 
 /// <summary>What one held action pressed, so the release goes to exactly that.</summary>
@@ -166,7 +166,7 @@ internal sealed class ActionDispatcher
     {
         if (id is null || !_macroById.TryGetValue(id, out Macro? macro))
         {
-            _worker.Post(() => _host.Report("Makro bulunamadı."));
+            _worker.Post(() => _host.Report(new Notice(NoticeKinds.Mapping, "Macro not found.", "Makro bulunamadı.")));
             return null;
         }
 
@@ -217,7 +217,7 @@ internal sealed class ActionDispatcher
         }
         catch (InvalidOperationException e)
         {
-            _host.Report(e.Message);
+            _host.Report(new Notice(NoticeKinds.Mapping, Text.English(e), e.Message));
         }
     }
 
@@ -229,7 +229,7 @@ internal sealed class ActionDispatcher
         }
         else
         {
-            _host.Report("Kayıt aygıtı bulunamadı; mikrofon susturulamadı.");
+            _host.Report(new Notice(NoticeKinds.Mapping, "No recording device found. Could not mute the microphone.", "Kayıt aygıtı bulunamadı; mikrofon susturulamadı."));
         }
     }
 }

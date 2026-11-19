@@ -2,33 +2,44 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using Tactile.Core;
+using Tactile.Core.Logging;
 using Tactile.Drivers;
 
 namespace Tactile.Host;
 
 internal static partial class Program
 {
-    private const string MutexName = @"Local\Tactile.Instance";
-    private const string ShowEventName = @"Local\Tactile.Show";
+    private const string MutexName = @"Local\TriggerForge.Instance";
+    private const string ShowEventName = @"Local\TriggerForge.Show";
     private const string TrayFlag = "--tray";
     private const string AfterFlag = "--after";
     private const string RestoreFlag = "--restore";
     private const int AfterWaitMs = 5000;
     private const int RestoreWaitMs = 10_000;
-    internal const string RestoreEventName = @"Local\Tactile.Restore";
-    internal const string RestoredEventName = @"Local\Tactile.Restored";
+    internal const string RestoreEventName = @"Local\TriggerForge.Restore";
+    internal const string RestoredEventName = @"Local\TriggerForge.Restored";
 
     private static bool s_tray;
 
     [STAThread]
-    private static void Main(string[] args)
+    private static int Main(string[] args)
     {
+        AppPaths paths = AppPaths.Resolve();
+        Log.Initialize(paths.LogDirectory);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            Log.Error("Unhandled application exception.", e.ExceptionObject as Exception);
+        Application.ThreadException += (_, e) => Log.Error("Unhandled UI exception.", e.Exception);
+        TaskScheduler.UnobservedTaskException += (_, e) => Log.Error("Unobserved task exception.", e.Exception);
+        Log.Info($"TriggerForge {Application.ProductVersion} starting. Windows: {Environment.OSVersion.VersionString}; portable: {(paths.Portable ? "yes" : "no")}.");
+
         // Before the mutex: this must work while another copy runs (or hangs).
+        // No data migration here: the uninstaller runs this and must not create new data folders.
         if (args.Any(a => string.Equals(a, RestoreFlag, StringComparison.OrdinalIgnoreCase)))
         {
-            Restore();
-            return;
+            return Restore(paths, args.Any(a => string.Equals(a, "--quiet", StringComparison.OrdinalIgnoreCase)));
         }
+
+        paths.Migrate();
 
         // A restarted copy must not see the old one's mutex and hand over to it.
         WaitForPrevious(args);
@@ -40,7 +51,7 @@ internal static partial class Program
             // We are in front (just launched), so let the running copy take focus.
             AllowSetForegroundWindow(AsfwAny);
             show.Set();
-            return;
+            return 0;
         }
 
         s_tray = args.Any(a => string.Equals(a, TrayFlag, StringComparison.OrdinalIgnoreCase));
@@ -48,13 +59,14 @@ internal static partial class Program
         TactileApp app;
         try
         {
-            app = new TactileApp(s_tray, show);
+            app = new TactileApp(s_tray, show, paths);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
-            MessageBox.Show($"Tactile başlatılamadı: ayar klasörüne erişilemiyor.{Environment.NewLine}{Environment.NewLine}{e.Message}", "Tactile",
+            Log.Error("Startup could not access the data folder.", e);
+            MessageBox.Show(Text.Pick($"TriggerForge could not start. The settings folder is inaccessible.{Environment.NewLine}{Environment.NewLine}{e.Message}", $"TriggerForge başlatılamadı: ayar klasörüne erişilemiyor.{Environment.NewLine}{Environment.NewLine}{e.Message}"), "TriggerForge",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
+            return 1;
         }
 
         using (app)
@@ -63,6 +75,7 @@ internal static partial class Program
         }
 
         GC.KeepAlive(mutex);
+        return 0;
     }
 
     /// <summary>
@@ -86,55 +99,91 @@ internal static partial class Program
     /// <c>--restore</c>: a running copy is asked to undo first (it owns the pad), then the
     /// journal is replayed here too in case that copy is stuck, and emulation is switched off.
     /// </summary>
-    private static void Restore()
+    private static int Restore(AppPaths paths, bool quiet)
     {
-        ApplicationConfiguration.Initialize();
-        if (EventWaitHandle.TryOpenExisting(RestoreEventName, out EventWaitHandle? restore))
+        try
         {
-            using (restore)
+            if (EventWaitHandle.TryOpenExisting(RestoreEventName, out EventWaitHandle? restore))
             {
-                EventWaitHandle.TryOpenExisting(RestoredEventName, out EventWaitHandle? restored);
-                using (restored)
+                using (restore)
                 {
-                    restore.Set();
-                    restored?.WaitOne(RestoreWaitMs);
+                    EventWaitHandle.TryOpenExisting(RestoredEventName, out EventWaitHandle? restored);
+                    using (restored)
+                    {
+                        restore.Set();
+                        if (restored is not null && !restored.WaitOne(RestoreWaitMs))
+                        {
+                            Log.Warn("Running instance did not acknowledge the restore request.");
+                        }
+                    }
                 }
             }
         }
+        catch (Exception e)
+        {
+            Log.Warn("Could not signal the running instance for restore.", e);
+        }
 
-        string? failure = null;
+        Func<string>? failure = null;
+        string dataDirectory = paths.RestoreDirectory;
         try
         {
-            DriverPlatform.CreateWindows(AppCore.DataDirectory()).Recovery.RestoreAll();
+            DriverPlatform.CreateWindows(dataDirectory).Recovery.RestoreAll();
+            // The driver layer retains journal entries whose undo did not succeed.
+            if (File.Exists(Path.Combine(dataDirectory, "recovery.json")))
+            {
+                failure = () => Text.Pick("Some driver changes could not be undone.", "Bazı sürücü değişiklikleri geri alınamadı.");
+                Log.Warn("Driver changes remain in the recovery journal.");
+            }
         }
         catch (Exception e)
         {
-            failure = e.Message;
+            Log.Error("Recovery journal replay failed.", e);
+            failure = () => e.Message;
         }
 
         try
         {
-            var settings = new SettingsStore();
+            var settings = new SettingsStore(dataDirectory, paths.Portable);
+            Text.Current = settings.Current.Language;
             AppSettings s = settings.Current;
             if (s.Emulation.Enabled)
             {
                 settings.Save(s with { Emulation = s.Emulation with { Enabled = false } });
             }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        catch (Exception e)
         {
-            failure ??= "Ayar dosyası yazılamadı.";
+            Log.Error("Could not turn off emulation during restore.", e);
+            failure ??= () => Text.Pick("Could not write the settings file.", "Ayar dosyası yazılamadı.");
         }
 
         if (failure is null)
         {
-            MessageBox.Show("Kontrolcü geri getirildi. Sanal kontrolcü kaldırıldı, gerçek kontrolcü yeniden görünür ve sanal kontrolcü ayarı kapalı.",
-                "Tactile", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            Log.Info("--restore succeeded.");
         }
         else
         {
-            MessageBox.Show($"Kontrolcü tam olarak geri getirilemedi: {failure}", "Tactile", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            Log.Error("--restore failed.");
         }
+
+        if (quiet)
+        {
+            return failure is null ? 0 : 1;
+        }
+
+        ApplicationConfiguration.Initialize();
+        if (failure is null)
+        {
+            MessageBox.Show(Text.Pick("Controller restored. The virtual controller was removed, the physical controller is visible again, and emulation is off.", "Kontrolcü geri getirildi. Sanal kontrolcü kaldırıldı, gerçek kontrolcü yeniden görünür ve sanal kontrolcü ayarı kapalı."),
+                "TriggerForge", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        else
+        {
+            MessageBox.Show(Text.Pick($"Could not fully restore the controller: {failure()}", $"Kontrolcü tam olarak geri getirilemedi: {failure()}"), "TriggerForge", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        return failure is null ? 0 : 1;
     }
 
     private static void WaitForPrevious(string[] args)
@@ -154,7 +203,7 @@ internal static partial class Program
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            // Already gone, or not ours to wait on.
+            Log.Info("Previous process is unavailable to wait for.", e);
         }
     }
 

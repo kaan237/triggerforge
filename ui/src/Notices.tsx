@@ -1,16 +1,17 @@
+import { L } from "./i18n";
 import { useEffect } from "react";
 import { useApp, type Notice } from "./state";
 
 const title: Record<Notice["kind"], string> = {
-  lowBattery: "Pil azaldı",
-  brokenFile: "Bozuk dosya",
-  idleSleep: "Uyku",
-  gyroCalibration: "Gyro kalibrasyonu",
-  info: "Bilgi",
-  elevated: "Yönetici izni",
-  mapping: "Tuş ataması",
-  emulation: "Sanal kontrolcü",
-  error: "Hata",
+  get lowBattery() { return L("Low battery", "Pil azaldı"); },
+  get brokenFile() { return L("Damaged file", "Bozuk dosya"); },
+  get idleSleep() { return L("Sleep", "Uyku"); },
+  get gyroCalibration() { return L("Gyro calibration", "Gyro kalibrasyonu"); },
+  get info() { return L("Info", "Bilgi"); },
+  get elevated() { return L("Administrator permission", "Yönetici izni"); },
+  get mapping() { return L("Mapping", "Tuş ataması"); },
+  get emulation() { return L("Virtual controller", "Sanal kontrolcü"); },
+  get error() { return L("Error", "Hata"); },
 };
 
 function Item({ n, dismiss }: { n: Notice; dismiss: (id: number) => void }) {
@@ -32,7 +33,7 @@ function Item({ n, dismiss }: { n: Notice; dismiss: (id: number) => void }) {
           </span>
         )}
       </div>
-      <button className="notice-close" aria-label="Kapat" onClick={() => dismiss(n.id)}>
+      <button className="notice-close" aria-label={L("Close", "Kapat")} onClick={() => dismiss(n.id)}>
         <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden>
           <path d="M 1.5 1.5 L 8.5 8.5 M 8.5 1.5 L 1.5 8.5" />
         </svg>

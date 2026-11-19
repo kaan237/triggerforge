@@ -1,3 +1,4 @@
+import { L } from "./i18n";
 import type { ReactNode } from "react";
 import { useApp } from "./state";
 
@@ -88,21 +89,21 @@ export function DraftBar() {
   return (
     <div className="draft-bar">
       <span className="draft-name">
-        <span className="faint">Profil</span> {draft.name}
-        {draft.id !== activeId && <span className="tag">etkin değil</span>}
+        <span className="faint">{L("Profile", "Profil")}</span> {draft.name}
+        {draft.id !== activeId && <span className="tag">{L("inactive", "etkin değil")}</span>}
       </span>
       {dirty ? (
         <>
-          <span className="unsaved">Kaydedilmedi</span>
+          <span className="unsaved">{L("Unsaved", "Kaydedilmedi")}</span>
           <button className="button ghost" onClick={revertDraft}>
-            Geri al
+            {L("Revert", "Geri al")}
           </button>
           <button className="button primary" onClick={saveDraft}>
-            Kaydet
+            {L("Save", "Kaydet")}
           </button>
         </>
       ) : (
-        <span className="faint saved">Kaydedildi</span>
+        <span className="faint saved">{L("Saved", "Kaydedildi")}</span>
       )}
     </div>
   );
@@ -121,4 +122,4 @@ export function Section({ title, aside, children, className }: { title: string; 
 }
 
 export const pct = (v: number) => `${Math.round(v * 100)}%`;
-export const fixed = (d: number) => (v: number) => v.toFixed(d).replace(".", ",");
+export const fixed = (d: number) => (v: number) => v.toFixed(d).replace(".", L(".", ","));

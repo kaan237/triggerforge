@@ -3,6 +3,7 @@ using Tactile.Device.DualSense;
 
 namespace Tactile.Tests;
 
+[Collection("Localization")]
 public class AppCoreTests
 {
     private static AppCore Create(TempDir dir, FakeForeground fg, ManualTime time) =>
@@ -105,10 +106,15 @@ public class AppCoreTests
         Assert.Equal(0, core.Controllers.Output.RumbleLeft);
     }
 
-    [Fact]
-    public void Broken_files_are_noticed_on_subscribe()
+    [Theory]
+    [InlineData(Language.En, "Skipped damaged file: ")]
+    [InlineData(Language.Tr, "Bozuk dosya atlandı: ")]
+    public void Broken_files_are_noticed_on_subscribe(Language requested, string message)
     {
+        using var language = new TestLanguage(requested);
         using var dir = new TempDir();
+        var settings = new SettingsStore(dir.Path);
+        settings.Save(settings.Current with { Language = requested });
         Directory.CreateDirectory(dir.Profiles);
         File.WriteAllText(Path.Combine(dir.Profiles, new string('e', 32) + ".json"), "{");
         using AppCore core = Create(dir, new FakeForeground(), new ManualTime());
@@ -118,6 +124,8 @@ public class AppCoreTests
 
         Notice n = Assert.Single(notices);
         Assert.Equal(NoticeKinds.BrokenFile, n.Kind);
+        Assert.StartsWith(message, n.Message);
+        Assert.StartsWith("Skipped damaged file: ", n.EnglishMessage);
     }
 
     [Fact]

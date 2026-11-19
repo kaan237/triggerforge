@@ -1,3 +1,4 @@
+using Tactile.Core;
 namespace Tactile.Audio;
 
 /// <summary>Converts 48 kHz stereo audio to bounded 3 kHz stereo haptic blocks.</summary>
@@ -81,7 +82,7 @@ public sealed class AudioHaptics(HapticMode mode)
     public bool Read(Span<sbyte> payload)
     {
         if (payload.Length != PayloadSamples)
-            throw new ArgumentException("Haptik paketi 64 örnek içermeli.", nameof(payload));
+            throw new ArgumentException(Text.Pick("The haptics packet must contain 64 samples.", "Haptik paketi 64 örnek içermeli."), nameof(payload));
 
         // Push holds the lock only for a short copy, so waiting here never stalls a tick.
         _gate.Enter();

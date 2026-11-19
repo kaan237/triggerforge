@@ -1,3 +1,4 @@
+import { L } from "./i18n";
 import type { Input, Output } from "./host";
 import { rawAxis } from "./model";
 
@@ -112,7 +113,7 @@ export function ControllerDrawing({ input, output, selected, onPick }: { input: 
   const lightOpacity = output ? [1, 0.7, 0.45][output.brightness] ?? 1 : 1;
 
   return (
-    <svg viewBox="0 0 600 420" className={onPick ? "ds pickable" : "ds"} role="img" aria-label="DualSense canlı görünüm">
+    <svg viewBox="0 0 600 420" className={onPick ? "ds pickable" : "ds"} role="img" aria-label={L("Live DualSense view", "DualSense canlı görünüm")}>
       <Shoulder side="L" pressed={down.has("L1")} pull={(input?.l2 ?? 0) / 255} pick={pick} />
       <Shoulder side="R" pressed={down.has("R1")} pull={(input?.r2 ?? 0) / 255} pick={pick} />
       <text x="114" y="34" className="tag-text" textAnchor="end">L2</text>

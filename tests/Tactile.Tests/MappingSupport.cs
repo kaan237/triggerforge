@@ -211,7 +211,7 @@ internal sealed class MapperRig : IMappingHost, IDisposable
 
     public void ShowApp() => ShowAppCount++;
 
-    public void Report(string message) => Reports.Add(message);
+    public void Report(Notice notice) => Reports.Add(notice.Message);
 
     public void Dispose() => Mapper.Dispose();
 }

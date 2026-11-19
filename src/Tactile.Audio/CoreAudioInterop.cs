@@ -1,3 +1,4 @@
+using Tactile.Core;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
@@ -16,7 +17,7 @@ internal static partial class CoreAudioInterop
     internal const int UnsupportedFormat = unchecked((int)0x88890008);
     internal const int BufferEmpty = 0x08890001;
 
-    internal static void Check(int result, string message)
+    internal static void Check(int result, LocalizedMessage message)
     {
         if (result < 0)
             throw new AudioUnavailableException(message, Marshal.GetExceptionForHR(result));
@@ -43,14 +44,14 @@ internal static partial class CoreAudioInterop
     internal static IMMDevice DefaultRender(IMMDeviceEnumerator devices)
     {
         Check(devices.GetDefaultAudioEndpoint(Render, ConsoleRole, out var device),
-            "Varsayılan ses çıkışı bulunamadı.");
+            new LocalizedMessage("Default audio output not found.", "Varsayılan ses çıkışı bulunamadı."));
         return device;
     }
 
     internal static T Activate<T>(IMMDevice device) where T : class
     {
         Guid iid = typeof(T).GUID;
-        Check(device.Activate(in iid, 0x17, 0, out var value), "Ses çıkışı açılamadı.");
+        Check(device.Activate(in iid, 0x17, 0, out var value), new LocalizedMessage("Could not open the audio output.", "Ses çıkışı açılamadı."));
         return RequireInterface<T>(value);
     }
 
@@ -59,7 +60,7 @@ internal static partial class CoreAudioInterop
         if (value is T result)
             return result;
         Release(value);
-        throw new AudioUnavailableException("Windows ses arabirimi kullanılamıyor.");
+        throw new AudioUnavailableException(new LocalizedMessage("Windows audio is unavailable.", "Windows ses arabirimi kullanılamıyor."));
     }
 
     [LibraryImport("avrt.dll", EntryPoint = "AvSetMmThreadCharacteristicsW", StringMarshalling = StringMarshalling.Utf16)]

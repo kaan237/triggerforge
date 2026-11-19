@@ -1,3 +1,4 @@
+using Tactile.Core;
 namespace Tactile.Audio;
 
 public sealed class SpeakerFeed : IDisposable
@@ -50,7 +51,7 @@ public sealed class SpeakerFeed : IDisposable
     {
         if (frame200.Length != OpusEncoder.FrameBytes)
         {
-            throw new ArgumentException("Opus paketi 200 bayt olmalı.", nameof(frame200));
+            throw new ArgumentException(Text.Pick("The Opus packet must be 200 bytes.", "Opus paketi 200 bayt olmalı."), nameof(frame200));
         }
 
         Span<float> block = stackalloc float[BlockSamples];

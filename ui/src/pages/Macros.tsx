@@ -1,3 +1,4 @@
+import { L } from "../i18n";
 import { useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
 import type { Direction, KeyName, Macro, MacroStep, MouseButtonName, Profile } from "../host";
 import { codeToKey, keyLabel, modifierKeys } from "../keys";
@@ -12,14 +13,14 @@ const MAX_MACROS = 50;
 
 type Op = MacroStep["op"];
 const ops: { id: Op; label: string }[] = [
-  { id: "tap", label: "Tuşa bas-bırak" },
-  { id: "down", label: "Tuşu indir" },
-  { id: "up", label: "Tuşu bırak" },
-  { id: "click", label: "Fare tıkla" },
-  { id: "mouseDown", label: "Fare indir" },
-  { id: "mouseUp", label: "Fare bırak" },
-  { id: "wheel", label: "Tekerlek" },
-  { id: "delay", label: "Bekle" },
+  { id: "tap", get label() { return L("Tap key", "Tuşa bas-bırak"); } },
+  { id: "down", get label() { return L("Press key", "Tuşu indir"); } },
+  { id: "up", get label() { return L("Release key", "Tuşu bırak"); } },
+  { id: "click", get label() { return L("Click mouse button", "Fare tıkla"); } },
+  { id: "mouseDown", get label() { return L("Press mouse button", "Fare indir"); } },
+  { id: "mouseUp", get label() { return L("Release mouse button", "Fare bırak"); } },
+  { id: "wheel", get label() { return L("Scroll", "Tekerlek"); } },
+  { id: "delay", get label() { return L("Wait", "Bekle"); } },
 ];
 const keyOps = new Set<Op>(["tap", "down", "up"]);
 const mouseOps = new Set<Op>(["click", "mouseDown", "mouseUp"]);
@@ -36,17 +37,17 @@ export function stepSummary(s: MacroStep): string {
     case "tap":
       return keyLabel(s.key);
     case "down":
-      return `${keyLabel(s.key)} indir`;
+      return L(`Press ${keyLabel(s.key)}`, `${keyLabel(s.key)} indir`);
     case "up":
-      return `${keyLabel(s.key)} bırak`;
+      return L(`Release ${keyLabel(s.key)}`, `${keyLabel(s.key)} bırak`);
     case "click":
       return mouseLabel(s.button);
     case "mouseDown":
-      return `${mouseLabel(s.button)} indir`;
+      return L(`Press ${mouseLabel(s.button)}`, `${mouseLabel(s.button)} indir`);
     case "mouseUp":
-      return `${mouseLabel(s.button)} bırak`;
+      return L(`Release ${mouseLabel(s.button)}`, `${mouseLabel(s.button)} bırak`);
     case "wheel":
-      return `Tekerlek ${directionLabel(s.direction).toLocaleLowerCase("tr")} ×${s.amount}`;
+      return L(`Scroll ${directionLabel(s.direction).toLowerCase()} ×${s.amount}`, `Tekerlek ${directionLabel(s.direction).toLocaleLowerCase("tr")} ×${s.amount}`);
     case "delay":
       return `${s.ms} ms`;
   }
@@ -64,10 +65,10 @@ function StepRow({ step, index, count, selected, onSelect, onChange, onMove, onD
 }) {
   return (
     <li className={selected ? "step selected" : "step"}>
-      <button className="step-no num" onClick={onSelect} aria-label={`Adım ${index + 1} seç`}>
+      <button className="step-no num" onClick={onSelect} aria-label={L(`Select step ${index + 1}`, `Adım ${index + 1} seç`)}>
         {index + 1}
       </button>
-      <select value={step.op} aria-label="Adım türü" onChange={(e) => onChange(withOp(step, e.target.value as Op))}>
+      <select value={step.op} aria-label={L("Step type", "Adım türü")} onChange={(e) => onChange(withOp(step, e.target.value as Op))}>
         {ops.map((o) => (
           <option key={o.id} value={o.id}>
             {o.label}
@@ -77,7 +78,7 @@ function StepRow({ step, index, count, selected, onSelect, onChange, onMove, onD
       <div className="step-fields">
         {"key" in step && <KeyField compact max={1} value={[step.key]} onChange={(k) => k[0] && onChange({ ...step, key: k[0] })} />}
         {"button" in step && (
-          <select value={step.button} aria-label="Fare tuşu" onChange={(e) => onChange({ ...step, button: e.target.value as MouseButtonName })}>
+          <select value={step.button} aria-label={L("Mouse button", "Fare tuşu")} onChange={(e) => onChange({ ...step, button: e.target.value as MouseButtonName })}>
             {mouseButtons.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.label}
@@ -87,7 +88,7 @@ function StepRow({ step, index, count, selected, onSelect, onChange, onMove, onD
         )}
         {step.op === "wheel" && (
           <>
-            <select value={step.direction} aria-label="Yön" onChange={(e) => onChange({ ...step, direction: e.target.value as Direction })}>
+            <select value={step.direction} aria-label={L("Direction", "Yön")} onChange={(e) => onChange({ ...step, direction: e.target.value as Direction })}>
               {directions.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.label}
@@ -96,7 +97,7 @@ function StepRow({ step, index, count, selected, onSelect, onChange, onMove, onD
             </select>
             <label className="number-field">
               <input type="number" min={1} max={10} value={step.amount} onChange={(e) => onChange({ ...step, amount: Math.min(10, Math.max(1, Math.round(Number(e.target.value) || 1))) })} />
-              <span className="faint">çentik</span>
+              <span className="faint">{L("ticks", "çentik")}</span>
             </label>
           </>
         )}
@@ -108,13 +109,13 @@ function StepRow({ step, index, count, selected, onSelect, onChange, onMove, onD
         )}
       </div>
       <div className="step-tools">
-        <button className="icon-btn" disabled={index === 0} aria-label="Yukarı taşı" onClick={() => onMove(-1)}>
+        <button className="icon-btn" disabled={index === 0} aria-label={L("Move up", "Yukarı taşı")} onClick={() => onMove(-1)}>
           <span className="chev up" />
         </button>
-        <button className="icon-btn" disabled={index === count - 1} aria-label="Aşağı taşı" onClick={() => onMove(1)}>
+        <button className="icon-btn" disabled={index === count - 1} aria-label={L("Move down", "Aşağı taşı")} onClick={() => onMove(1)}>
           <span className="chev down" />
         </button>
-        <button className="icon-btn" aria-label="Adımı sil" onClick={onDelete}>
+        <button className="icon-btn" aria-label={L("Delete step", "Adımı sil")} onClick={onDelete}>
           <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden>
             <path d="M 1.5 1.5 L 8.5 8.5 M 8.5 1.5 L 1.5 8.5" />
           </svg>
@@ -226,28 +227,28 @@ function Recorder({ hasSteps, onDone }: { hasSteps: boolean; onDone: (steps: Mac
       <div className="recorder-bar">
         {recording ? (
           <button className="button danger" onMouseDown={(e) => e.preventDefault()} onClick={stop}>
-            Durdur
+            {L("Stop", "Durdur")}
           </button>
         ) : ask ? (
           <>
-            <span className="small warn">Mevcut adımlar ne olsun?</span>
+            <span className="small warn">{L("What should happen to the existing steps?", "Mevcut adımlar ne olsun?")}</span>
             <button className="button ghost" onClick={() => setAsk(false)}>
-              Vazgeç
+              {L("Cancel", "Vazgeç")}
             </button>
             <button className="button" onClick={() => start("append")}>
-              Sona ekle
+              {L("Append", "Sona ekle")}
             </button>
             <button className="button danger" onClick={() => start("replace")}>
-              Değiştir
+              {L("Replace", "Değiştir")}
             </button>
           </>
         ) : (
           <button className="button" onClick={() => (hasSteps ? setAsk(true) : start("replace"))}>
             <span className="rec-dot" aria-hidden />
-            Kaydet
+            {L("Save", "Kaydet")}
           </button>
         )}
-        <span className="hint">Kutunun içinde tuşlara bas ve tıkla; aradaki süreler bekleme olur.</span>
+        <span className="hint">{L("Press keys and click inside the box. Pauses are recorded as wait steps.", "Kutunun içinde tuşlara bas ve tıkla; aradaki süreler bekleme olur.")}</span>
       </div>
       {recording && (
         <div
@@ -264,9 +265,9 @@ function Recorder({ hasSteps, onDone }: { hasSteps: boolean; onDone: (steps: Mac
           onBlur={stop}
         >
           <span className="rec-dot on" aria-hidden />
-          <span>Kaydediliyor</span>
-          <span className="faint num">{count} olay</span>
-          <span className="faint small">Kutudan çıkınca kayıt durur.</span>
+          <span>{L("Recording", "Kaydediliyor")}</span>
+          <span className="faint num">{count} {L("events", "olay")}</span>
+          <span className="faint small">{L("Leaving the box stops recording.", "Kutudan çıkınca kayıt durur.")}</span>
         </div>
       )}
     </div>
@@ -297,54 +298,54 @@ function MacroEditor({ macro, onChange, onDuplicate, onDelete, canDuplicate }: {
   return (
     <div className="macro-detail">
       <div className="detail-head">
-        <input className="name-input" type="text" value={macro.name} maxLength={64} aria-label="Makro adı" onChange={(e) => onChange({ ...macro, name: e.target.value })} />
+        <input className="name-input" type="text" value={macro.name} maxLength={64} aria-label={L("Macro name", "Makro adı")} onChange={(e) => onChange({ ...macro, name: e.target.value })} />
         <span className="faint small num">
-          {steps.length} adım · {total >= 1000 ? `${(total / 1000).toFixed(1).replace(".", ",")} sn` : `${total} ms`}
+          {steps.length} {L("steps ·", "adım ·")} {total >= 1000 ? L(`${(total / 1000).toFixed(1)} sec`, `${(total / 1000).toFixed(1).replace(".", ",")} sn`) : `${total} ms`}
         </span>
       </div>
       <div className="detail-actions">
         <Segmented
-          label="Tekrar"
+          label={L("Repeat", "Tekrar")}
           value={macro.repeat}
           onChange={(repeat) => onChange({ ...macro, repeat })}
           options={[
-            { id: "once", label: "Bir kez" },
-            { id: "whileHeld", label: "Basılıyken tekrarla" },
-            { id: "toggle", label: "Aç/kapa" },
+            { id: "once", label: L("Once", "Bir kez") },
+            { id: "whileHeld", label: L("Repeat while held", "Basılıyken tekrarla") },
+            { id: "toggle", label: L("Toggle", "Aç/kapa") },
           ]}
         />
         <span className="spacer" />
         <button className="button" disabled={!canDuplicate} onClick={onDuplicate}>
-          Çoğalt
+          {L("Duplicate", "Çoğalt")}
         </button>
         {confirmDelete ? (
           <>
-            <span className="small warn">Silinsin mi? Kullanan atamalar boşalır.</span>
+            <span className="small warn">{L("Delete this macro? Its assignments will be cleared.", "Silinsin mi? Kullanan atamalar boşalır.")}</span>
             <button className="button ghost" onClick={() => setConfirmDelete(false)}>
-              Vazgeç
+              {L("Cancel", "Vazgeç")}
             </button>
             <button className="button danger" onClick={onDelete}>
-              Sil
+              {L("Delete", "Sil")}
             </button>
           </>
         ) : (
           <button className="button ghost" onClick={() => setConfirmDelete(true)}>
-            Sil
+            {L("Delete", "Sil")}
           </button>
         )}
       </div>
 
       <section className="detail-section">
-        <h2>Kayıt</h2>
+        <h2>{L("Recording", "Kayıt")}</h2>
         <Recorder hasSteps={steps.length > 0} onDone={(rec, mode) => setSteps(mode === "append" ? [...steps, ...rec] : rec)} />
       </section>
 
       <section className="detail-section">
         <div className="panel-head">
-          <h2>Adımlar</h2>
+          <h2>{L("Steps", "Adımlar")}</h2>
           {steps.length > 0 && (
             <button className="button ghost" onClick={() => setSteps([])}>
-              Hepsini sil
+              {L("Delete all", "Hepsini sil")}
             </button>
           )}
         </div>
@@ -368,27 +369,27 @@ function MacroEditor({ macro, onChange, onDuplicate, onDelete, canDuplicate }: {
             ))}
           </ol>
         ) : (
-          <p className="hint">Adım yok. Kaydet ya da aşağıdan ekle.</p>
+          <p className="hint">{L("No steps. Record some or add them below.", "Adım yok. Kaydet ya da aşağıdan ekle.")}</p>
         )}
         <div className="button-row">
-          <span className="faint small">{sel !== null ? `${sel + 1}. adımdan sonra ekle:` : "Sona ekle:"}</span>
+          <span className="faint small">{sel !== null ? L(`Add after step ${sel + 1}:`, `${sel + 1}. adımdan sonra ekle:`) : L("Add at end:", "Sona ekle:")}</span>
           <button className="button" disabled={full} onClick={() => insert({ op: "tap", key: "a" })}>
-            Tuş
+            {L("Key", "Tuş")}
           </button>
           <button className="button" disabled={full} onClick={() => insert({ op: "click", button: "left" })}>
-            Fare
+            {L("Mouse", "Fare")}
           </button>
           <button className="button" disabled={full} onClick={() => insert({ op: "wheel", direction: "down", amount: 1 })}>
-            Tekerlek
+            {L("Scroll", "Tekerlek")}
           </button>
           <button className="button" disabled={full} onClick={() => insert({ op: "delay", ms: 50 })}>
-            Bekleme
+            {L("Wait", "Bekleme")}
           </button>
         </div>
         <p className="hint step-note">
-          {macro.repeat === "once" && "Sonuna kadar bir kez çalışır; çalışırken tekrar basmak bir şey yapmaz."}
-          {macro.repeat === "whileHeld" && "Tuş basılı kaldıkça baştan çalışır; bırakınca o adımdan sonra durur."}
-          {macro.repeat === "toggle" && "İlk basış döngüyü başlatır, ikinci basış durdurur."}
+          {macro.repeat === "once" && L("Runs once. Pressing again during playback has no effect.", "Sonuna kadar bir kez çalışır; çalışırken tekrar basmak bir şey yapmaz.")}
+          {macro.repeat === "whileHeld" && L("Repeats while held. Releasing stops it after the current step.", "Tuş basılı kaldıkça baştan çalışır; bırakınca o adımdan sonra durur.")}
+          {macro.repeat === "toggle" && L("Press once to start looping and again to stop.", "İlk basış döngüyü başlatır, ikinci basış durdurur.")}
         </p>
       </section>
     </div>
@@ -405,8 +406,8 @@ export function Macros({ draft }: { draft: Profile }) {
 
   const add = () => {
     let n = macros.length + 1;
-    while (macros.some((m) => m.name === `Makro ${n}`)) n++;
-    const m = defaultMacro(`Makro ${n}`);
+    while (macros.some((m) => m.name === L(`Macro ${n}`, `Makro ${n}`))) n++;
+    const m = defaultMacro(L(`Macro ${n}`, `Makro ${n}`));
     setMacros((list) => [...list, m]);
     setSelectedId(m.id);
   };
@@ -419,9 +420,9 @@ export function Macros({ draft }: { draft: Profile }) {
             {macros.map((m) => (
               <li key={m.id}>
                 <button className={m.id === selected?.id ? "selected" : ""} onClick={() => setSelectedId(m.id)}>
-                  <span className="pl-name">{m.name || "Adsız"}</span>
+                  <span className="pl-name">{m.name || L("Untitled", "Adsız")}</span>
                   <span className="pl-games faint">
-                    {m.steps.length} adım · {{ once: "bir kez", whileHeld: "basılıyken", toggle: "aç/kapa" }[m.repeat]}
+                    {m.steps.length} {L("steps ·", "adım ·")} {{ once: L("once", "bir kez"), whileHeld: L("while held", "basılıyken"), toggle: L("toggle", "aç/kapa") }[m.repeat]}
                   </span>
                 </button>
               </li>
@@ -430,9 +431,9 @@ export function Macros({ draft }: { draft: Profile }) {
         )}
         <div className="button-row">
           <button className="button" disabled={full} onClick={add}>
-            Yeni makro
+            {L("New macro", "Yeni makro")}
           </button>
-          {full && <span className="hint">En çok {MAX_MACROS} makro.</span>}
+          {full && <span className="hint">{L("Maximum", "En çok")} {MAX_MACROS} {L("macros.", "makro.")}</span>}
         </div>
       </div>
       {selected ? (
@@ -442,7 +443,7 @@ export function Macros({ draft }: { draft: Profile }) {
           canDuplicate={!full}
           onChange={(m) => setMacros((list) => list.map((x) => (x.id === m.id ? m : x)))}
           onDuplicate={() => {
-            const copy = { ...clone(selected), id: newId(), name: `${selected.name} (kopya)`.slice(0, 64) };
+            const copy = { ...clone(selected), id: newId(), name: L(`${selected.name} (copy)`, `${selected.name} (kopya)`).slice(0, 64) };
             setMacros((list) => [...list, copy]);
             setSelectedId(copy.id);
           }}
@@ -452,8 +453,8 @@ export function Macros({ draft }: { draft: Profile }) {
           }}
         />
       ) : (
-        <Section title="Makrolar">
-          <p className="hint">Makro, sırayla basılan tuşlar ve beklemelerdir. Bir tuşa “Makro” eylemiyle atanır.</p>
+        <Section title={L("Macros", "Makrolar")}>
+          <p className="hint">{L("A macro plays keys and waits in sequence. Assign it to a button with the Macro action.", "Makro, sırayla basılan tuşlar ve beklemelerdir. Bir tuşa “Makro” eylemiyle atanır.")}</p>
         </Section>
       )}
     </div>

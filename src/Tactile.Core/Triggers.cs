@@ -17,12 +17,12 @@ public static class Triggers
                     return config.Frequency;
                 }
 
-                throw new ArgumentException($"Tetik parametresi eksik: {name}.");
+                throw new LocalizedMessage($"Missing trigger parameter: {name}.", $"Tetik parametresi eksik: {name}.").CreateException(message => new ArgumentException(message));
             }
 
             if (double.IsNaN(v) || double.IsInfinity(v))
             {
-                throw new ArgumentException($"Tetik parametresi geçersiz: {name}.");
+                throw new LocalizedMessage($"Invalid trigger parameter: {name}.", $"Tetik parametresi geçersiz: {name}.").CreateException(message => new ArgumentException(message));
             }
 
             return (int)Math.Round(v);
@@ -40,7 +40,7 @@ public static class Triggers
             TriggerMode.Bow => TriggerEffect.Bow(P("start"), P("end"), P("strength"), P("snap")),
             TriggerMode.Galloping => TriggerEffect.Galloping(P("start"), P("end"), P("firstFoot"), P("secondFoot"), P("frequency")),
             TriggerMode.Machine => TriggerEffect.Machine(P("start"), P("end"), P("amplitudeA"), P("amplitudeB"), P("frequency"), P("period")),
-            _ => throw new ArgumentException($"Bilinmeyen tetik modu: {config.Mode}."),
+            _ => throw new LocalizedMessage($"Unknown trigger mode: {config.Mode}.", $"Bilinmeyen tetik modu: {config.Mode}.").CreateException(message => new ArgumentException(message)),
         };
     }
 
@@ -63,5 +63,5 @@ public static class Triggers
     private static int[] ZonesOf(TriggerConfig config) =>
         config.Zones is { Length: TriggerEffect.Zones } z
             ? z
-            : throw new ArgumentException($"Bölge listesi {TriggerEffect.Zones} değer olmalı.");
+            : throw new LocalizedMessage($"The zone list must contain {TriggerEffect.Zones} values.", $"Bölge listesi {TriggerEffect.Zones} değer olmalı.").CreateException(message => new ArgumentException(message));
 }

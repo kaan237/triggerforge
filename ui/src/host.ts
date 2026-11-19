@@ -314,6 +314,7 @@ export type Status = {
   activeReason?: string; // manual | game:<exe> | controllerDefault | default
   mapping?: MappingStatus;
   elevated?: boolean;
+  portable?: boolean;
 };
 
 export type Input = {
@@ -359,6 +360,7 @@ export type HostMessage =
   | { type: "profiles"; list: Profile[]; activeId: string }
   | { type: "settings"; settings: AppSettings }
   | { type: "export"; id: string; json: string }
+  | { type: "logs.exported"; ok: boolean; path?: string; error?: string }
   | { type: "foreground"; recent: string[] }
   | { type: "runPicked"; path: string | null }
   | { type: "notice"; kind: NoticeKind; message: string; progress?: number }
@@ -381,6 +383,7 @@ export type UiMessage =
   | { type: "profile.export"; id: string }
   | { type: "trigger.preview"; side: "left" | "right"; config: TriggerConfig | null }
   | { type: "settings.save"; settings: AppSettings }
+  | { type: "logs.export" | "logs.open" }
   | { type: "gyro.calibrate" }
   | { type: "foreground.pick" }
   | { type: "audio.apps" }

@@ -6,7 +6,7 @@ namespace Tactile.Host;
 internal static class Autostart
 {
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string ValueName = "Tactile";
+    private const string ValueName = "TriggerForge";
 
     public static void Apply(bool enabled)
     {
@@ -20,5 +20,7 @@ internal static class Autostart
         {
             key.DeleteValue(ValueName, throwOnMissingValue: false);
         }
+
+        key.DeleteValue("Tactile", throwOnMissingValue: false);
     }
 }

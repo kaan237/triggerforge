@@ -7,7 +7,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Deterministic>true</Deterministic>
     <Company>KH</Company>
-    <Product>Tactile</Product>
+    <Product>TriggerForge</Product>
+    <Version>0.7.0</Version>
     <Copyright>Copyright (c) 2026 KH. All rights reserved.</Copyright>
   </PropertyGroup>
 </Project>

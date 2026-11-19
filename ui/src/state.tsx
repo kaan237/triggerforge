@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { send, subscribe, type AppSettings, type DriverKind, type DriverProgress, type EmulationStatus, type HapticStatus, type Input, type NoticeKind, type Output, type Profile, type Status, type TelemetryRule } from "./host";
+import { L, setLanguage } from "./i18n";
 import { clone, deepEqual, normalizeProfile, normalizeSettings } from "./model";
 
 export type Notice = { id: number; kind: NoticeKind | "error"; message: string; progress?: number };
@@ -67,6 +68,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [draft, setDraft] = useState<Profile | null>(null);
   const [telemetryDrafts, setTelemetryDrafts] = useState<ReadonlyMap<string, TelemetryRule[]>>(new Map());
   const touched = useRef(false);
+  const language = useRef<AppSettings["language"]>("en");
   const profilesRef = useRef<Profile[]>([]);
 
   const push = useCallback((kind: Notice["kind"], message: string, progress?: number) => {
@@ -97,9 +99,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setActiveId(m.activeId);
           break;
         }
-        case "settings":
-          setSettings(normalizeSettings(m.settings));
+        case "settings": {
+          const saved = normalizeSettings(m.settings);
+          setLanguage(saved.language);
+          if (language.current !== saved.language) {
+            language.current = saved.language;
+            setNotices([]);
+            setInstalls((all) => ({
+              usbIp: all.usbIp && !all.usbIp.done ? { ...all.usbIp, message: "" } : undefined,
+              hidHide: all.hidHide && !all.hidHide.done ? { ...all.hidHide, message: "" } : undefined,
+            }));
+          }
+          setSettings(saved);
           break;
+        }
         case "foreground":
           setRecent(m.recent);
           break;
@@ -180,7 +193,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 }
 
 function download(json: string, name: string) {
-  const safe = name.replace(/[\\/:*?"<>|]+/g, "").trim() || "profil";
+  const safe = name.replace(/[\\/:*?"<>|]+/g, "").trim() || L("profile", "profil");
   const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
   const a = document.createElement("a");
   a.href = url;

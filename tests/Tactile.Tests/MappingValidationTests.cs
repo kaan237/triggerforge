@@ -4,6 +4,7 @@ using Tactile.Input;
 
 namespace Tactile.Tests;
 
+[Collection("Localization")]
 public class MappingValidationTests
 {
     private static Profile Normalize(MappingConfig m, IReadOnlyList<Macro>? macros, out List<string> issues)
@@ -142,6 +143,7 @@ public class MappingValidationTests
     [Fact]
     public void Macro_limits_and_steps()
     {
+        using var language = new TestLanguage(Language.Tr);
         string dup = Validation.NewId();
         Macro[] macros =
         [

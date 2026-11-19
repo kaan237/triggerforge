@@ -1,3 +1,4 @@
+using Tactile.Core;
 using System.ComponentModel;
 using System.Diagnostics;
 
@@ -10,7 +11,7 @@ public sealed class WindowsLauncher : ILauncher
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
-            throw new InvalidOperationException($"Program bulunamadı: {path}");
+            throw new LocalizedMessage($"Program not found: {path}", $"Program bulunamadı: {path}").CreateException(message => new InvalidOperationException(message));
         }
 
         var info = new ProcessStartInfo(path, arguments ?? string.Empty)
@@ -26,7 +27,7 @@ public sealed class WindowsLauncher : ILauncher
         }
         catch (Win32Exception e)
         {
-            throw new InvalidOperationException($"Program başlatılamadı: {Path.GetFileName(path)} ({e.Message})", e);
+            throw new LocalizedMessage($"Could not start {Path.GetFileName(path)} ({e.Message})", $"Program başlatılamadı: {Path.GetFileName(path)} ({e.Message})").CreateException(message => new InvalidOperationException(message, e));
         }
     }
 }

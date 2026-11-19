@@ -1,3 +1,4 @@
+using Tactile.Core;
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 
@@ -41,7 +42,7 @@ internal sealed class AudioFormatConverter
         };
         if (!supported || format.Channels == 0 || format.Rate <= 0 ||
             format.BlockAlign < format.Channels * _sampleBytes)
-            throw new AudioUnavailableException("Ses biçimi desteklenmiyor.");
+            throw new AudioUnavailableException(new LocalizedMessage("Unsupported audio format.", "Ses biçimi desteklenmiyor."));
 
         _format = format;
     }

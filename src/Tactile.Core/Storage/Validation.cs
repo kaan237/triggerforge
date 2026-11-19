@@ -28,7 +28,7 @@ public static partial class Validation
         string name = (p.Name ?? "").Trim();
         if (name.Length == 0)
         {
-            name = "Profil";
+            name = Text.Pick("Profile", "Profil");
         }
         else if (name.Length > MaxNameLength)
         {
@@ -67,18 +67,18 @@ public static partial class Validation
             MicLed = Defined(p.MicLed, MicLed.Off),
             Triggers = new TriggerPair
             {
-                Left = Trigger(triggers.Left, "Sol tetik", issues),
-                Right = Trigger(triggers.Right, "Sağ tetik", issues),
+                Left = Trigger(triggers.Left, Text.Pick("Left trigger", "Sol tetik"), issues),
+                Right = Trigger(triggers.Right, Text.Pick("Right trigger", "Sağ tetik"), issues),
             },
             TriggerResponse = new TriggerResponsePair
             {
-                Left = Response(response.Left, "Sol tetik eğrisi", issues),
-                Right = Response(response.Right, "Sağ tetik eğrisi", issues),
+                Left = Response(response.Left, Text.Pick("Left trigger curve", "Sol tetik eğrisi"), issues),
+                Right = Response(response.Right, Text.Pick("Right trigger curve", "Sağ tetik eğrisi"), issues),
             },
             Sticks = new StickPair
             {
-                Left = Stick(sticks.Left, "Sol analog", issues),
-                Right = Stick(sticks.Right, "Sağ analog", issues),
+                Left = Stick(sticks.Left, Text.Pick("Left stick", "Sol analog"), issues),
+                Right = Stick(sticks.Right, Text.Pick("Right stick", "Sağ analog"), issues),
             },
             Gyro = new GyroConfig
             {
@@ -115,7 +115,7 @@ public static partial class Validation
         var rules = new List<TelemetryRule>(Math.Min(input.Count, maxRules));
         if (input.Count > maxRules)
         {
-            issues.Add("Telemetri: ilk 32 kuraldan sonrakiler kaldırıldı.");
+            issues.Add(Text.Pick("Telemetry: rules beyond the first 32 were removed.", "Telemetri: ilk 32 kuraldan sonrakiler kaldırıldı."));
         }
 
         foreach (TelemetryRule? rule in input.Take(maxRules))
@@ -123,7 +123,7 @@ public static partial class Validation
             if (rule is null || rule.Signal == TelemetrySignal.Unknown || rule.Target == TelemetryTarget.Unknown ||
                 !Enum.IsDefined(rule.Signal) || !Enum.IsDefined(rule.Target))
             {
-                issues.Add("Telemetri: geçersiz sinyal veya hedef içeren kural kaldırıldı.");
+                issues.Add(Text.Pick("Telemetry: removed a rule with an invalid signal or target.", "Telemetri: geçersiz sinyal veya hedef içeren kural kaldırıldı."));
                 continue;
             }
 
@@ -144,7 +144,7 @@ public static partial class Validation
                 trigger = rule.Trigger;
                 if (trigger?.Params is null || trigger.Params.Values.Any(v => !double.IsFinite(v) || v < int.MinValue || v > int.MaxValue))
                 {
-                    issues.Add("Telemetri: geçersiz tetik şablonu içeren kural kaldırıldı.");
+                    issues.Add(Text.Pick("Telemetry: removed a rule with an invalid trigger preset.", "Telemetri: geçersiz tetik şablonu içeren kural kaldırıldı."));
                     continue;
                 }
 
@@ -152,7 +152,7 @@ public static partial class Validation
                 {
                     if (TelemetryRules.ParameterRange(trigger.Mode, param) is not { } range)
                     {
-                        issues.Add("Telemetri: geçersiz tetik parametresi içeren kural kaldırıldı.");
+                        issues.Add(Text.Pick("Telemetry: removed a rule with an invalid trigger parameter.", "Telemetri: geçersiz tetik parametresi içeren kural kaldırıldı."));
                         continue;
                     }
 
@@ -167,7 +167,7 @@ public static partial class Validation
                 };
                 if (!TelemetryRules.TryTrigger(trigger, rule.Param, outputMin, out _))
                 {
-                    issues.Add("Telemetri: geçersiz tetik şablonu içeren kural kaldırıldı.");
+                    issues.Add(Text.Pick("Telemetry: removed a rule with an invalid trigger preset.", "Telemetri: geçersiz tetik şablonu içeren kural kaldırıldı."));
                     continue;
                 }
             }
@@ -209,7 +209,7 @@ public static partial class Validation
             Version = AppSettings.CurrentVersion,
             StartWithWindows = s.StartWithWindows,
             CloseToTray = s.CloseToTray,
-            Language = Defined(s.Language, Language.Tr),
+            Language = Defined(s.Language, Language.En),
             AutoProfile = s.AutoProfile,
             AutoProfileDelayMs = Math.Clamp(s.AutoProfileDelayMs, 0, 10_000),
             DefaultProfileId = IsId(s.DefaultProfileId) ? s.DefaultProfileId : null,
@@ -248,7 +248,7 @@ public static partial class Validation
         {
             if (!ButtonNames.TryParse(key, out Buttons source))
             {
-                issues.Add($"Sanal kontrolcü: bilinmeyen tuş adı \"{key}\", yeniden ataması silindi.");
+                issues.Add(Text.Pick($"Virtual controller: removed remapping for unknown button \"{key}\".", $"Sanal kontrolcü: bilinmeyen tuş adı \"{key}\", yeniden ataması silindi."));
                 continue;
             }
 
@@ -263,7 +263,7 @@ public static partial class Validation
             }
             else
             {
-                issues.Add($"Sanal kontrolcü: \"{key}\" için hedef tuş bilinmiyor ({target}), yeniden ataması silindi.");
+                issues.Add(Text.Pick($"Virtual controller: removed remapping for \"{key}\" to unknown button {target}.", $"Sanal kontrolcü: \"{key}\" için hedef tuş bilinmiyor ({target}), yeniden ataması silindi."));
                 continue;
             }
 
@@ -298,7 +298,7 @@ public static partial class Validation
 
         if (!Enum.IsDefined(c.Mode))
         {
-            issues.Add($"{label}: bilinmeyen mod, kapatıldı.");
+            issues.Add(Text.Pick($"{label}: disabled an unknown mode.", $"{label}: bilinmeyen mod, kapatıldı."));
             return TriggerConfig.Off;
         }
 
@@ -310,7 +310,7 @@ public static partial class Validation
         };
         if (!Triggers.TryToEffect(cleaned, out _, out string? error))
         {
-            issues.Add($"{label}: {error} Kapatıldı.");
+            issues.Add(Text.Pick($"{label}: {error} Disabled.", $"{label}: {error} Kapatıldı."));
             return TriggerConfig.Off;
         }
 
@@ -363,7 +363,7 @@ public static partial class Validation
         bool valid = ResponseCurve.IsValid(points);
         if (kind == CurveKind.Custom && !valid)
         {
-            issues.Add($"{label}: özel eğri noktaları geçersiz, doğrusala dönüldü.");
+            issues.Add(Text.Pick($"{label}: invalid curve points. Switched to a linear curve.", $"{label}: özel eğri noktaları geçersiz, doğrusala dönüldü."));
             return (CurveKind.Linear, null);
         }
 

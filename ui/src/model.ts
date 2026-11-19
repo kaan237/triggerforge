@@ -1,3 +1,4 @@
+import { L } from "./i18n";
 import type {
   Action,
   AppSettings,
@@ -92,7 +93,7 @@ export function newId(): string {
   return crypto.randomUUID().replace(/-/g, "");
 }
 
-export function defaultProfile(name = "Varsayılan", id = newId()): Profile {
+export function defaultProfile(name = L("Default", "Varsayılan"), id = newId()): Profile {
   return {
     version: 1,
     id,
@@ -127,7 +128,7 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     version: 1,
     startWithWindows: false,
     closeToTray: true,
-    language: "tr",
+    language: "en",
     autoProfile: true,
     autoProfileDelayMs: 800,
     defaultProfileId,
@@ -145,7 +146,7 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
 
 // Missing fields take defaults (the contract allows partial objects).
 export function normalizeProfile(p: Partial<Profile> & { id: string }): Profile {
-  const d = defaultProfile(p.name ?? "Profil", p.id);
+  const d = defaultProfile(p.name ?? L("Profile", "Profil"), p.id);
   const h = p.haptics;
   const trig = (t?: Partial<TriggerConfig>): TriggerConfig => ({
     ...defaultTrigger(),
@@ -242,14 +243,14 @@ export function normalizeMapping(m?: Partial<Mapping>): Mapping {
 }
 
 export function normalizeMacro(m: Partial<Macro>): Macro {
-  return { ...defaultMacro(m.name ?? "Makro", m.id ?? newId()), ...m, steps: (m.steps ?? []).map((s) => ({ ...s }) as MacroStep) };
+  return { ...defaultMacro(m.name ?? L("Macro", "Makro"), m.id ?? newId()), ...m, steps: (m.steps ?? []).map((s) => ({ ...s }) as MacroStep) };
 }
 
 export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
   const d = defaultSettings();
   const emulation = { ...d.emulation, ...s.emulation };
   if (emulation.speakerPacket !== "single36") emulation.speakerPacket = d.emulation.speakerPacket;
-  return { ...d, ...s, controllerDefaults: { ...(s.controllerDefaults ?? {}) }, emulation, integration: { ...d.integration, ...s.integration } };
+  return { ...d, ...s, language: s.language === "tr" ? "tr" : "en", controllerDefaults: { ...(s.controllerDefaults ?? {}) }, emulation, integration: { ...d.integration, ...s.integration } };
 }
 
 export function clone<T>(v: T): T {
@@ -271,25 +272,25 @@ export function deepEqual(a: unknown, b: unknown): boolean {
 
 export const reasonLabel = (reason?: string): string => {
   if (!reason) return "—";
-  if (reason === "manual") return "Elle seçildi";
-  if (reason.startsWith("game:")) return `Oyun: ${reason.slice(5)}`;
-  if (reason === "controllerDefault") return "Kontrolcü varsayılanı";
-  return "Varsayılan";
+  if (reason === "manual") return L("Selected manually", "Elle seçildi");
+  if (reason.startsWith("game:")) return L(`Game: ${reason.slice(5)}`, `Oyun: ${reason.slice(5)}`);
+  if (reason === "controllerDefault") return L("Controller default", "Kontrolcü varsayılanı");
+  return L("Default", "Varsayılan");
 };
 
 export const effects: { id: LightEffect; label: string; hint: string }[] = [
-  { id: "off", label: "Kapalı", hint: "Işık çubuğu söner" },
-  { id: "static", label: "Sabit", hint: "Tek renk, hareket yok" },
-  { id: "breathe", label: "Nefes", hint: "İki renk arasında yavaş geçiş" },
-  { id: "strobe", label: "Yanıp sönme", hint: "İki renk arasında keskin geçiş" },
-  { id: "rainbow", label: "Gökkuşağı", hint: "Renk tekerinde döner" },
-  { id: "battery", label: "Pil", hint: "Doluysa yeşil, azaldıkça kırmızı" },
-  { id: "playerColor", label: "Oyuncu rengi", hint: "Oyuncu numarasının rengi" },
+  { id: "off", get label() { return L("Off", "Kapalı"); }, get hint() { return L("Turns off the light bar", "Işık çubuğu söner"); } },
+  { id: "static", get label() { return L("Static", "Sabit"); }, get hint() { return L("One steady color", "Tek renk, hareket yok"); } },
+  { id: "breathe", get label() { return L("Breathe", "Nefes"); }, get hint() { return L("Fades between two colors", "İki renk arasında yavaş geçiş"); } },
+  { id: "strobe", get label() { return L("Flash", "Yanıp sönme"); }, get hint() { return L("Switches sharply between two colors", "İki renk arasında keskin geçiş"); } },
+  { id: "rainbow", get label() { return L("Rainbow", "Gökkuşağı"); }, get hint() { return L("Cycles through colors", "Renk tekerinde döner"); } },
+  { id: "battery", get label() { return L("Battery", "Pil"); }, get hint() { return L("Green when full, red when low", "Doluysa yeşil, azaldıkça kırmızı"); } },
+  { id: "playerColor", get label() { return L("Player color", "Oyuncu rengi"); }, get hint() { return L("Color based on the player number", "Oyuncu numarasının rengi"); } },
 ];
 
 export const effectLabel = (e: LightEffect) => effects.find((x) => x.id === e)?.label ?? e;
 
-export const brightnessLabel = { high: "Yüksek", medium: "Orta", low: "Düşük" } as const;
+export const brightnessLabel = { get high() { return L("High", "Yüksek"); }, get medium() { return L("Medium", "Orta"); }, get low() { return L("Low", "Düşük"); } } as const;
 
 // ---- trigger modes ----
 
@@ -305,88 +306,88 @@ type ModeDef = {
 };
 
 export const triggerModes: ModeDef[] = [
-  { id: "off", label: "Kapalı", edit: "none", params: [] },
+  { id: "off", get label() { return L("Off", "Kapalı"); }, edit: "none", params: [] },
   {
     id: "feedback",
-    label: "Direnç",
+    get label() { return L("Resistance", "Direnç"); },
     edit: "start",
     params: [
-      { key: "start", label: "Başlangıç", min: 0, max: 9, def: 2 },
-      { key: "strength", label: "Güç", min: 1, max: 8, def: 5 },
+      { key: "start", get label() { return L("Start", "Başlangıç"); }, min: 0, max: 9, def: 2 },
+      { key: "strength", get label() { return L("Strength", "Güç"); }, min: 1, max: 8, def: 5 },
     ],
   },
-  { id: "zones", label: "Bölgesel direnç", edit: "zones", params: [] },
+  { id: "zones", get label() { return L("Zone resistance", "Bölgesel direnç"); }, edit: "zones", params: [] },
   {
     id: "slope",
-    label: "Artan direnç",
+    get label() { return L("Rising resistance", "Artan direnç"); },
     edit: "range",
     params: [
-      { key: "start", label: "Başlangıç", min: 0, max: 8, def: 0 },
-      { key: "end", label: "Bitiş", min: 1, max: 9, def: 8 },
-      { key: "startStrength", label: "İlk güç", min: 1, max: 8, def: 1 },
-      { key: "endStrength", label: "Son güç", min: 1, max: 8, def: 8 },
+      { key: "start", get label() { return L("Start", "Başlangıç"); }, min: 0, max: 8, def: 0 },
+      { key: "end", get label() { return L("End", "Bitiş"); }, min: 1, max: 9, def: 8 },
+      { key: "startStrength", get label() { return L("Start strength", "İlk güç"); }, min: 1, max: 8, def: 1 },
+      { key: "endStrength", get label() { return L("End strength", "Son güç"); }, min: 1, max: 8, def: 8 },
     ],
   },
   {
     id: "weapon",
-    label: "Silah",
+    get label() { return L("Weapon", "Silah"); },
     edit: "range",
     params: [
-      { key: "start", label: "Başlangıç", min: 2, max: 7, def: 3 },
-      { key: "end", label: "Kırılma", min: 3, max: 8, def: 6 },
-      { key: "strength", label: "Güç", min: 1, max: 8, def: 8 },
+      { key: "start", get label() { return L("Start", "Başlangıç"); }, min: 2, max: 7, def: 3 },
+      { key: "end", get label() { return L("Break point", "Kırılma"); }, min: 3, max: 8, def: 6 },
+      { key: "strength", get label() { return L("Strength", "Güç"); }, min: 1, max: 8, def: 8 },
     ],
   },
   {
     id: "vibration",
-    label: "Titreşim",
+    get label() { return L("Vibration", "Titreşim"); },
     edit: "start",
     params: [
-      { key: "start", label: "Başlangıç", min: 0, max: 9, def: 0 },
-      { key: "amplitude", label: "Şiddet", min: 1, max: 8, def: 6 },
-      { key: "frequency", label: "Frekans", min: 1, max: 120, def: 30 },
+      { key: "start", get label() { return L("Start", "Başlangıç"); }, min: 0, max: 9, def: 0 },
+      { key: "amplitude", get label() { return L("Intensity", "Şiddet"); }, min: 1, max: 8, def: 6 },
+      { key: "frequency", get label() { return L("Frequency", "Frekans"); }, min: 1, max: 120, def: 30 },
     ],
   },
-  { id: "zonesVibration", label: "Bölgesel titreşim", edit: "zones", params: [] },
+  { id: "zonesVibration", get label() { return L("Zone vibration", "Bölgesel titreşim"); }, edit: "zones", params: [] },
   {
     id: "bow",
-    label: "Yay",
+    get label() { return L("Bow", "Yay"); },
     edit: "range",
     params: [
-      { key: "start", label: "Başlangıç", min: 0, max: 7, def: 1 },
-      { key: "end", label: "Bitiş", min: 1, max: 8, def: 6 },
-      { key: "strength", label: "Gerginlik", min: 1, max: 8, def: 6 },
-      { key: "snap", label: "Geri tepme", min: 1, max: 8, def: 6 },
+      { key: "start", get label() { return L("Start", "Başlangıç"); }, min: 0, max: 7, def: 1 },
+      { key: "end", get label() { return L("End", "Bitiş"); }, min: 1, max: 8, def: 6 },
+      { key: "strength", get label() { return L("Tension", "Gerginlik"); }, min: 1, max: 8, def: 6 },
+      { key: "snap", get label() { return L("Kickback", "Geri tepme"); }, min: 1, max: 8, def: 6 },
     ],
   },
   {
     id: "galloping",
-    label: "Dörtnala",
+    get label() { return L("Gallop", "Dörtnala"); },
     edit: "range",
     params: [
-      { key: "start", label: "Başlangıç", min: 0, max: 8, def: 0 },
-      { key: "end", label: "Bitiş", min: 1, max: 9, def: 9 },
-      { key: "firstFoot", label: "1. ayak", min: 0, max: 6, def: 1 },
-      { key: "secondFoot", label: "2. ayak", min: 1, max: 7, def: 4 },
-      { key: "frequency", label: "Frekans", min: 1, max: 20, def: 3 },
+      { key: "start", get label() { return L("Start", "Başlangıç"); }, min: 0, max: 8, def: 0 },
+      { key: "end", get label() { return L("End", "Bitiş"); }, min: 1, max: 9, def: 9 },
+      { key: "firstFoot", get label() { return L("First foot", "1. ayak"); }, min: 0, max: 6, def: 1 },
+      { key: "secondFoot", get label() { return L("Second foot", "2. ayak"); }, min: 1, max: 7, def: 4 },
+      { key: "frequency", get label() { return L("Frequency", "Frekans"); }, min: 1, max: 20, def: 3 },
     ],
   },
   {
     id: "machine",
-    label: "Makine",
+    get label() { return L("Machine", "Makine"); },
     edit: "range",
     params: [
-      { key: "start", label: "Başlangıç", min: 0, max: 8, def: 0 },
-      { key: "end", label: "Bitiş", min: 1, max: 9, def: 9 },
-      { key: "amplitudeA", label: "Şiddet A", min: 0, max: 7, def: 2 },
-      { key: "amplitudeB", label: "Şiddet B", min: 0, max: 7, def: 6 },
-      { key: "frequency", label: "Frekans", min: 1, max: 60, def: 20 },
-      { key: "period", label: "Periyot", min: 1, max: 60, def: 8 },
+      { key: "start", get label() { return L("Start", "Başlangıç"); }, min: 0, max: 8, def: 0 },
+      { key: "end", get label() { return L("End", "Bitiş"); }, min: 1, max: 9, def: 9 },
+      { key: "amplitudeA", get label() { return L("Intensity A", "Şiddet A"); }, min: 0, max: 7, def: 2 },
+      { key: "amplitudeB", get label() { return L("Intensity B", "Şiddet B"); }, min: 0, max: 7, def: 6 },
+      { key: "frequency", get label() { return L("Frequency", "Frekans"); }, min: 1, max: 60, def: 20 },
+      { key: "period", get label() { return L("Period", "Periyot"); }, min: 1, max: 60, def: 8 },
     ],
   },
 ];
 
-export const zoneFrequency: ParamDef = { key: "frequency", label: "Frekans", min: 1, max: 120, def: 30 };
+export const zoneFrequency: ParamDef = { key: "frequency", get label() { return L("Frequency", "Frekans"); }, min: 1, max: 120, def: 30 };
 
 export const modeDef = (m: TriggerMode) => triggerModes.find((d) => d.id === m) ?? triggerModes[0];
 export const isZoneMode = (m: TriggerMode) => m === "zones" || m === "zonesVibration";
@@ -460,22 +461,22 @@ export function withMode(c: TriggerConfig, mode: TriggerMode): TriggerConfig {
 export function triggerSummary(c: TriggerConfig): string {
   const def = modeDef(c.mode);
   const p = c.params;
-  if (c.mode === "off") return "Kapalı";
-  if (def.edit === "range") return `${def.label} (bölge ${p.start + 1}–${p.end + 1})`;
-  if (def.edit === "start") return `${def.label} (bölge ${p.start + 1}–10)`;
+  if (c.mode === "off") return L("Off", "Kapalı");
+  if (def.edit === "range") return L(`${def.label} (zones ${p.start + 1}–${p.end + 1})`, `${def.label} (bölge ${p.start + 1}–${p.end + 1})`);
+  if (def.edit === "start") return L(`${def.label} (zones ${p.start + 1}–10)`, `${def.label} (bölge ${p.start + 1}–10)`);
   return def.label;
 }
 
 export const presets: { name: string; config: TriggerConfig }[] = [
-  { name: "Kapalı", config: defaultTrigger() },
-  { name: "Tabanca", config: { mode: "weapon", params: { start: 3, end: 5, strength: 6 }, zones: null, frequency: 0 } },
-  { name: "Tüfek", config: { mode: "weapon", params: { start: 4, end: 7, strength: 8 }, zones: null, frequency: 0 } },
-  { name: "Yay", config: { mode: "bow", params: { start: 1, end: 6, strength: 6, snap: 4 }, zones: null, frequency: 0 } },
-  { name: "Fren", config: { mode: "slope", params: { start: 1, end: 9, startStrength: 2, endStrength: 8 }, zones: null, frequency: 0 } },
-  { name: "Gaz pedalı", config: { mode: "zones", params: {}, zones: [1, 1, 2, 2, 2, 3, 3, 3, 4, 4], frequency: 0 } },
-  { name: "Kilitli tetik", config: { mode: "feedback", params: { start: 0, strength: 8 }, zones: null, frequency: 0 } },
-  { name: "Motor titreşimi", config: { mode: "zonesVibration", params: {}, zones: [2, 2, 3, 3, 4, 5, 5, 6, 7, 8], frequency: 40 } },
-  { name: "Dörtnala", config: { mode: "galloping", params: { start: 0, end: 9, firstFoot: 2, secondFoot: 5, frequency: 3 }, zones: null, frequency: 0 } },
+  { get name() { return L("Off", "Kapalı"); }, config: defaultTrigger() },
+  { get name() { return L("Pistol", "Tabanca"); }, config: { mode: "weapon", params: { start: 3, end: 5, strength: 6 }, zones: null, frequency: 0 } },
+  { get name() { return L("Rifle", "Tüfek"); }, config: { mode: "weapon", params: { start: 4, end: 7, strength: 8 }, zones: null, frequency: 0 } },
+  { get name() { return L("Bow", "Yay"); }, config: { mode: "bow", params: { start: 1, end: 6, strength: 6, snap: 4 }, zones: null, frequency: 0 } },
+  { get name() { return L("Brake", "Fren"); }, config: { mode: "slope", params: { start: 1, end: 9, startStrength: 2, endStrength: 8 }, zones: null, frequency: 0 } },
+  { get name() { return L("Accelerator", "Gaz pedalı"); }, config: { mode: "zones", params: {}, zones: [1, 1, 2, 2, 2, 3, 3, 3, 4, 4], frequency: 0 } },
+  { get name() { return L("Locked trigger", "Kilitli tetik"); }, config: { mode: "feedback", params: { start: 0, strength: 8 }, zones: null, frequency: 0 } },
+  { get name() { return L("Engine vibration", "Motor titreşimi"); }, config: { mode: "zonesVibration", params: {}, zones: [2, 2, 3, 3, 4, 5, 5, 6, 7, 8], frequency: 40 } },
+  { get name() { return L("Gallop", "Dörtnala"); }, config: { mode: "galloping", params: { start: 0, end: 9, firstFoot: 2, secondFoot: 5, frequency: 3 }, zones: null, frequency: 0 } },
 ];
 
 // ---- shaping (mirrors what the core does; used for the draft preview and the simulator) ----

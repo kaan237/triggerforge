@@ -1,3 +1,4 @@
+using Tactile.Core;
 using System.Globalization;
 
 namespace Tactile.Drivers;
@@ -9,7 +10,7 @@ internal sealed class Vhci(IVhciControl control, RecoveryJournal journal) : IVhc
         if (tcpPort is < 1 or > 65535)
             throw new ArgumentOutOfRangeException(nameof(tcpPort));
         if (control.InterfaceCount() != 1)
-            throw new DriverException("usbip-win2 sürücüsü hazır değil.");
+            throw new DriverException(new LocalizedMessage("The usbip-win2 driver is not ready.", "usbip-win2 sürücüsü hazır değil."));
 
         string service = tcpPort.ToString(CultureInfo.InvariantCulture);
         var entry = new AttachEntry { Id = Guid.NewGuid().ToString("N"), TcpPort = tcpPort, BusId = busId };

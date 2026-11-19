@@ -5,6 +5,7 @@ using Tactile.Emulation;
 
 namespace Tactile.Tests.EmulationCore;
 
+[Collection("Localization")]
 public class EmulationServiceTests
 {
     private static readonly Profile Xbox = EmulationRig.ProfileWith(EmulationMode.Xbox360);
@@ -133,6 +134,7 @@ public class EmulationServiceTests
     [Fact]
     public void Attach_failure_is_a_notice_and_stays_off_until_retry_or_profile_change()
     {
+        using var language = new TestLanguage(Language.Tr);
         var rig = new EmulationRig();
         rig.Vhci.Fail = true;
         using EmulationService e = rig.Create();
@@ -173,6 +175,7 @@ public class EmulationServiceTests
     [Fact]
     public void Hide_failure_keeps_the_pad_and_says_so()
     {
+        using var language = new TestLanguage(Language.Tr);
         var rig = new EmulationRig();
         rig.Hider.Fail = true;
         using EmulationService e = rig.Create();

@@ -1,3 +1,5 @@
+using Tactile.Core;
+
 namespace Tactile.Audio;
 
 // Fixed contract for phase 5a (docs/contract-phase5a.md). Do not edit; implementations live
@@ -31,18 +33,22 @@ public interface IAudioCapture : IDisposable
     /// <summary>Raised on the capture thread. Handlers must be quick and must not throw.</summary>
     event AudioDataHandler? Data;
 
-    /// <summary>Raised once when capture stops by itself (device removed, app exited). Turkish message.</summary>
+    /// <summary>Raised once when capture stops by itself (device removed, app exited). localized message.</summary>
     event Action<string>? Failed;
 }
 
-public sealed class AudioUnavailableException(string message, Exception? inner = null) : Exception(message, inner);
+public sealed class AudioUnavailableException(LocalizedMessage translation, Exception? inner = null)
+    : LocalizedException(translation, inner)
+{
+    public AudioUnavailableException(string message, Exception? inner = null) : this(new LocalizedMessage(message, message), inner) { }
+}
 
 public interface IAudioSystem
 {
     /// <summary>Processes with an active render session, one entry per process name.</summary>
     IReadOnlyList<AudioApp> ListApps();
 
-    /// <summary>Starts capturing. Throws <see cref="AudioUnavailableException"/> with a Turkish message.</summary>
+    /// <summary>Starts capturing. Throws <see cref="AudioUnavailableException"/> with a localized message.</summary>
     IAudioCapture Start(AudioTarget target);
 }
 

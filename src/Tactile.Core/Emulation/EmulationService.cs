@@ -75,7 +75,7 @@ public sealed class EmulationService : IDisposable
 
     private Wanted? _wanted;
     private (string ProfileId, EmulationMode Mode, bool Audio)? _failedFor;
-    private string? _error;
+    private (string En, string Tr)? _error;
     private DriverStatus[] _drivers;
     private TimeSpan? _driversCheckedAt;
     private EmulationStatus _lastStatus = EmulationStatus.Unavailable;
@@ -131,22 +131,22 @@ public sealed class EmulationService : IDisposable
             try
             {
                 platform.Recovery.RestoreAll();
-                Notify("Tactile geçen sefer düzgün kapanmadı; sanal kontrolcü kaldırıldı ve gerçek kontrolcü yeniden görünür yapıldı.");
+                Notify("TriggerForge did not close cleanly. The virtual controller was removed and the physical controller is visible again.", "Tactile geçen sefer düzgün kapanmadı; sanal kontrolcü kaldırıldı ve gerçek kontrolcü yeniden görünür yapıldı.");
             }
             catch (Exception e)
             {
-                Notify($"Geçen oturumdan kalanlar geri alınamadı: {e.Message} Ayarlar'daki “Kontrolcüyü geri getir” ile yeniden deneyin.");
+                Notify($"Could not undo the previous session's changes: {Text.English(e)} Try Restore controller in Settings.", $"Geçen oturumdan kalanlar geri alınamadı: {e.Message} Ayarlar'daki “Kontrolcüyü geri getir” ile yeniden deneyin.");
             }
         }
 
         if (server is null)
         {
-            _error = "Sanal USB sunucusu başlatılamadı.";
+            _error = ("Could not start the virtual USB server.", "Sanal USB sunucusu başlatılamadı.");
         }
 
         if (threaded)
         {
-            _worker = new Thread(Run) { IsBackground = true, Name = "tactile-emulation" };
+            _worker = new Thread(Run) { IsBackground = true, Name = "TriggerForge: emulation" };
             _worker.Start();
         }
         else
@@ -233,7 +233,7 @@ public sealed class EmulationService : IDisposable
             }
             catch (Exception e)
             {
-                Notify($"Geri alma tamamlanamadı: {e.Message}");
+                Notify($"Could not undo changes: {Text.English(e)}", $"Geri alma tamamlanamadı: {e.Message}");
             }
         }
 
@@ -315,7 +315,7 @@ public sealed class EmulationService : IDisposable
             }
             catch (Exception e)
             {
-                Fail($"Sanal kontrolcü hatası: {e.Message}");
+                Fail($"Virtual controller error: {Text.English(e)}", $"Sanal kontrolcü hatası: {e.Message}");
             }
         }
     }
@@ -431,7 +431,7 @@ public sealed class EmulationService : IDisposable
         }
         catch (Exception e)
         {
-            Fail($"Sanal kontrolcü oluşturulamadı: {e.Message}", w);
+            Fail($"Could not create the virtual controller: {Text.English(e)}", $"Sanal kontrolcü oluşturulamadı: {e.Message}", w);
             return;
         }
 
@@ -445,14 +445,14 @@ public sealed class EmulationService : IDisposable
             port = _platform.Vhci.Attach(server.Port, pad.BusId);
             if (port < 0)
             {
-                throw new InvalidOperationException($"geçersiz hub portu {port}");
+                throw new LocalizedMessage($"Invalid hub port {port}", $"geçersiz hub portu {port}").CreateException(message => new InvalidOperationException(message));
             }
         }
         catch (Exception e)
         {
             pad.Feedback -= handler;
             TryRemove(pad);
-            Fail($"Sanal kontrolcü takılamadı: {e.Message}", w);
+            Fail($"Could not attach the virtual controller: {Text.English(e)}", $"Sanal kontrolcü takılamadı: {e.Message}", w);
             return;
         }
 
@@ -490,7 +490,7 @@ public sealed class EmulationService : IDisposable
         }
         catch (Exception e)
         {
-            Notify($"Varsayılan ses cihazları kaydedilemedi: {e.Message}");
+            Notify($"Could not save the default audio devices: {Text.English(e)}", $"Varsayılan ses cihazları kaydedilemedi: {e.Message}");
             return null;
         }
     }
@@ -521,7 +521,7 @@ public sealed class EmulationService : IDisposable
             if (!_audioCheckFailed)
             {
                 _audioCheckFailed = true;
-                Notify($"Varsayılan ses cihazları denetlenemedi: {e.Message}");
+                Notify($"Could not check the default audio devices: {Text.English(e)}", $"Varsayılan ses cihazları denetlenemedi: {e.Message}");
             }
             return;
         }
@@ -542,7 +542,7 @@ public sealed class EmulationService : IDisposable
             }
             catch (Exception e)
             {
-                Notify($"Varsayılan ses cihazı geri yüklenemedi: {e.Message}");
+                Notify($"Could not restore the default audio device: {Text.English(e)}", $"Varsayılan ses cihazı geri yüklenemedi: {e.Message}");
             }
         }
 
@@ -571,7 +571,7 @@ public sealed class EmulationService : IDisposable
             string? id = _platform.Tree.InstanceId(_padPath);
             if (id is null)
             {
-                Notify("Gerçek kontrolcünün aygıt kimliği bulunamadı, gizlenemedi. Oyunlar iki kontrolcü görebilir.");
+                Notify("Could not find the physical controller's device ID to hide it. Games may see two controllers.", "Gerçek kontrolcünün aygıt kimliği bulunamadı, gizlenemedi. Oyunlar iki kontrolcü görebilir.");
             }
             else if (_platform.Hider.Hide(id))
             {
@@ -579,12 +579,12 @@ public sealed class EmulationService : IDisposable
             }
             else
             {
-                Notify("Gerçek kontrolcü gizlenemedi. Oyunlar iki kontrolcü görebilir.");
+                Notify("Could not hide the physical controller. Games may see two controllers.", "Gerçek kontrolcü gizlenemedi. Oyunlar iki kontrolcü görebilir.");
             }
         }
         catch (Exception e)
         {
-            Notify($"Gerçek kontrolcü gizlenemedi: {e.Message}");
+            Notify($"Could not hide the physical controller: {Text.English(e)}", $"Gerçek kontrolcü gizlenemedi: {e.Message}");
         }
     }
 
@@ -608,7 +608,7 @@ public sealed class EmulationService : IDisposable
             if (!_unhideFailNoticed)
             {
                 _unhideFailNoticed = true;
-                Notify($"Gerçek kontrolcü yeniden görünür yapılamadı: {e.Message}");
+                Notify($"Could not make the physical controller visible again: {Text.English(e)}", $"Gerçek kontrolcü yeniden görünür yapılamadı: {e.Message}");
             }
 
             return false;
@@ -640,7 +640,7 @@ public sealed class EmulationService : IDisposable
         catch (Exception e)
         {
             clean = false;
-            Notify($"Sanal kontrolcü çıkarılamadı: {e.Message}");
+            Notify($"Could not remove the virtual controller: {Text.English(e)}", $"Sanal kontrolcü çıkarılamadı: {e.Message}");
         }
 
         TryRemove(pad);
@@ -740,7 +740,7 @@ public sealed class EmulationService : IDisposable
         if (running)
         {
             _steamNoticed = true;
-            Notify("Steam Input bu oyunda açıksa çift kontrolcü görünür; oyunun Steam ayarlarında Steam Input'u kapatın.");
+            Notify("If the game shows two controllers, turn off Steam Input in its Steam settings.", "Steam Input bu oyunda açıksa çift kontrolcü görünür; oyunun Steam ayarlarında Steam Input'u kapatın.");
         }
     }
 
@@ -783,11 +783,11 @@ public sealed class EmulationService : IDisposable
 
     private DriverState State(DriverKind kind) => _drivers.FirstOrDefault(d => d.Kind == kind)?.State ?? DriverState.Missing;
 
-    private void Fail(string message, Wanted? w = null)
+    private void Fail(string en, string tr, Wanted? w = null)
     {
         lock (_stateLock)
         {
-            _error = message;
+            _error = (en, tr);
             w ??= _wanted;
             if (w is not null)
             {
@@ -795,14 +795,14 @@ public sealed class EmulationService : IDisposable
             }
         }
 
-        Notify(message);
+        Notify(en, tr);
         RaiseIfChanged();
     }
 
     private void ClearFailureLocked()
     {
         _failedFor = null;
-        _error = _server is null ? "Sanal USB sunucusu başlatılamadı." : null;
+        _error = _server is null ? ("Could not start the virtual USB server.", "Sanal USB sunucusu başlatılamadı.") : null;
     }
 
     private EmulationStatus BuildStatus()
@@ -817,7 +817,7 @@ public sealed class EmulationService : IDisposable
             Hidden: pad is not null && _hiddenId is not null,
             Drivers: _drivers,
             Latency: _latency.Summary(),
-            Error: _error,
+            Error: _error is { } error ? Text.Pick(error.En, error.Tr) : null,
             Audio: pad is IVirtualAudio audio
                 ? audio.SpeakerActive ? EmulationAudioStatus.Playing : EmulationAudioStatus.Ready
                 : EmulationAudioStatus.Off);
@@ -839,7 +839,7 @@ public sealed class EmulationService : IDisposable
         }
     }
 
-    private void Notify(string message) => _host.Report(new Notice(NoticeKinds.Emulation, message));
+    private void Notify(string en, string tr) => _host.Report(new Notice(NoticeKinds.Emulation, en, tr));
 
     private static DriverStatus Missing(DriverKind kind) => new(kind, DriverState.Missing, null, null);
 

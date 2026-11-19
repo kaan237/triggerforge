@@ -1,3 +1,4 @@
+using Tactile.Core;
 namespace Tactile.Input;
 
 /// <summary>Synthetic keyboard and mouse output. Implementations are safe to call from any thread.</summary>
@@ -67,7 +68,7 @@ public sealed record InputPlatform(IInputInjector Injector, IMicrophone Micropho
 
         public bool? ToggleMute() => null;
 
-        public void Run(string path, string arguments) => throw new InvalidOperationException("Program çalıştırma bu ortamda yok.");
+        public void Run(string path, string arguments) => throw new LocalizedMessage("Launching programs is unavailable here.", "Program çalıştırma bu ortamda yok.").CreateException(message => new InvalidOperationException(message));
 
         public bool ForegroundBlocksInput() => false;
     }

@@ -8,7 +8,7 @@ public sealed class SettingsStore
     private readonly List<string> _broken = [];
     private AppSettings _current;
 
-    public SettingsStore(string? dataDir = null)
+    public SettingsStore(string? dataDir = null, bool portable = false)
     {
         _path = Path.Combine(JsonFile.ResolveDataDir(dataDir), "settings.json");
         AppSettings? loaded = null;
@@ -21,7 +21,13 @@ public sealed class SettingsStore
             }
         }
 
-        _current = Validation.Normalize(loaded ?? new AppSettings());
+        var defaults = new AppSettings();
+        if (loaded is null && (portable || (string.IsNullOrWhiteSpace(dataDir) && AppPaths.Resolve().Portable)))
+        {
+            defaults = defaults with { Emulation = defaults.Emulation with { Enabled = false } };
+        }
+
+        _current = Validation.Normalize(loaded ?? defaults);
     }
 
     public AppSettings Current

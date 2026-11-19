@@ -1,3 +1,4 @@
+import { L } from "./i18n";
 import { useRef, type PointerEvent } from "react";
 import type { Curve, CurvePoint } from "./host";
 import { applyCurve, clamp, sampleCurve } from "./model";
@@ -94,17 +95,17 @@ export function CurvePlot({
       </svg>
       <div className="curve-controls">
         <Segmented
-          label="Eğri"
+          label={L("Curve", "Eğri")}
           value={shape.curve}
           options={[
-            { id: "linear", label: "Doğrusal" },
-            { id: "exponential", label: "Üstel" },
-            { id: "custom", label: "Özel" },
+            { id: "linear", label: L("Linear", "Doğrusal") },
+            { id: "exponential", label: L("Exponential", "Üstel") },
+            { id: "custom", label: L("Custom", "Özel") },
           ]}
           onChange={(curve) => onChange(curve === "custom" && !shape.points ? { curve, points: sampleCurve(shape.curve, shape.exponent, null) } : { curve })}
         />
-        {shape.curve === "exponential" && <Slider label="Üs" min={0.3} max={4} step={0.05} value={shape.exponent} format={fixed(2)} onChange={(exponent) => onChange({ exponent })} />}
-        {shape.curve === "custom" && <p className="hint">Ortadaki üç noktayı sürükle.</p>}
+        {shape.curve === "exponential" && <Slider label={L("Exponent", "Üs")} min={0.3} max={4} step={0.05} value={shape.exponent} format={fixed(2)} onChange={(exponent) => onChange({ exponent })} />}
+        {shape.curve === "custom" && <p className="hint">{L("Drag the three middle points.", "Ortadaki üç noktayı sürükle.")}</p>}
       </div>
     </div>
   );

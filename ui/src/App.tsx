@@ -1,3 +1,4 @@
+import { L } from "./i18n";
 import { useEffect, useState } from "react";
 import { inHost, type Profile, type Status } from "./host";
 import { deepEqual } from "./model";
@@ -16,27 +17,27 @@ import { AppProvider, useApp, useInput } from "./state";
 
 // `keys`: profile fields edited on that page, for the unsaved mark in the rail.
 const sections = [
-  { id: "controller", label: "Kontrolcü", keys: [] },
-  { id: "triggers", label: "Tetikler", keys: ["triggers", "triggerResponse"] },
-  { id: "haptics", label: "Haptik", keys: ["haptics"] },
-  { id: "light", label: "Işık", keys: ["lightbar", "playerLeds", "micLed"] },
-  { id: "sticks", label: "Analoglar", keys: ["sticks", "gyro"] },
-  { id: "mapping", label: "Tuşlar", keys: ["mapping", "macros"] },
-  { id: "emulation", label: "Sanal kontrolcü", keys: ["emulation"] },
-  { id: "integrations", label: "Entegrasyonlar", keys: [] },
-  { id: "profiles", label: "Profiller", keys: [] },
+  { id: "controller", get label() { return L("Overview", "Kontrolcü"); }, keys: [] },
+  { id: "triggers", get label() { return L("Triggers", "Tetikler"); }, keys: ["triggers", "triggerResponse"] },
+  { id: "haptics", get label() { return L("Haptics", "Haptik"); }, keys: ["haptics"] },
+  { id: "light", get label() { return L("Light", "Işık"); }, keys: ["lightbar", "playerLeds", "micLed"] },
+  { id: "sticks", get label() { return L("Sticks", "Analoglar"); }, keys: ["sticks", "gyro"] },
+  { id: "mapping", get label() { return L("Mapping", "Tuşlar"); }, keys: ["mapping", "macros"] },
+  { id: "emulation", get label() { return L("Virtual controller", "Sanal kontrolcü"); }, keys: ["emulation"] },
+  { id: "integrations", get label() { return L("Integrations", "Entegrasyonlar"); }, keys: [] },
+  { id: "profiles", get label() { return L("Profiles", "Profiller"); }, keys: [] },
 ] as const satisfies readonly { id: string; label: string; keys: readonly (keyof Profile)[] }[];
 
 type SectionId = (typeof sections)[number]["id"] | "settings";
 
-const linkLabel: Record<string, string> = { Bluetooth: "Bluetooth", Usb: "USB", Simulated: "simülasyon" };
+const linkLabel: Record<string, string> = { Bluetooth: "Bluetooth", Usb: "USB", get Simulated() { return L("simulation", "simülasyon"); } };
 
 function mappingState(status: Status | null): string {
   const m = status?.mapping;
-  if (!status?.connected) return "bekliyor";
-  if (m?.paused) return "duraklatıldı";
-  if (m?.blockedBy) return "engellendi";
-  return m?.active ? "açık" : "bekliyor";
+  if (!status?.connected) return L("waiting", "bekliyor");
+  if (m?.paused) return L("paused", "duraklatıldı");
+  if (m?.blockedBy) return L("blocked", "engellendi");
+  return m?.active ? L("on", "açık") : L("waiting", "bekliyor");
 }
 
 function StatusBar() {
@@ -48,26 +49,26 @@ function StatusBar() {
   return (
     <header className="status">
       <span className={connected ? "dot live" : "dot"} aria-hidden />
-      <span className="status-model">{connected ? status?.model ?? "DualSense" : "Kontrolcü bağlı değil"}</span>
+      <span className="status-model">{connected ? status?.model ?? "DualSense" : L("No controller connected", "Kontrolcü bağlı değil")}</span>
       <span className="spacer" />
       {active && (
         <span className="metric">
-          <span className="label">profil</span>
+          <span className="label">{L("profile", "profil")}</span>
           <span className="value">{active.name}</span>
         </span>
       )}
       {active?.mapping.enabled && (
-        <span className="metric" title={status?.mapping?.blockedBy ? `${status.mapping.blockedBy} yönetici olarak çalışıyor` : undefined}>
-          <span className="label">atama</span>
+        <span className="metric" title={status?.mapping?.blockedBy ? L(`${status.mapping.blockedBy} is running as administrator`, `${status.mapping.blockedBy} yönetici olarak çalışıyor`) : undefined}>
+          <span className="label">{L("mapping", "atama")}</span>
           <span className={status?.mapping?.blockedBy ? "value warn" : "value"}>{mappingState(status)}</span>
         </span>
       )}
       <span className="metric">
-        <span className="label">pil</span>
-        <span className="value">{input ? `%${input.battery}${input.charging ? " şarjda" : ""}` : "—"}</span>
+        <span className="label">{L("battery", "pil")}</span>
+        <span className="value">{input ? L(`${input.battery}%${input.charging ? " charging" : ""}`, `%${input.battery}${input.charging ? " şarjda" : ""}`) : "—"}</span>
       </span>
       <span className="metric">
-        <span className="label">bağlantı</span>
+        <span className="label">{L("connection", "bağlantı")}</span>
         <span className="value">{connected && status?.link ? linkLabel[status.link] ?? status.link : "—"}</span>
       </span>
     </header>
@@ -76,7 +77,8 @@ function StatusBar() {
 
 function Shell() {
   const [section, setSection] = useState<SectionId>("controller");
-  const { status, output, dirty, draft, draftBase, profiles, telemetryDrafts } = useApp();
+  const { status, output, dirty, draft, draftBase, profiles, settings, telemetryDrafts } = useApp();
+  const language = settings?.language ?? "en";
   const changed = (keys: readonly (keyof Profile)[]) => dirty && !!draft && !!draftBase && keys.some((k) => !deepEqual(draft[k], draftBase[k]));
   const telemetryChanged = profiles.some((p) => {
     const rules = telemetryDrafts.get(p.id);
@@ -92,42 +94,50 @@ function Shell() {
   return (
     <div className="shell">
       <nav className="rail">
-        <div className="wordmark">tactile</div>
+        <div className="wordmark">TriggerForge</div>
         <ul>
           {sections.map((s) => (
             <li key={s.id}>
               <button className={section === s.id ? "active" : ""} onClick={() => setSection(s.id)}>
                 {s.label}
-                {(s.id === "integrations" ? telemetryChanged : changed(s.keys)) && <span className="dirty-mark" title="Kaydedilmemiş değişiklik" />}
+                {(s.id === "integrations" ? telemetryChanged : changed(s.keys)) && <span className="dirty-mark" title={L("Unsaved changes", "Kaydedilmemiş değişiklik")} />}
               </button>
             </li>
           ))}
         </ul>
         <div className="rail-foot">
           <button className={section === "settings" ? "active" : ""} onClick={() => setSection("settings")}>
-            Ayarlar
+            {L("Settings", "Ayarlar")}
           </button>
-          <span className="version">{inHost ? `v${status?.version ?? "…"}` : "tarayıcı önizleme"}</span>
+          <span className="version">{inHost ? `v${status?.version ?? "…"}` : L("browser preview", "tarayıcı önizleme")}</span>
         </div>
       </nav>
 
       <main>
         <StatusBar />
         <section className="content" key={section}>
-          {section === "controller" && <Overview />}
-          {section === "triggers" && <Triggers />}
-          {section === "haptics" && <Haptics />}
-          {section === "light" && <Light />}
-          {section === "sticks" && <Sticks />}
-          {section === "mapping" && <Mapping />}
-          {section === "emulation" && <Emulation />}
-          {section === "integrations" && <Integrations />}
-          {section === "profiles" && <Profiles />}
-          {section === "settings" && <Settings />}
+          <PageView key={language} section={section} />
         </section>
       </main>
       <Notices />
     </div>
+  );
+}
+
+function PageView({ section }: { section: SectionId }) {
+  return (
+    <>
+      {section === "controller" && <Overview />}
+      {section === "triggers" && <Triggers />}
+      {section === "haptics" && <Haptics />}
+      {section === "light" && <Light />}
+      {section === "sticks" && <Sticks />}
+      {section === "mapping" && <Mapping />}
+      {section === "emulation" && <Emulation />}
+      {section === "integrations" && <Integrations />}
+      {section === "profiles" && <Profiles />}
+      {section === "settings" && <Settings />}
+    </>
   );
 }
 

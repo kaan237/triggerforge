@@ -1,9 +1,11 @@
+using Tactile.Core;
 using System.Security.Cryptography;
 using System.Text;
 using Tactile.Drivers;
 
 namespace Tactile.Tests.Drivers;
 
+[Collection("Localization")]
 public class DriverPureTests
 {
     [Theory]
@@ -56,6 +58,18 @@ public class DriverPureTests
     }
 
     [Fact]
+    public void Cached_driver_detail_follows_the_language()
+    {
+        using var language = new TestLanguage(Language.En);
+        DriverStatus status = DriverManager.UsbIpStatus(DriverManifest.UsbIp.RequiredVersion, 0);
+        Assert.Contains("inactive", status.Detail, StringComparison.Ordinal);
+
+        Text.Current = Language.Tr;
+        Assert.Contains("etkin değil", status.Detail, StringComparison.Ordinal);
+        Assert.Contains("inactive", status.EnglishDetail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Wrong_hash_fails_and_deletes_the_file()
     {
         using var dir = new TempDir();
@@ -64,7 +78,7 @@ public class DriverPureTests
         File.WriteAllBytes(file, content);
         DriverPackage pkg = DriverManifest.UsbIp with { Size = content.Length };
 
-        string? error = DriverManager.VerifyOrDelete(file, pkg);
+        string? error = DriverManager.VerifyOrDelete(file, pkg)?.Value;
 
         Assert.NotNull(error);
         Assert.Contains("SHA-256", error, StringComparison.Ordinal);
@@ -74,24 +88,26 @@ public class DriverPureTests
     [Fact]
     public void Wrong_size_fails_and_deletes_the_file()
     {
+        using var language = new TestLanguage(Language.Tr);
         using var dir = new TempDir();
         string file = Path.Combine(dir.Path, "setup.exe");
         File.WriteAllBytes(file, [1, 2, 3]);
 
-        Assert.Contains("boyut", DriverManager.VerifyOrDelete(file, DriverManifest.HidHide), StringComparison.Ordinal);
+        Assert.Contains("boyut", DriverManager.VerifyOrDelete(file, DriverManifest.HidHide)?.Value, StringComparison.Ordinal);
         Assert.False(File.Exists(file));
     }
 
     [Fact]
     public void Matching_hash_but_unsigned_fails_authenticode_and_deletes()
     {
+        using var language = new TestLanguage(Language.Tr);
         using var dir = new TempDir();
         string file = Path.Combine(dir.Path, "setup.exe");
         byte[] content = Encoding.ASCII.GetBytes("unsigned payload");
         File.WriteAllBytes(file, content);
         DriverPackage pkg = DriverManifest.HidHide with { Size = content.Length, Sha256 = Convert.ToHexString(SHA256.HashData(content)) };
 
-        string? error = DriverManager.VerifyOrDelete(file, pkg);
+        string? error = DriverManager.VerifyOrDelete(file, pkg)?.Value;
 
         Assert.NotNull(error);
         Assert.Contains("imza", error, StringComparison.Ordinal);

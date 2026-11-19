@@ -1,3 +1,4 @@
+using Tactile.Core;
 using System.ComponentModel;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
@@ -173,7 +174,7 @@ internal sealed unsafe class WindowsHidHideControl : IHidHideControl
             }
         }
 
-        private static DriverException Fail() => new("HidHide ayarı uygulanamadı.", new Win32Exception());
+        private static DriverException Fail() => new(new LocalizedMessage("Could not apply the HidHide setting.", "HidHide ayarı uygulanamadı."), new Win32Exception());
 
         public void Dispose()
         {

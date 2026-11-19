@@ -1,3 +1,4 @@
+using Tactile.Core;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -8,8 +9,8 @@ namespace Tactile.Audio;
 
 internal sealed class WasapiLoopback : IAudioCapture
 {
-    private const string StreamError = "Ses yakalama durdu.";
-    private const string EndpointChanged = "Varsayılan ses çıkışı değişti veya bağlantısı kesildi.";
+    private static readonly LocalizedMessage StreamError = new("Audio capture stopped.", "Ses yakalama durdu.");
+    private static readonly LocalizedMessage EndpointChanged = new("The default audio output changed or disconnected.", "Varsayılan ses çıkışı değişti veya bağlantısı kesildi.");
     private readonly Lock _lifetime = new();
     private readonly ManualResetEvent _stop;
     private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -24,7 +25,7 @@ internal sealed class WasapiLoopback : IAudioCapture
         _thread = new Thread(Run)
         {
             IsBackground = true,
-            Name = "WASAPI loopback",
+            Name = "TriggerForge: WASAPI loopback",
             Priority = ThreadPriority.AboveNormal
         };
         _thread.SetApartmentState(ApartmentState.MTA);
@@ -51,7 +52,7 @@ internal sealed class WasapiLoopback : IAudioCapture
             capture?.Dispose();
             if (ex is AudioUnavailableException)
                 throw;
-            throw new AudioUnavailableException("Ses yakalama başlatılamadı.", ex);
+            throw new AudioUnavailableException(new LocalizedMessage("Could not start audio capture.", "Ses yakalama başlatılamadı."), ex);
         }
     }
 
@@ -88,9 +89,10 @@ internal sealed class WasapiLoopback : IAudioCapture
         _stopClosed = true;
     }
 
+    internal LocalizedMessage? Failure { get; private set; }
+
     private void Run()
     {
-        string? failure = null;
         try
         {
             Capture();
@@ -98,9 +100,9 @@ internal sealed class WasapiLoopback : IAudioCapture
         catch (Exception ex)
         {
             var error = ex as AudioUnavailableException
-                ?? new AudioUnavailableException(_started.Task.IsCompleted ? StreamError : "Ses yakalama başlatılamadı.", ex);
+                ?? new AudioUnavailableException(_started.Task.IsCompleted ? StreamError : new LocalizedMessage("Could not start audio capture.", "Ses yakalama başlatılamadı."), ex);
             if (!_started.TrySetException(error))
-                failure = error.Message;
+                Failure = error.Translation;
         }
         finally
         {
@@ -109,11 +111,11 @@ internal sealed class WasapiLoopback : IAudioCapture
                 CloseStopEvent();
         }
 
-        if (failure is not null && !_disposed)
+        if (Failure is { } failure && !_disposed)
         {
             try
             {
-                Failed?.Invoke(failure);
+                Failed?.Invoke(failure.Value);
             }
             catch (Exception ex)
             {
@@ -145,7 +147,7 @@ internal sealed class WasapiLoopback : IAudioCapture
                 var callback = new EndpointWatcher(id);
                 // Registration does not AddRef the notification interface.
                 notification = Marshal.GetComInterfaceForObject<EndpointWatcher, IMMNotificationClient>(callback);
-                Check(devices.RegisterEndpointNotificationCallback(notification), "Ses çıkışı değişiklikleri izlenemiyor.");
+                Check(devices.RegisterEndpointNotificationCallback(notification), new LocalizedMessage("Could not monitor audio output changes.", "Ses çıkışı değişiklikleri izlenemiyor."));
                 watcher = callback;
 
                 // Close the gap between selecting the endpoint and subscribing for changes.
@@ -165,15 +167,15 @@ internal sealed class WasapiLoopback : IAudioCapture
             bool eventDriven = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063);
             AudioFormatConverter format = Initialize(endpoint, process, eventDriven, ref client);
             if (eventDriven)
-                Check(client!.SetEventHandle(ready.SafeWaitHandle.DangerousGetHandle()), "Ses bekleme olayı ayarlanamadı.");
+                Check(client!.SetEventHandle(ready.SafeWaitHandle.DangerousGetHandle()), new LocalizedMessage("Could not set up the audio wait event.", "Ses bekleme olayı ayarlanamadı."));
 
             Guid captureIid = typeof(IAudioCaptureClient).GUID;
-            Check(client!.GetService(in captureIid, out var captureService), "Ses yakalama arabirimi açılamadı.");
+            Check(client!.GetService(in captureIid, out var captureService), new LocalizedMessage("Could not open the audio capture interface.", "Ses yakalama arabirimi açılamadı."));
             reader = RequireInterface<IAudioCaptureClient>(captureService);
 
             mmcss = AvSetMmThreadCharacteristics("Pro Audio", out _);
             CheckTarget(watcher, process);
-            Check(client.Start(), "Ses akışı başlatılamadı.");
+            Check(client.Start(), new LocalizedMessage("Could not start the audio stream.", "Ses akışı başlatılamadı."));
             started = true;
             _running = true;
             _started.SetResult();
@@ -208,7 +210,7 @@ internal sealed class WasapiLoopback : IAudioCapture
 
     private static string EndpointId(IMMDevice endpoint)
     {
-        Check(endpoint.GetId(out nint id), "Ses çıkışı kimliği okunamadı.");
+        Check(endpoint.GetId(out nint id), new LocalizedMessage("Could not read the audio output ID.", "Ses çıkışı kimliği okunamadı."));
         return TakeString(id);
     }
 
@@ -218,7 +220,7 @@ internal sealed class WasapiLoopback : IAudioCapture
         if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
             name = name[..^4];
         if (name.Length == 0)
-            throw new AudioUnavailableException("Uygulamanın dosya adı boş.");
+            throw new AudioUnavailableException(new LocalizedMessage("Enter an app file name.", "Uygulamanın dosya adı boş."));
 
         Process[] matches = Process.GetProcessesByName(name);
         try
@@ -238,7 +240,7 @@ internal sealed class WasapiLoopback : IAudioCapture
                     handle.Dispose();
                     if (error is 87 or 1168)
                         continue;
-                    throw new AudioUnavailableException($"{executable} işlemi izlenemiyor.", new Win32Exception(error));
+                    throw new AudioUnavailableException(new LocalizedMessage($"Could not monitor {executable}.", $"{executable} işlemi izlenemiyor."), new Win32Exception(error));
                 }
 
                 var target = new TargetProcess(process.Id, handle);
@@ -246,7 +248,7 @@ internal sealed class WasapiLoopback : IAudioCapture
                     return target;
                 target.Dispose();
             }
-            throw new AudioUnavailableException($"{executable} çalışmıyor.");
+            throw new AudioUnavailableException(new LocalizedMessage($"{executable} is not running.", $"{executable} çalışmıyor."));
         }
         finally
         {
@@ -260,13 +262,13 @@ internal sealed class WasapiLoopback : IAudioCapture
         if (watcher?.Changed == true)
             throw new AudioUnavailableException(EndpointChanged);
         if (process?.WaitOne(0) == true)
-            throw new AudioUnavailableException("Uygulama kapandı. Ses yakalama durdu.");
+            throw new AudioUnavailableException(new LocalizedMessage("The app closed. Audio capture stopped.", "Uygulama kapandı. Ses yakalama durdu."));
     }
 
     private static unsafe AudioFormatConverter Initialize(IMMDevice? endpoint, TargetProcess? process,
         bool eventDriven, ref IAudioClient? client)
     {
-        const string error = "Ses yakalama biçimi ayarlanamadı.";
+        LocalizedMessage error = new LocalizedMessage("Could not set the audio capture format.", "Ses yakalama biçimi ayarlanamadı.");
         uint flags = Loopback | (eventDriven ? EventCallback : 0);
         WaveFormat format = new(WaveFormat.Float, 2, AudioFormatConverter.OutputRate, 32);
         client = endpoint is not null ? Activate<IAudioClient>(endpoint) : ActivateProcess(process!.Id);
@@ -314,7 +316,7 @@ internal sealed class WasapiLoopback : IAudioCapture
 
     private static unsafe IAudioClient ActivateProcess(int pid)
     {
-        const string error = "Uygulama sesi yakalama arabirimi açılamadı.";
+        LocalizedMessage error = new LocalizedMessage("Could not open the app audio capture interface.", "Uygulama sesi yakalama arabirimi açılamadı.");
         var parameters = new ProcessActivation { Type = 1, ProcessId = (uint)pid, Mode = 0 };
         var variant = new BlobVariant { Type = 65, Size = (uint)sizeof(ProcessActivation), Data = (nint)(&parameters) };
         var callback = new ActivationCompletion();
@@ -325,7 +327,7 @@ internal sealed class WasapiLoopback : IAudioCapture
             Guid iid = typeof(IAudioClient).GUID;
             Check(ActivateAudioInterfaceAsync(@"VAD\Process_Loopback", in iid, in variant, completion, out operation), error);
             if (!callback.Completed.Task.Wait(TimeSpan.FromSeconds(5)))
-                throw new AudioUnavailableException("Uygulama sesi yakalama isteği zaman aşımına uğradı.");
+                throw new AudioUnavailableException(new LocalizedMessage("App audio capture timed out.", "Uygulama sesi yakalama isteği zaman aşımına uğradı."));
 
             object result = Marshal.GetObjectForIUnknown(operation);
             try
