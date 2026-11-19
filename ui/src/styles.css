@@ -229,7 +229,7 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 2px; }
 .progress > span { display: block; height: 100%; background: var(--accent); }
 
 /* checkbox: small square */
-.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; position: relative; }
 .check input { position: absolute; opacity: 0; pointer-events: none; }
 .check .box { width: 14px; height: 14px; border: 1px solid var(--line-strong); border-radius: 3px; display: grid; place-items: center; }
 .check input:checked + .box { background: var(--accent); border-color: var(--accent); }
@@ -240,7 +240,7 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 2px; }
 
 /* toggle switch row */
 .toggle, .setting-row { display: flex; align-items: center; gap: 16px; padding: 9px 0; border-top: 1px solid var(--line); cursor: default; }
-.toggle { cursor: pointer; }
+.toggle { cursor: pointer; position: relative; }
 .toggle:first-of-type, h2 + .toggle, h2 + .setting-row { border-top: 0; }
 .toggle-text { display: grid; gap: 1px; margin-right: auto; min-width: 0; }
 .toggle input { position: absolute; opacity: 0; pointer-events: none; }
