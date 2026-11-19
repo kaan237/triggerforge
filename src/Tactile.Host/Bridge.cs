@@ -1,9 +1,11 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using Tactile.Core;
 using Tactile.Core.Integration;
 using Tactile.Core.Logging;
+using Tactile.Core.Updates;
 using Tactile.Device.DualSense;
 using Tactile.Drivers;
 using Tactile.Input.Windows;
@@ -22,17 +24,20 @@ internal sealed class Bridge
     private readonly Control _owner;
     private readonly Action<string> _postRaw;
     private readonly AppPaths _paths;
+    private readonly UpdateService _updates;
     private readonly List<string> _queued = [];
     private OutputState? _lastOutput;
     private HapticStatus? _lastHaptics;
+    private UpdateStatus? _lastUpdate;
     private bool _ready;
 
-    public Bridge(AppCore core, Control owner, Action<string> postRaw, AppPaths paths)
+    public Bridge(AppCore core, Control owner, Action<string> postRaw, AppPaths paths, UpdateService updates)
     {
         _core = core;
         _owner = owner;
         _postRaw = postRaw;
         _paths = paths;
+        _updates = updates;
     }
 
     public bool Ready => _ready;
@@ -43,6 +48,8 @@ internal sealed class Bridge
     /// <summary>The UI requested controller restoration. Raised on the UI thread.</summary>
     public event Action? RestoreRequested;
 
+    public event Action? UpdateStarted;
+
     /// <summary>The page is going away; hold posts until the next hello.</summary>
     public void Detach()
     {
@@ -51,7 +58,7 @@ internal sealed class Bridge
         _core.MappingPaused = false;
     }
 
-    public void Handle(string json)
+    public void Handle(string json, bool appSource)
     {
         string? type = null;
         try
@@ -64,6 +71,12 @@ internal sealed class Bridge
             }
 
             type = m.TryGetProperty("type", out JsonElement t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+            if (type?.StartsWith("update.", StringComparison.Ordinal) == true && (!appSource || !_ready))
+            {
+                Log.Info("Ignored an update message before hello or from outside the application page.");
+                return;
+            }
+
             Dispatch(type, m);
         }
         catch (Exception e)
@@ -86,6 +99,7 @@ internal sealed class Bridge
                 _ready = true;
                 PostSettings();
                 PostStatus();
+                PostUpdateStatus(force: true);
                 _lastOutput = null;
                 PostOutputIfChanged();
                 PostProfiles();
@@ -176,6 +190,29 @@ internal sealed class Bridge
 
             case "settings.save":
                 SaveSettings(Read<AppSettings>(m, "settings"));
+                break;
+
+            case "update.check":
+                _ = _updates.CheckAsync();
+                break;
+
+            case "update.download":
+                _ = _updates.DownloadAsync();
+                break;
+
+            case "update.install":
+                // The elevation prompt must run outside the WebView2 message event.
+                _owner.BeginInvoke(new Action(async () =>
+                {
+                    if (await _updates.InstallAsync(StartInstaller))
+                    {
+                        UpdateStarted?.Invoke();
+                    }
+                }));
+                break;
+
+            case "update.openPage":
+                OpenUpdatePage();
                 break;
 
             case "logs.export":
@@ -527,6 +564,58 @@ internal sealed class Bridge
         }
     }
 
+    private static void StartInstaller(string path)
+    {
+        using Process? installer = Process.Start(new ProcessStartInfo(path)
+        {
+            UseShellExecute = true,
+            Verb = "runas",
+            Arguments = "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /RELAUNCH",
+        });
+        if (installer is null)
+        {
+            throw new IOException("The shell did not start the installer.");
+        }
+    }
+
+    private void OpenUpdatePage()
+    {
+        try
+        {
+            using Process? browser = Process.Start(new ProcessStartInfo(UpdateKey.ReleasesPage) { UseShellExecute = true });
+        }
+        catch (Win32Exception e)
+        {
+            Log.Warn($"Could not open the releases page (network, Windows error {e.NativeErrorCode}).");
+            PostError(Text.Pick("Could not open the releases page.", "Sürümler sayfası açılamadı."));
+        }
+    }
+
+    public void PostUpdateStatus(bool force = false)
+    {
+        UpdateStatus status = _updates.Status;
+        if (!_ready || (!force && status == _lastUpdate))
+        {
+            return;
+        }
+
+        _lastUpdate = status;
+        Post(new
+        {
+            type = "update.status",
+            status.State,
+            status.Current,
+            status.Latest,
+            status.Notes,
+            status.Released,
+            status.Progress,
+            status.Portable,
+            status.Error,
+            status.Message,
+            status.LastCheck,
+        });
+    }
+
     public void PostStatus()
     {
         DualSenseController? c = _core.Controllers.Controller;
@@ -539,7 +628,7 @@ internal sealed class Bridge
             link = c?.Details.Link.ToString(),
             mac = c?.Details.MacAddress,
             firmware = c?.Details.Firmware?.Display,
-            version = Application.ProductVersion,
+            version = _updates.Status.Current,
             activeProfileId = _core.ActiveProfile.Id,
             activeReason = _core.ActiveReason,
             mapping = new { active = mapping.Active, paused = mapping.Paused, blockedBy = mapping.BlockedBy },

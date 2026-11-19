@@ -222,6 +222,8 @@ public static partial class Validation
                 .Take(5)
                 .ToArray(),
             RunAsAdminHint = s.RunAsAdminHint,
+            Updates = s.Updates ?? new(),
+            FirstRunDone = s.FirstRunDone,
             Integration = integration with
             {
                 UdpPort = Math.Clamp(integration.UdpPort, 1024, 65535),

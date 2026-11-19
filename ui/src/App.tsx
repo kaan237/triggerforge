@@ -1,7 +1,7 @@
 import { L } from "./i18n";
 import { useEffect, useState } from "react";
 import { inHost, type Profile, type Status } from "./host";
-import { deepEqual } from "./model";
+import { deepEqual, linkLabel } from "./model";
 import { Notices } from "./Notices";
 import { Emulation } from "./pages/Emulation";
 import { Haptics } from "./pages/Haptics";
@@ -14,6 +14,7 @@ import { Settings } from "./pages/Settings";
 import { Sticks } from "./pages/Sticks";
 import { Triggers } from "./pages/Triggers";
 import { AppProvider, useApp, useInput } from "./state";
+import { SetupWizard } from "./SetupWizard";
 
 // `keys`: profile fields edited on that page, for the unsaved mark in the rail.
 const sections = [
@@ -29,8 +30,6 @@ const sections = [
 ] as const satisfies readonly { id: string; label: string; keys: readonly (keyof Profile)[] }[];
 
 type SectionId = (typeof sections)[number]["id"] | "settings";
-
-const linkLabel: Record<string, string> = { Bluetooth: "Bluetooth", Usb: "USB", get Simulated() { return L("simulation", "simülasyon"); } };
 
 function mappingState(status: Status | null): string {
   const m = status?.mapping;
@@ -77,7 +76,7 @@ function StatusBar() {
 
 function Shell() {
   const [section, setSection] = useState<SectionId>("controller");
-  const { status, output, dirty, draft, draftBase, profiles, settings, telemetryDrafts } = useApp();
+  const { status, output, dirty, draft, draftBase, profiles, settings, update, telemetryDrafts } = useApp();
   const language = settings?.language ?? "en";
   const changed = (keys: readonly (keyof Profile)[]) => dirty && !!draft && !!draftBase && keys.some((k) => !deepEqual(draft[k], draftBase[k]));
   const telemetryChanged = profiles.some((p) => {
@@ -91,6 +90,10 @@ function Shell() {
     document.documentElement.style.setProperty("--accent", color && color.toUpperCase() !== "#000000" ? lift(color) : "#9a9ca1");
   }, [output, status]);
 
+  if (!settings) return null;
+  if (!settings.firstRunDone) return <><SetupWizard settings={settings} /><Notices /></>;
+
+  const updateReady = update?.state === "available" || update?.state === "ready";
   return (
     <div className="shell">
       <nav className="rail">
@@ -108,6 +111,7 @@ function Shell() {
         <div className="rail-foot">
           <button className={section === "settings" ? "active" : ""} onClick={() => setSection("settings")}>
             {L("Settings", "Ayarlar")}
+            {updateReady && <span className="tag accent update-badge">{L("Update", "Güncelleme")}</span>}
           </button>
           <span className="version">{inHost ? `v${status?.version ?? "…"}` : L("browser preview", "tarayıcı önizleme")}</span>
         </div>

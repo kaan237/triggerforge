@@ -43,7 +43,7 @@ Referans kodların lisansı:
 | DS5Dongle | MIT | Pico firmware |
 | Linux hid-playstation | GPL-2.0 | Rapor yapıları |
 
-**Lisans kararı (2026-11-18): kapalı kaynak** (`LICENSE`: All rights reserved).
+**Lisans kararı:** 2026-11-18'de kapalı kaynak; **2026-11-19'da GPL-3.0-or-later** ile açık kaynak yapıldı (`LICENSE`), repo `kaan237/triggerforge` public.
 
 **Kural: referans projelerden hiç kod alınmaz; her satır sıfırdan yazılır.** Referanslardan yalnız **protokol bilgisi** alınır: byte offsetleri, rapor ID'leri, CRC seed'leri, tetik bit düzeni, USB descriptor değerleri, paket zamanlaması. Bunlar donanımın nasıl çalıştığına dair gerçekler; telif konusu değil, atıf gerektirmez.
 
@@ -415,6 +415,15 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 - Testler 549/549 (üç kez arka arkaya). Çıktılar: `artifacts/TriggerForge-0.7.0-setup.exe` (40,9 MB) ve `-portable.zip` (49 MB), imzalayan `CN=Wiaus`. Windows imzayı "güvenilmeyen kök" diye gösterir (kendinden imzalı); SmartScreen uyarısı sürer.
 - Kalan: installer'ı kurup kaldırma denemesi ve `uninstall-check.ps1` (KH), tepsi metinlerinin dil değişince değişmesi (uygulama açıkken), simge dosyası (exe'nin kendi simgesi yok; tepsi simgesi çalışırken çiziliyor).
 
+
+**Faz 7b sonucu (2026-11-19, 0.8.0)**
+- Sözleşme `docs/contract-phase7b.md`: A (C# güncelleyici) ve B (arayüz) aynı anda Codex'te; C (yayın aracı, installer, betikler) elle.
+- Güncelleme: `github.com/kaan237/triggerforge/releases/latest/download/manifest.json` + `.sig`. ECDSA P-256 imzası, public anahtar uygulamada sabit (`UpdateKey.cs`); özel anahtar KH'nin Windows anahtar deposunda ("TriggerForge update signing"). Yönlendirmeler elle izleniyor, her adımda yalnız `github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com` ve https/443. Boyut sınırları, sürüm yalnız ileri, varlık adresi ve adı sürüme bağlı, indirmede boyut + SHA-256 + Wiaus imzacı kontrolü. Kurulu kopya installer'ı `/SILENT … /RELAUNCH` ile yönetici izniyle başlatıp kapanır; installer uygulamanın kapanmasını 30 sn bekler ve bitince uygulamayı normal kullanıcı olarak açar. Portable kopya yalnız sürümler sayfasını açar. Açılıştan 60 sn sonra ve 24 saatte bir otomatik denetim (Ayarlar'dan kapatılabilir).
+- İlk açılış sihirbazı: Hoş geldin + dil, controller bağlama, isteğe bağlı sürücüler, test (canlı giriş, ışık, titreşim, R2), bitiş. Atlanabilir, Ayarlar'dan yeniden başlatılabilir.
+- Yayın: `tools/Tactile.Tools.Release` (keygen, pubkey, backup, manifest, verify) ve `build/release.ps1` (paket, manifest imzası, uygulamanın anahtarıyla doğrulama, GitHub sürümü; var olan sürümün üstüne yazmaz).
+- Açık kaynak: GPL-3.0-or-later; repo `kaan237/tactile` → `kaan237/triggerforge` adıyla public (geçmiş korunarak; geçmişte sır, kişisel e-posta, gerçek MAC yok, kontrol edildi).
+- İnceleme: indirme imzalı boyutu aşınca hemen durmuyordu; sessiz güncellemede uygulama henüz kapanmamışsa installer duruyordu (AppMutex → bekleyen kontrol). İkisi düzeltildi. Testler 580/580; arayüzde sihirbaz ve güncelleme bölümü iki dilde simülasyonla denendi.
+
 ---
 
 ### Faz 8 — DualSense Edge ve çoklu kontrolcü (1-2 hafta)
@@ -435,13 +444,13 @@ Faz 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse: P
 
 ## 5. Açık sorular (fazı gelince cevaplanacak)
 
-1. ~~Lisans~~ → **kapalı kaynak** kararı verildi (2026-11-18), bölüm 1.
+1. ~~Lisans~~ → önce kapalı kaynak (2026-11-18), sonra **GPL-3.0-or-later** (2026-11-19), bölüm 1.
 2. ~~UI~~ → **WebView2 + React** kararı verildi (2026-11-18), bölüm 2 ve 2b.
 3. BT'de controller mikrofonunun sanal cihaza aktarılması mümkün mü? (Faz 5b)
 4. Eklenti dili: C# DLL mi, betik mi? (Faz 6)
 5. ~~Uygulama adı~~ → **TriggerForge** (2026-11-19), Faz 7 kararları.
 6. ~~İmzalama~~ → kendi sertifikamız **Wiaus** (2026-11-19), Faz 7 kararları.
-7. Açık kaynak lisansı (Faz 7 sonu): kapalı kaynak kararı Faz 7 bitince değişecek.
+7. ~~Açık kaynak lisansı~~ → **GPL-3.0-or-later** (2026-11-19): değiştirilmiş sürümler de aynı lisansla, kaynağıyla ve telif bildirimi korunarak dağıtılmak zorunda.
 
 ## 3b. Faz sırası ve paralellik
 

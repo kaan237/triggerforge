@@ -2,7 +2,7 @@ import { L } from "./i18n";
 // Browser-only stand-in for the host. Keeps profiles and settings in memory and fakes
 // a controller so every screen can be used without hardware.
 
-import type { Action, AppSettings, AudioApp, Binding, DriverKind, DriverState, EmulationStatus, HapticStatus, HostMessage, Output, Profile, TelemetryConfig, TelemetryRule, TelemetryValues, TriggerConfig, UdpStatus } from "./host";
+import type { Action, AppSettings, AudioApp, Binding, DriverKind, DriverState, EmulationStatus, HapticStatus, HostMessage, Output, Profile, TelemetryConfig, TelemetryRule, TelemetryValues, TriggerConfig, UdpStatus, UpdateStatus } from "./host";
 import {
   clone,
   defaultBinding,
@@ -112,6 +112,15 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     controllerDefaults: { "A0:AB:51:12:34:56": profiles[0].id },
   });
   settings.integration = { ...settings.integration, udpEnabled: true, forzaEnabled: true };
+  const previewOptions = new URLSearchParams(window.location.search);
+  const nextVersion = "0.9.0";
+  let failNextCheck = previewOptions.get("update") === "error";
+  let update: UpdateStatus = {
+    type: "update.status", state: "idle", current: "0.8.0",
+    latest: null, notes: null, released: null, progress: null,
+    portable: previewOptions.get("portable") === "1",
+    error: null, message: null, lastCheck: null,
+  };
   let udpPackets = 3;
   let udpLastPacket = performance.now();
   let udpHolding = true;
@@ -160,14 +169,58 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       link: "Simulated",
       mac: "A0:AB:51:12:34:56",
       firmware: "0x0430",
-      version: "dev",
+      version: update.current,
       activeProfileId: activeId,
       activeReason,
       mapping: { active: active().mapping.enabled && !mappingPaused, paused: mappingPaused, blockedBy: null },
       elevated: false,
-      portable: false,
+      portable: update.portable,
     });
   const sendProfiles = () => emit({ type: "profiles", list: clone(profiles), activeId });
+
+  function sendUpdate() {
+    emit({
+      ...update,
+      notes: update.latest ? L("Improved controller setup and update checks.", "Kontrolcü kurulumu ve güncelleme denetimi iyileştirildi.") : null,
+      message: update.error === "network" ? L("Could not check for updates. Check your connection.", "Güncellemeler denetlenemedi. Bağlantınızı kontrol edin.") : null,
+    });
+  }
+
+  function setUpdate(patch: Partial<Omit<UpdateStatus, "type">>) {
+    update = { ...update, ...patch };
+    sendUpdate();
+  }
+
+  function checkUpdate() {
+    if (update.state === "checking" || update.state === "downloading") return;
+    setUpdate({ state: "checking", latest: null, released: null, progress: null, error: null });
+    window.setTimeout(() => {
+      const lastCheck = new Date().toISOString();
+      if (failNextCheck) {
+        failNextCheck = false;
+        setUpdate({ state: "error", error: "network", lastCheck });
+      } else if (update.current === nextVersion) {
+        setUpdate({ state: "upToDate", lastCheck });
+      } else {
+        setUpdate({ state: "available", latest: nextVersion, released: "2026-12-01", lastCheck });
+      }
+    }, 600);
+  }
+
+  function downloadUpdate() {
+    if (update.state !== "available" || update.portable) return;
+    let progress = 0;
+    setUpdate({ state: "downloading", progress });
+    const download = window.setInterval(() => {
+      progress += 0.25;
+      if (progress < 1) {
+        setUpdate({ progress });
+      } else {
+        window.clearInterval(download);
+        setUpdate({ state: "ready", progress: null });
+      }
+    }, 250);
+  }
 
   function sendIntegration() {
     const s = settings.integration;
@@ -267,6 +320,8 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       brightness: { high: 0, medium: 1, low: 2 }[p.lightbar.brightness],
       playerLeds: ledMask(p.playerLeds),
       micLed: { off: 0, on: 1, pulse: 2 }[p.micLed],
+      rumbleLeft: 0,
+      rumbleRight: 0,
       leftTrigger: (preview.left ?? p.triggers.left).mode,
       rightTrigger: (preview.right ?? p.triggers.right).mode,
       ...overrides,
@@ -365,6 +420,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         sendEmulation();
         sendIntegration();
         sendHaptics(true);
+        sendUpdate();
         timer ??= window.setInterval(simTick, 33);
         return;
 
@@ -448,6 +504,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         return;
       case "settings.save": {
         const before = settings.integration;
+        const language = settings.language;
         settings = normalizeSettings(m.settings as AppSettings);
         const after = settings.integration;
         if (after.udpEnabled && (!before.udpEnabled || before.udpPort !== after.udpPort)) {
@@ -457,10 +514,28 @@ export function createSimulator(emit: (m: HostMessage) => void) {
           udpFormat = after.dsx ? "dsx" : "native";
         }
         emit({ type: "settings", settings: clone(settings) });
+        if (language !== settings.language) sendUpdate();
         sendEmulation();
         sendIntegration();
         return;
       }
+      case "update.check":
+        checkUpdate();
+        return;
+      case "update.download":
+        downloadUpdate();
+        return;
+      case "update.install":
+        if (update.state === "ready" && update.latest && !update.portable) {
+          setUpdate({ state: "upToDate", current: update.latest, latest: null, released: null });
+          status();
+        }
+        return;
+      case "update.openPage":
+        if (update.state === "available" && update.portable) {
+          emit({ type: "notice", kind: "info", message: L("The download page is unavailable in preview.", "Önizlemede indirme sayfası açılmaz.") });
+        }
+        return;
       case "integration.status":
         sendIntegration();
         return;
@@ -525,7 +600,10 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         break;
       case "reset":
         overrides = {};
-        output = { ...output, rumbleLeft: 0, rumbleRight: 0 };
+        preview.left = null;
+        preview.right = null;
+        udpHolding = false;
+        sendIntegration();
         break;
       default:
         return;

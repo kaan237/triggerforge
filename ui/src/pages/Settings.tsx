@@ -6,6 +6,7 @@ import { deepEqual } from "../model";
 import { Outputs } from "../Outputs";
 import { useApp, useInput } from "../state";
 import { PageHead, Segmented, Toggle } from "../ui";
+import { Updates } from "./Updates";
 
 function NumberField({ label, value, min, max, step = 1, suffix, onChange, hint }: { label: string; value: number; min: number; max: number; step?: number; suffix?: string; hint?: string; onChange: (v: number) => void }) {
   return (
@@ -131,6 +132,11 @@ export function Settings() {
             <button className="button" onClick={() => send({ type: "logs.open" })}>{L("Open log folder", "Log klasörünü aç")}</button>
           </div>
           <div className="hint" role="status">{logResult}</div>
+          <div className="setting-row">
+            <button className="button" disabled={dirty} onClick={() => send({ type: "settings.save", settings: { ...settings, firstRunDone: false } })}>
+              {L("Run setup again", "Kurulumu yeniden başlat")}
+            </button>
+          </div>
         </section>
 
         <section className="settings-group">
@@ -197,6 +203,8 @@ export function Settings() {
             </button>
           </div>
         </section>
+
+        <Updates settings={draft.updates} onChange={(updates) => set({ updates })} />
 
         <section className="settings-group dev">
           <button className="disclosure" aria-expanded={dev} onClick={() => setDev(!dev)}>

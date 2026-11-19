@@ -20,7 +20,7 @@ const stateLabel: Record<DriverState, string> = {
 const modeLabel: Record<EmulationMode, string> = { get off() { return L("Off", "Kapalı"); }, xbox360: "Xbox 360", dualSense: "DualSense" };
 const audioLabel: Record<EmulationStatus["audio"], string> = { get off() { return L("Off", "Kapalı"); }, get ready() { return L("Ready", "Hazır"); }, get playing() { return L("Playing", "Oynatılıyor"); } };
 
-function DriverCard({ driver }: { driver: DriverStatus }) {
+export function DriverCard({ driver }: { driver: DriverStatus }) {
   const { installs } = useApp();
   const progress = installs[driver.kind];
   const running = progress !== undefined && !progress.done;
@@ -43,7 +43,7 @@ function DriverCard({ driver }: { driver: DriverStatus }) {
           </button>
         </div>
       )}
-      {progress && <p className={progress.done && !progress.ok ? "small warn driver-progress" : "small muted-text driver-progress"}>{progress.message}</p>}
+      {progress && <p role="status" className={progress.done && !progress.ok ? "small warn driver-progress" : "small muted-text driver-progress"}>{progress.message}</p>}
       {driver.kind === "usbIp" && driver.state !== "ready" && (
         <p className="hint">{L("USB 3 hubs briefly restart during setup. Your mouse and keyboard may disconnect momentarily.", "Kurulum sırasında USB 3 hub'ları kısa süre yeniden başlar; fare ve klavye bir an kopabilir.")}</p>
       )}

@@ -71,6 +71,7 @@ button:disabled { cursor: default; }
 .dirty-mark { width: 5px; height: 5px; border-radius: 50%; background: var(--warn); margin-left: auto; }
 .rail-foot { margin-top: auto; display: grid; gap: 8px; }
 .version { color: var(--faint); font-size: 12px; padding: 0 10px; font-variant-numeric: tabular-nums; }
+.update-badge { margin-left: auto; }
 
 main { display: grid; grid-template-rows: 44px 1fr; min-width: 0; min-height: 0; }
 
@@ -92,6 +93,13 @@ main { display: grid; grid-template-rows: 44px 1fr; min-width: 0; min-height: 0;
 
 .content { padding: 22px 28px 32px; overflow: auto; min-height: 0; }
 .page { animation: page-in 120ms ease-out; max-width: 1280px; }
+.setup-window { display: block; height: 100%; overflow: auto; padding: clamp(16px, 5vw, 48px); }
+.setup-window .setup-panel { max-width: 720px; margin: 0 auto; padding: clamp(16px, 4vw, 36px); overflow: auto; }
+.setup-brand { font-size: 16px; font-weight: 600; }
+.setup-panel h1 { margin: 0 0 16px; }
+.setup-panel .dot { display: inline-block; }
+.setup-actions { flex-wrap: wrap; }
+.setup-footer { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line); }
 @keyframes page-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (max-width: 1100px) {
@@ -492,6 +500,10 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 2px; }
 @media (max-width: 1100px) { .settings-grid { grid-template-columns: 1fr; } }
 .settings-group { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 14px 16px 6px; min-width: 0; }
 .settings-group h2 { margin-bottom: 4px; }
+.update-state { padding: 8px 0; }
+.update-state p { margin: 0 0 8px; }
+.update-state progress { display: block; width: 100%; accent-color: var(--accent); }
+.update-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
 .settings-group .toggle-text > span:first-child, .setting-row > span:first-child { font-size: 13px; }
 .number-field { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .number-field input { width: 76px; text-align: right; font-variant-numeric: tabular-nums; }

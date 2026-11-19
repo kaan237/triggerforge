@@ -1,6 +1,8 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using Tactile.Core;
 using Tactile.Core.Logging;
+using Tactile.Core.Updates;
 using Tactile.Device.DualSense;
 using Tactile.Drivers;
 using Tactile.Emulation;
@@ -18,6 +20,9 @@ internal sealed class TactileApp : ApplicationContext
     private const int ErrorCancelled = 1223;
 
     private readonly AppCore _core;
+    private readonly UpdateService _updates;
+    private readonly Stopwatch _uptime = Stopwatch.StartNew();
+    private TimeSpan _nextAutomaticCheck = TimeSpan.FromSeconds(60);
     private readonly Glyph _smallGlyph = new(SystemInformation.SmallIconSize.Width);
     private readonly Glyph _largeGlyph = new(SystemInformation.IconSize.Width);
     private readonly MainWindow _window;
@@ -38,7 +43,8 @@ internal sealed class TactileApp : ApplicationContext
         (DriverPlatform? drivers, IUsbIpServer? server) = StartEmulation(paths.DataDirectory);
         _core = new AppCore(paths.DataDirectory, platform: WindowsInputPlatform.Create(),
             drivers: drivers, server: server, portable: paths.Portable);
-        _window = new MainWindow(_core, _largeGlyph.Icon, paths);
+        _updates = new UpdateService(paths, typeof(TactileApp).Assembly.GetName().Version!);
+        _window = new MainWindow(_core, _largeGlyph.Icon, paths, _updates);
         // A handle now, so core events can be marshalled even while the window was never shown.
         _ = _window.Handle;
         _window.FormClosing += OnWindowClosing;
@@ -59,6 +65,9 @@ internal sealed class TactileApp : ApplicationContext
         _core.ShowAppRequested += OnShowAppRequested;
         _window.Bridge.RestartElevatedRequested += RestartElevated;
         _window.Bridge.RestoreRequested += RestoreController;
+        _window.Bridge.UpdateStarted += Exit;
+        _updates.Changed += OnUpdateChanged;
+        _updates.Notice += _window.Bridge.PostNotice;
         if (_core.Emulation is { } emulation)
         {
             emulation.Changed += OnEmulationChanged;
@@ -68,6 +77,8 @@ internal sealed class TactileApp : ApplicationContext
         _inputTimer.Start();
         _emulationTimer.Tick += (_, _) =>
         {
+            CheckForUpdatesAutomatically();
+            _window.Bridge.PostUpdateStatus();
             if (_window.OnScreen)
             {
                 _window.Bridge.PostEmulation();
@@ -226,6 +237,18 @@ internal sealed class TactileApp : ApplicationContext
 
     private void OnShowAppRequested() => Ui(ShowWindow);
 
+    private void CheckForUpdatesAutomatically()
+    {
+        TimeSpan elapsed = _uptime.Elapsed;
+        if (elapsed >= _nextAutomaticCheck && _core.Settings.Current.Updates.AutoCheck && !_updates.Busy)
+        {
+            _nextAutomaticCheck = elapsed + TimeSpan.FromHours(24);
+            _ = _updates.CheckAsync();
+        }
+    }
+
+    private void OnUpdateChanged() => _window.Bridge.PostUpdateStatus(force: true);
+
     private void RestartElevated()
     {
         if (_exiting)
@@ -261,6 +284,10 @@ internal sealed class TactileApp : ApplicationContext
         UpdateTrayStatus();
         _window.Bridge.PostEmulation();
         _window.Bridge.PostHapticsIfChanged();
+        if (_updates.Status.State != UpdateState.Downloading)
+        {
+            _window.Bridge.PostUpdateStatus();
+        }
     });
 
     private void OnNotice(Notice n) => Ui(() =>
@@ -340,6 +367,10 @@ internal sealed class TactileApp : ApplicationContext
         _restoreWait.Unregister(null);
         _inputTimer.Stop();
         _emulationTimer.Stop();
+        _window.Bridge.UpdateStarted -= Exit;
+        _updates.Changed -= OnUpdateChanged;
+        _updates.Notice -= _window.Bridge.PostNotice;
+        _updates.Dispose();
         if (_core.Emulation is { } emulation)
         {
             emulation.Changed -= OnEmulationChanged;
@@ -368,6 +399,7 @@ internal sealed class TactileApp : ApplicationContext
         {
             _inputTimer.Dispose();
             _emulationTimer.Dispose();
+            _updates.Dispose();
             _restoreSignal.Dispose();
             _restoredSignal.Dispose();
             // No-op after Exit; covers the loop ending some other way (session end).

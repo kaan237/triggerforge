@@ -13,7 +13,6 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
 MinVersion=10.0.17763
-AppMutex=Local\TriggerForge.Instance
 RestartApplications=no
 UninstallDisplayIcon={app}\TriggerForge.exe
 OutputDir=..\artifacts
@@ -40,6 +39,8 @@ en.MissingWebView=TriggerForge requires the Microsoft Edge WebView2 Runtime. Dow
 tr.MissingWebView=TriggerForge için Microsoft Edge WebView2 Runtime gerekiyor. https://developer.microsoft.com/microsoft-edge/webview2/ adresinden indirebilirsiniz. Kurulum devam edecek.
 en.RestoreFailed=Controller recovery failed or timed out. Run TriggerForge — Restore controller from Start, then try uninstalling again.
 tr.RestoreFailed=Kontrolcü geri getirilemedi veya işlem zaman aşımına uğradı. Başlat menüsünden TriggerForge — Kontrolcüyü geri getir seçeneğini çalıştırıp kaldırmayı tekrar deneyin.
+en.AppRunning=TriggerForge is running. Close it from its tray menu, then click OK. Cancel stops.
+tr.AppRunning=TriggerForge çalışıyor. Tepsi menüsünden kapatıp Tamam'a basın. İptal işlemi durdurur.
 en.RestoreFailedAsk=Controller recovery failed or timed out. The controller may stay hidden from other apps until HidHide's list is cleared.%n%nUninstall anyway?
 tr.RestoreFailedAsk=Kontrolcü geri getirilemedi veya işlem zaman aşımına uğradı. HidHide listesi temizlenene kadar kontrolcü diğer uygulamalardan gizli kalabilir.%n%nYine de kaldırılsın mı?
 en.RemoveData=Also remove settings and profiles? Local logs and WebView2 data will also be deleted for this Windows account.
@@ -62,6 +63,11 @@ Name: "{commonprograms}\TriggerForge"; Filename: "{app}\TriggerForge.exe"; Worki
 Name: "{commonprograms}\{cm:RestoreShortcut}"; Filename: "{app}\TriggerForge.exe"; Parameters: "--restore"; WorkingDir: "{app}"
 Name: "{commondesktop}\TriggerForge"; Filename: "{app}\TriggerForge.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
+[Run]
+Filename: "{app}\TriggerForge.exe"; Description: "{cm:LaunchProgram,TriggerForge}"; Flags: nowait postinstall skipifsilent runasoriginaluser
+; After an update the app passes /RELAUNCH; it starts again as the signed-in user, not elevated.
+Filename: "{app}\TriggerForge.exe"; Flags: nowait runasoriginaluser; Check: RelaunchRequested
+
 [Code]
 const
   RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
@@ -71,6 +77,56 @@ const
 
 var
   DriverRestartNeeded: Boolean;
+
+const
+  AppMutexName = 'Local\TriggerForge.Instance';
+
+{ The app exits right after starting an update, so a silent update first waits for it.
+  Interactive setups and uninstalls ask the user to close it instead. }
+function WaitForApp(Silent: Boolean): Boolean;
+var
+  Waited: Integer;
+begin
+  Result := True;
+  Waited := 0;
+  while CheckForMutexes(AppMutexName) do begin
+    if Silent then begin
+      if Waited >= 30000 then begin
+        Log('TriggerForge did not exit within 30 s.');
+        Result := False;
+        exit;
+      end;
+      Sleep(500);
+      Waited := Waited + 500;
+    end
+    else if MsgBox(CustomMessage('AppRunning'), mbError, MB_OKCANCEL) <> IDOK then begin
+      Result := False;
+      exit;
+    end;
+  end;
+end;
+
+function InitializeSetup: Boolean;
+begin
+  Result := WaitForApp(WizardSilent);
+end;
+
+function InitializeUninstall: Boolean;
+begin
+  Result := WaitForApp(UninstallSilent);
+end;
+
+function RelaunchRequested: Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  if not WizardSilent then
+    exit;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/RELAUNCH') = 0 then
+      Result := True;
+end;
 
 function WebViewInstalled(Root: Integer): Boolean;
 var
@@ -95,7 +151,7 @@ var
   ExitCode: Integer;
   Command: String;
 begin
-  { AppMutex requires the running instance to exit before this step. }
+  { WaitForApp has already made sure no instance is running. }
   Command := '-NoProfile -NonInteractive -Command "' +
     '$ErrorActionPreference = ''Stop''; ' +
     '$exe = [IO.Path]::GetFullPath(''TriggerForge.exe''); ' +

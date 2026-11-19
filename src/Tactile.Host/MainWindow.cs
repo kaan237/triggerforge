@@ -2,6 +2,7 @@ using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Tactile.Core;
 using Tactile.Core.Logging;
+using Tactile.Core.Updates;
 
 namespace Tactile.Host;
 
@@ -14,7 +15,7 @@ internal sealed class MainWindow : Form
     private readonly WebView2 _view = new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Background };
     private readonly AppPaths _paths;
 
-    public MainWindow(AppCore core, Icon icon, AppPaths paths)
+    public MainWindow(AppCore core, Icon icon, AppPaths paths, UpdateService updates)
     {
         _paths = paths;
         Text = "TriggerForge";
@@ -24,7 +25,7 @@ internal sealed class MainWindow : Form
         Size = new Size(1240, 780);
         StartPosition = FormStartPosition.CenterScreen;
         Controls.Add(_view);
-        Bridge = new Bridge(core, this, PostRaw, paths);
+        Bridge = new Bridge(core, this, PostRaw, paths, updates);
         Load += async (_, _) => await InitializeViewAsync();
     }
 
@@ -83,10 +84,16 @@ internal sealed class MainWindow : Form
         core.Settings.IsStatusBarEnabled = false;
         core.Settings.AreDevToolsEnabled = IsDev;
 
-        core.NavigationStarting += (_, _) => Bridge.Detach();
-        core.WebMessageReceived += (_, e) => Bridge.Handle(e.WebMessageAsJson);
-
         string? devUrl = Environment.GetEnvironmentVariable("TACTILE_UI_DEV");
+        var appUri = new Uri(string.IsNullOrEmpty(devUrl) ? $"https://{AppHost}/index.html" : devUrl);
+        core.NavigationStarting += (_, _) => Bridge.Detach();
+        core.WebMessageReceived += (_, e) =>
+        {
+            bool appSource = Uri.TryCreate(e.Source, UriKind.Absolute, out Uri? source) &&
+                Uri.Compare(source, appUri, UriComponents.SchemeAndServer, UriFormat.UriEscaped, StringComparison.OrdinalIgnoreCase) == 0;
+            Bridge.Handle(e.WebMessageAsJson, appSource);
+        };
+
         if (!string.IsNullOrEmpty(devUrl))
         {
             core.Navigate(devUrl);
@@ -95,6 +102,6 @@ internal sealed class MainWindow : Form
 
         string uiFolder = Path.Combine(AppContext.BaseDirectory, "ui");
         core.SetVirtualHostNameToFolderMapping(AppHost, uiFolder, CoreWebView2HostResourceAccessKind.DenyCors);
-        core.Navigate($"https://{AppHost}/index.html");
+        core.Navigate(appUri.AbsoluteUri);
     }
 }

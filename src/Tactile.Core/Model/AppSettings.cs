@@ -23,6 +23,13 @@ public sealed record AppSettings
     public bool RunAsAdminHint { get; init; }
     public EmulationSettings Emulation { get; init; } = new();
     public IntegrationSettings Integration { get; init; } = new();
+    public UpdateSettings Updates { get; init; } = new();
+    public bool FirstRunDone { get; init; }
+}
+
+public sealed record UpdateSettings
+{
+    public bool AutoCheck { get; init; } = true;
 }
 
 public sealed record IntegrationSettings

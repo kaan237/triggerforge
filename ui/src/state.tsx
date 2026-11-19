@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { send, subscribe, type AppSettings, type DriverKind, type DriverProgress, type EmulationStatus, type HapticStatus, type Input, type NoticeKind, type Output, type Profile, type Status, type TelemetryRule } from "./host";
+import { send, subscribe, type AppSettings, type DriverKind, type DriverProgress, type EmulationStatus, type HapticStatus, type Input, type NoticeKind, type Output, type Profile, type Status, type TelemetryRule, type UpdateStatus } from "./host";
 import { L, setLanguage } from "./i18n";
 import { clone, deepEqual, normalizeProfile, normalizeSettings } from "./model";
 
@@ -11,6 +11,7 @@ type AppState = {
   profiles: Profile[];
   activeId: string;
   settings: AppSettings | null;
+  update: UpdateStatus | null;
   emulation: EmulationStatus | null;
   haptics: HapticStatus | null;
   // Last install message per driver; cleared when a new install starts.
@@ -60,6 +61,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [activeId, setActiveId] = useState("");
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
   const [emulation, setEmulation] = useState<EmulationStatus | null>(null);
   const [haptics, setHaptics] = useState<HapticStatus | null>(null);
   const [installs, setInstalls] = useState<Partial<Record<DriverKind, DriverProgress>>>({});
@@ -115,6 +117,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         case "foreground":
           setRecent(m.recent);
+          break;
+        case "update.status":
+          setUpdate(m);
           break;
         case "emulation":
           setEmulation(m);
@@ -185,8 +190,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AppState>(
-    () => ({ status, output, profiles, activeId, settings, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, telemetryDrafts, setTelemetryDraft }),
-    [status, output, profiles, activeId, settings, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, telemetryDrafts, setTelemetryDraft],
+    () => ({ status, output, profiles, activeId, settings, update, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, telemetryDrafts, setTelemetryDraft }),
+    [status, output, profiles, activeId, settings, update, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, telemetryDrafts, setTelemetryDraft],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

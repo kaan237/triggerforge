@@ -298,9 +298,30 @@ export type AppSettings = {
   runAsAdminHint: boolean;
   emulation: EmulationSettings;
   integration: IntegrationSettings;
+  updates: UpdateSettings;
+  firstRunDone: boolean;
 };
 
+export type UpdateSettings = { autoCheck: boolean };
+
 // ---- host → UI ----
+
+export type UpdateState = "idle" | "checking" | "upToDate" | "available" | "downloading" | "ready" | "error";
+export type UpdateError = "network" | "untrustedHost" | "tooLarge" | "badSignature" | "badManifest" | "badFile" | "badSigner";
+
+export type UpdateStatus = {
+  type: "update.status";
+  state: UpdateState;
+  current: string;
+  latest: string | null;
+  notes: string | null;
+  released: string | null;
+  progress: number | null;
+  portable: boolean;
+  error: UpdateError | null;
+  message: string | null;
+  lastCheck: string | null;
+};
 
 export type Status = {
   type: "status";
@@ -369,6 +390,7 @@ export type HostMessage =
   | HapticStatus
   | { type: "audioApps"; apps: AudioApp[] }
   | DriverProgress
+  | UpdateStatus
   | { type: "error"; message: string };
 
 // ---- UI → host (Phase 2 additions; Phase 1 test messages stay loose) ----
@@ -383,6 +405,7 @@ export type UiMessage =
   | { type: "profile.export"; id: string }
   | { type: "trigger.preview"; side: "left" | "right"; config: TriggerConfig | null }
   | { type: "settings.save"; settings: AppSettings }
+  | { type: "update.check" | "update.download" | "update.install" | "update.openPage" }
   | { type: "logs.export" | "logs.open" }
   | { type: "gyro.calibrate" }
   | { type: "foreground.pick" }

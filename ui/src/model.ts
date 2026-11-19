@@ -136,6 +136,8 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     idleSleepMinutes: 15,
     lowBatteryWarnings: [20, 10],
     runAsAdminHint: false,
+    updates: { autoCheck: true },
+    firstRunDone: false,
     emulation: { enabled: true, hideController: true, audio: true, keepAudioDefaults: true, hapticBuffer: 64, speakerPacket: "single36" },
     integration: {
       udpEnabled: false, udpPort: 6969, dsx: true, dsxPortFile: true,
@@ -250,7 +252,15 @@ export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
   const d = defaultSettings();
   const emulation = { ...d.emulation, ...s.emulation };
   if (emulation.speakerPacket !== "single36") emulation.speakerPacket = d.emulation.speakerPacket;
-  return { ...d, ...s, language: s.language === "tr" ? "tr" : "en", controllerDefaults: { ...(s.controllerDefaults ?? {}) }, emulation, integration: { ...d.integration, ...s.integration } };
+  return {
+    ...d, ...s,
+    language: s.language === "tr" ? "tr" : "en",
+    controllerDefaults: { ...(s.controllerDefaults ?? {}) },
+    emulation,
+    integration: { ...d.integration, ...s.integration },
+    updates: { autoCheck: s.updates?.autoCheck !== false },
+    firstRunDone: s.firstRunDone === true,
+  };
 }
 
 export function clone<T>(v: T): T {
@@ -269,6 +279,8 @@ export function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 // ---- labels ----
+
+export const linkLabel: Record<string, string> = { Bluetooth: "Bluetooth", Usb: "USB", get Simulated() { return L("simulation", "simülasyon"); } };
 
 export const reasonLabel = (reason?: string): string => {
   if (!reason) return "—";
