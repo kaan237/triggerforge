@@ -369,7 +369,7 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 
 **Risk:** dış ağdan UDP komutu → yalnız loopback dinleme. **Geri alma:** entegrasyon kapalı anahtarı.
 
-**Faz 6 sonucu (2026-11-19, ilk sürüm kodu tamam, donanımda denenmedi)**
+**Faz 6 sonucu (2026-11-19, ilk sürüm kodu tamam, oyunsuz donanım testi geçti)**
 - Sözleşme `docs/contract-phase6.md` (3 iş + inceleme düzeltmesi, sırayla, her biri kontrol edilerek). Biçimler `docs/protocol-integrations.md`'de kendi cümlelerimizle: DSX UDP biçimi Paliverse/DualSenseX'in açık örneklerinden, Forza "Data Out" Forza Support'un resmî FH6 ve Forza Motorsport belgelerinden.
 - Plan denetimi düzeltmeleri uygulandı: öncelik sırası profil < UDP API < telemetri kuralları < oyunun kendi geri bildirimi < arayüz önizlemesi; DSX uyumu ilk sürüme alındı; port doluysa uyarı ve 5 sn'de bir yeniden deneme; UDP komutları program çalıştıramıyor (yalnız tetik, ışık, oyuncu LED, mikrofon LED, titreşim, profil seçimi).
 - UDP API (`127.0.0.1`, varsayılan 6969, kapalı başlar): kendi JSON biçimimiz ve DSX biçimi aynı soket üzerinde; DSX modları için `C:\Temp\DualSenseX\DualSenseX_PortNumber.txt` port dosyası; 16 KB / 32 komut / saniyede 500 paket sınırı; bozuk paket sayılıp atlanıyor; "sessiz kalınca bırak" ayarı.
@@ -377,7 +377,8 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 - Kural motoru: profil başına en çok 32 kural, "sinyal aralığı → tetik parametresi / ışık rengi (yanıp sönme) / oyuncu LED çubuğu / titreşim", hedef başına son etkin kural kazanır. Forza şablonu: frenle L2 direnci, ABS'de L2 titreşimi, devirle R2 direnci, patinajda R2 titreşimi, devirle ışık yeşil → kırmızı, devir LED çubuğu, kasiste titreşim.
 - Arayüz: **Entegrasyonlar** sayfası (UDP ve Forza kartları, canlı durum ve değerler, kural düzenleyici, "Forza şablonunu uygula", "Efektleri bırak"); tarayıcıda simülasyonla denendi. Test göndericisi `tools/integration-test/udptest.py` (native, dsx, garbage, forza).
 - Testler 536/536. Code-review high: 7 bulgu; 5'i düzeltildi (controller'a yazma ve profil seçimi dinleyici kilidi dışında, sıra numaralı katman yayını; bozuk DSX komutları sayılıyor; boşta 10 ms'de uyanma kalktı; arayüzdeki sıfırlama UDP durumunu da bırakıyor; gerçek DSX için port dosyası uyarısı), 1'i yanlış alarm, 1'i (iki dinleyicide ortak bağlanma kodu) bırakıldı.
-- Kalan (KH ile): uygulamada test göndericisiyle deneme, gerçek bir DSX modu, Forza'da Data Out ile deneme; DSX v3 (Steam) modlarının yeni alanları bilinmiyor; AC/ACC, F1, eklenti sistemi ve profil paylaşımı sonraki adım.
+- Donanım testi (2026-11-19, KH, Bluetooth, `udptest.py` ile): kendi biçimimiz (R2 silah direnci, kırmızı ışık, oyuncu LED'leri, cevapta pil ve bağlantı, 5 sn sonra profile dönüş), DSX biçimi (L2 direnç, R2 dörtnala, mavi ışık, oyuncu 3 düzeni, mikrofon LED'i açık ve yanıp sönme, DSX cevabı, sıfırlama), bozuk paketler (10 bozuk paket atlandı, uygulama açık kaldı, sonraki iyi pakete cevap geldi) ve sahte Forza Horizon verisi (durum "Veri geliyor (FH)", canlı değerler, Forza şablonuyla devirle R2 direnci, ışık yeşil → kırmızı ve en üst devirde yanıp sönme, devir LED çubuğu, frenle artan L2 direnci, ABS'de L2 titreşimi, veri kesilince profile dönüş) çalıştı.
+- Kalan: gerçek Forza (KH'de yok) ve gerçek bir DSX modu (KH'de yok) ile deneme; DSX v3 (Steam) modlarının yeni alanları bilinmiyor; AC/ACC, F1, eklenti sistemi ve profil paylaşımı sonraki adım.
 
 ---
 
@@ -450,6 +451,37 @@ Faz 0 → Faz 1 ─┬→ Faz 2 → Faz 3 ─┐
 | 10 | Düşük | Faz 7 | Nexo Corp imzası bu kişisel projeye otomatik bağlanmıştı | Açık soruya çevrildi |
 
 Bu düzeltmelerden sonra karar: **ONAYLANABİLİR**. Koşul: Faz 0'daki açık sorular 1-2 cevaplanmadan Faz 1'e geçilmez.
+
+## 8. Kalan işler (2026-11-19 durumu)
+
+Fazların sonuç bloklarından toplandı. Kod tarafında açık hata yok; kalanların çoğu **gerçek oyunla deneme**.
+
+### Önce: test oyunu bulmak
+Kabul ölçütlerinin çoğu gerçek oyun istiyor. KH'de şu an yalnız Ghost of Tsushima var (DualSense destekli). Gereken:
+- DualSense tetik ve haptik destekli **2 oyun daha** (ör. Returnal, Ratchet & Clank, Spider-Man, The Last of Us, Cyberpunk 2077, Alan Wake 2; ücretsiz deneme veya Game Pass yolu da olur).
+- Faz 6 için telemetri veren bir yarış oyunu (Forza Horizon 5/6 Steam sürümü, Forza Motorsport, F1, Assetto Corsa) ve bir DSX modu.
+
+### Faz bazında denenmemiş / kalan
+| Faz | Kalan | Nasıl kapanır |
+|---|---|---|
+| 0 | `tactile-capture` donanımda kullanılmadı | gerekirse bir rapor kaydı alınır; acil değil |
+| 1 | USB bağlantısı, yay ve makine tetik modları, BT yazma hız sınırı, PS/mic tuşu | controller kabloyla takılıp kısa deneme |
+| 2 | boşta uyku (BT kesme), Windows ile başlatma, tray balonları, gyro "hareketsiz" eşiği | 15 dk bekletme ve yeniden başlatma denemesi |
+| 3 | gerçek klavye/fare çıkışı ve oyunlarda davranış, mikrofon susturma, gyro eksen yönleri, kombinasyon kaydı, yönetici olarak yeniden başlatma | masaüstü + bir oyunda tuş atama denemesi |
+| 4 | gerçek oyunlarda tetik (Ghost of Tsushima + 2 oyun), 10 dk oyun içi gecikme ölçümü | test oyunu bulunca |
+| 5a | 30 dk kesintisiz koşu, Oyun ve Film modlarının karşılaştırması | bir film/oyun oturumu |
+| 5b | haptik destekli gerçek oyun, kablolu ile karşılaştırma, 30 dk koşu, oyun içi gecikme; seyrek hoparlör kopması (12 sn'de ~1), `0x39`'un çalışmaması; Bluetooth'tan mikrofon (ertelendi) | test oyunu + BT kuyruk incelemesi |
+| 6 | gerçek Forza ve gerçek DSX modu; DSX v3 alanları; AC/ACC, F1, eklenti sistemi, profil paylaşımı | yarış oyunu bulunca; diğerleri ihtiyaç oldukça |
+
+### Sıradaki fazlar
+- **Faz 7 — Dağıtım (1-2 hafta):** tek installer (uygulama + isteğe bağlı sürücü adımı + kaldırıcı), ilk açılış sihirbazı, kod imzalama, imzalı manifest + SHA-256 + host allowlist ile otomatik güncelleme, yerel log ve "logları dışa aktar", kurulumsuz hafif sürüm, `licenses.txt` (Opus, usbip-win2, HidHide, React). Başlamadan cevaplanacak: **uygulama adı** (açık soru 5) ve **imza kimliği** (açık soru 6: Nexo Corp sertifikası mı, ayrı kimlik mi). Kabul: temiz bir Windows 11 makinede kur → bağla → oyun → kaldır, kaldırınca HidHide listesi temiz.
+- **Faz 8 — DualSense Edge ve çoklu controller (1-2 hafta):** Edge arka kolları, Fn tuşu, controller içi profiller, tetik stop seviyeleri; aynı anda 2-4 controller, her birine ayrı profil, sanal cihaz ve oyuncu LED'i (UDP API'deki controller indeksi de burada anlam kazanır). Edge controller'ı gerekiyor.
+- **Faz 9 — Pico 2 W köprüsü (isteğe bağlı):** yalnız 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse.
+
+### Önerilen sıra
+1. Test oyunu bulununca Faz 4, 5b ve 6'nın oyun testleri tek oturumda (her biri için 30 dk koşu ve gecikme notu).
+2. Paralelde Faz 7'ye başlanabilir: oyun gerektirmiyor. Önce ad ve imza kararı.
+3. Faz 8 bir Edge controller veya ikinci bir DualSense elde olunca.
 
 ## 6. Kaynaklar
 
