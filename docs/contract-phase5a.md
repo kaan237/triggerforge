@@ -235,7 +235,7 @@ public sealed class OpusEncoder : IDisposable
 ```
 
 Settings: application `OPUS_APPLICATION_RESTRICTED_LOWDELAY`, bitrate 160000, VBR off
-(hard CBR), complexity 5. If a packet comes out shorter than 200 bytes, pad it to 200 with
+(hard CBR), complexity 10, signal music (raised from 5 after the 2026-11-19 hardware test). If a packet comes out shorter than 200 bytes, pad it to 200 with
 `opus_packet_pad`. Negative return codes become `AudioUnavailableException`.
 
 ### `SpeakerFeed`

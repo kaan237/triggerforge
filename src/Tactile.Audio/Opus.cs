@@ -11,6 +11,8 @@ public sealed partial class OpusEncoder : IDisposable
     private const int SetBitrate = 4002;
     private const int SetVbr = 4006;
     private const int SetComplexity = 4010;
+    private const int SetSignal = 4024;
+    private const int SignalMusic = 3002;
     private readonly EncoderHandle _encoder;
 
     public OpusEncoder()
@@ -27,7 +29,9 @@ public sealed partial class OpusEncoder : IDisposable
 
             Check(Control(encoder, SetBitrate, 160_000));
             Check(Control(encoder, SetVbr, 0));
-            Check(Control(encoder, SetComplexity, 5));
+            // Highest quality search and a music hint; the 200-byte frame size is fixed by the controller.
+            Check(Control(encoder, SetComplexity, 10));
+            Check(Control(encoder, SetSignal, SignalMusic));
             _encoder = encoder;
         }
         catch (Exception e) when (e is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
