@@ -394,6 +394,15 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 
 **Kabul ölçütü:** temiz bir Windows 11 makinede (VM değil, gerçek cihaz) installer → controller bağla → oyun → kaldır akışı sorunsuz; kaldırma sonrası HidHide gizleme listesi temiz.
 
+**Faz 7 kararları (2026-11-19, KH)**
+- **Ad: TriggerForge.** "DualSense" Sony markası olduğu için adda yok; aramada çıkmak için alt başlıkta geçer ("TriggerForge — DualSense PC control center"). Aramada çakışan ürün bulunmadı. Kod adı ve C# proje adları `Tactile.*` kalır; kullanıcının gördüğü ad, exe, kayıt defteri ve veri klasörü TriggerForge olur. Eski `%APPDATA%\Tactile` ayarları ilk açılışta taşınır.
+- **Dil: İngilizce + Türkçe.** Arayüzde ve çekirdek mesajlarında iki dil; varsayılan İngilizce; Ayarlar'da dil seçimi. Repo açıklaması ve README önce İngilizce, altında Türkçe.
+- **İmza: kendi sertifikamız "Wiaus".** `CN=Wiaus, O=Wiaus, C=TR`, kendinden imzalı, RSA 3072 / SHA-256, CurrentUser\My, 2031-11-19'a kadar geçerli, parmak izi `25C26195A82AC4EC3A5C57CF6B7D652939154655`. Exe, installer ve kaldırıcı bununla imzalanır. SmartScreen "bilinmeyen yayımcı" uyarısını kaldırmaz; bunun için ileride ücretli bir sertifika gerekir. Özel anahtar repoya girmez.
+- **Güncelleme: GitHub Releases.** Kaynak repo (`kaan237/tactile`) private kaldıkça release dosyaları dışarıdan indirilemediği için ayrı bir public repo (`kaan237/triggerforge`) açılır: yalnız release, README ve ekran görüntüleri. Her sürümde installer, portable zip ve `manifest.json`. Uygulama manifest imzasını gömülü ayrı bir anahtarla (kod imzasından bağımsız) doğrular, SHA-256'yı karşılaştırır, yalnız GitHub'ın kendi alan adlarından indirir.
+- **Açık kaynak: en sonda.** Faz 7 bitince kaynak public repoya taşınır ve lisans eklenir (bölüm 5, madde 1 o zaman güncellenir). Lisans kararı o adımda verilir.
+- **Test:** KH donanım testlerini kendisi yaptı; ikinci makine yok, Faz 7 kabulünde temiz makine şartı aranmaz. Kaldırma sonrası iz kontrolü bir betikle yapılır.
+- **Bölme:** 7a = ad, iki dil, log ve "logları dışa aktar", installer + kaldırıcı, portable, `licenses.txt`, imzalama. 7b = public repo, imzalı güncelleme, ilk açılış sihirbazı, açık kaynak geçişi.
+
 ---
 
 ### Faz 8 — DualSense Edge ve çoklu kontrolcü (1-2 hafta)
@@ -418,8 +427,9 @@ Faz 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse: P
 2. ~~UI~~ → **WebView2 + React** kararı verildi (2026-11-18), bölüm 2 ve 2b.
 3. BT'de controller mikrofonunun sanal cihaza aktarılması mümkün mü? (Faz 5b)
 4. Eklenti dili: C# DLL mi, betik mi? (Faz 6)
-5. Uygulama adı. (Faz 7'den önce)
-6. İmzalama: Nexo Corp sertifikası mı, ayrı bir kimlik mi? (Faz 7)
+5. ~~Uygulama adı~~ → **TriggerForge** (2026-11-19), Faz 7 kararları.
+6. ~~İmzalama~~ → kendi sertifikamız **Wiaus** (2026-11-19), Faz 7 kararları.
+7. Açık kaynak lisansı (Faz 7 sonu): kapalı kaynak kararı Faz 7 bitince değişecek.
 
 ## 3b. Faz sırası ve paralellik
 
