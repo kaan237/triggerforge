@@ -77,11 +77,13 @@ Both files are fetched from `UpdateKey.ManifestUrl` and `ManifestUrl + ".sig"`.
 - Download to `<local data>\updates\<version>\<name>` (`AppPaths` local root, i.e. next to
   logs; portable: `data\updates`), written to `.partial` then renamed. Old version folders
   are deleted when a check starts.
-- Installed copy: `install` runs the verified installer with `UseShellExecute = true`,
-  `Verb = "runas"`, arguments `/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS
-  /RELAUNCH`, then the app exits normally (emulation cleanup runs as on a normal exit). UAC
-  cancelled (1223) → state back to `ready`, notice "Update was cancelled." / "Güncelleme iptal
-  edildi.".
+- Installed copy: `install` runs the verified installer with `UseShellExecute = true` and
+  **no** `runas` (setup elevates itself and so keeps the signed-in user's token for the
+  relaunch; started elevated it relaunched the app as administrator, found in the 2026-11-19
+  install test), arguments `/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS
+  /RELAUNCH` (`/RELAUNCH` left out when the app itself runs elevated), then the app exits
+  normally. If the user declines setup's UAC prompt, the app stays closed and is started
+  again from Start.
 - Portable copy: never downloads or installs. State `available` carries `portable: true`; the
   UI offers to open `UpdateKey.ReleasesPage` (the only URL the app ever opens for updates).
 

@@ -9,3 +9,6 @@ artifacts/
 captures/*.bin
 *.log
 *.tsbuildinfo
+
+# Signing key backups (never committed)
+secrets/

@@ -590,10 +590,11 @@ internal sealed class Bridge
 
     private static void StartInstaller(string path)
     {
+        // No "runas": setup elevates itself and keeps the signed-in user's token, which it needs to
+        // relaunch the app unelevated. Started elevated, it would relaunch the app as administrator.
         using Process? installer = Process.Start(new ProcessStartInfo(path)
         {
             UseShellExecute = true,
-            Verb = "runas",
             // An elevated app has no unelevated token to hand down, so setup would relaunch it as
             // administrator; then the user starts it again from Start instead.
             Arguments = "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS" + (WindowsInputPlatform.IsElevated ? "" : " /RELAUNCH"),

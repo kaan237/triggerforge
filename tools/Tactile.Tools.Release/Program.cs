@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 //   keygen                      create the signing key once (Windows key store, current user)
 //   pubkey                      print the public key (SubjectPublicKeyInfo, base64)
 //   backup <file> <password>    write a password-encrypted PKCS#8 copy of the key
+//   restore <file> <password>   import such a copy into the key store (new PC)
 //   manifest <version> <dir> <notes-en> <notes-tr>
 //                               write <dir>/manifest.json and <dir>/manifest.json.sig
 //                               for TriggerForge-<version>-setup.exe and -portable.zip in <dir>
@@ -26,6 +27,7 @@ internal static class Program
                 ["keygen"] => KeyGen(),
                 ["pubkey"] => PubKey(),
                 ["backup", var file, var password] => Backup(file, password),
+                ["restore", var file, var password] => Restore(file, password),
                 ["manifest", var version, var dir, var en, var tr] => Manifest(version, dir, en, tr),
                 ["verify", var dir, var publicKey] => Verify(dir, publicKey),
                 _ => Usage(),
@@ -40,7 +42,7 @@ internal static class Program
 
     private static int Usage()
     {
-        Console.Error.WriteLine("usage: keygen | pubkey | backup <file> <password> | manifest <version> <dir> <notes-en> <notes-tr> | verify <dir> <pubkey>");
+        Console.Error.WriteLine("usage: keygen | pubkey | backup <file> <password> | restore <file> <password> | manifest <version> <dir> <notes-en> <notes-tr> | verify <dir> <pubkey>");
         return 2;
     }
 
@@ -68,6 +70,27 @@ internal static class Program
         var pbe = new PbeParameters(PbeEncryptionAlgorithm.Aes256Cbc, HashAlgorithmName.SHA256, 600_000);
         File.WriteAllBytes(file, key.ExportEncryptedPkcs8PrivateKey(password, pbe));
         Console.WriteLine($"Encrypted key written to {file}.");
+        return 0;
+    }
+
+    private static int Restore(string file, string password)
+    {
+        if (CngKey.Exists(KeyName))
+        {
+            Console.Error.WriteLine($"The key \"{KeyName}\" already exists; it is never replaced.");
+            return 1;
+        }
+
+        using var imported = ECDsa.Create();
+        imported.ImportEncryptedPkcs8PrivateKey(password, File.ReadAllBytes(file), out _);
+        ECParameters parameters = imported.ExportParameters(includePrivateParameters: true);
+        var creation = new CngKeyCreationParameters { ExportPolicy = CngExportPolicies.AllowExport };
+        using CngKey cng = CngKey.Create(CngAlgorithm.ECDsaP256, KeyName, creation);
+        using var key = new ECDsaCng(cng);
+        key.ImportParameters(parameters);
+        CryptographicOperations.ZeroMemory(parameters.D);
+        Console.WriteLine($"Key \"{KeyName}\" restored.");
+        Console.WriteLine(Convert.ToBase64String(key.ExportSubjectPublicKeyInfo()));
         return 0;
     }
 
