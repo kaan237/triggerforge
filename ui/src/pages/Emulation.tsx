@@ -115,6 +115,12 @@ function SystemPanel() {
           checked={s.audio}
           onChange={(audio) => save({ audio })}
         />
+        <Toggle
+          label="Varsayılan ses cihazlarımı koru"
+          hint="Sanal DualSense takılınca Windows sesi ve mikrofonu ona geçirmesin."
+          checked={s.keepAudioDefaults}
+          onChange={(keepAudioDefaults) => save({ keepAudioDefaults })}
+        />
         <Slider label="Haptik tamponu" min={16} max={128} value={s.hapticBuffer} onChange={(hapticBuffer) => save({ hapticBuffer })} />
         <p className="hint">Yalnız haptik akışında küçük tampon gecikmeyi, büyük tampon kesintileri azaltır.</p>
       </Section>

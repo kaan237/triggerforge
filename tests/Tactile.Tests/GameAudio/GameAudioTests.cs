@@ -19,16 +19,41 @@ public sealed class GameAudioTests
         audio.Push(frames.AsSpan(0, 11 * 4));
         Assert.False(audio.ReadHaptics(payload));
         audio.Push(frames.AsSpan(11 * 4));
+        audio.HapticStrength = -1;
+        audio.Push(frames);
         Assert.True(audio.ReadHaptics(payload));
         Assert.Equal((sbyte)16, payload[0]);
         Assert.Equal((sbyte)-16, payload[1]);
         Assert.Equal(sbyte.MaxValue, payload[2]);
         Assert.Equal(sbyte.MinValue, payload[3]);
 
-        audio.HapticStrength = -1;
-        audio.Push(frames);
         Assert.True(audio.ReadHaptics(payload));
         Assert.All(payload, sample => Assert.Equal(0, sample));
+    }
+
+    [Fact]
+    public void Read_waits_for_two_whole_blocks_at_start_and_after_underrun()
+    {
+        var audio = new GameAudio(new GameAudioClock());
+        var payload = new sbyte[64];
+        short[] first = Block(0, 0, 1024, 0);
+        short[] second = Block(0, 0, 2048, 0);
+        for (int i = 0; i < 2; i++)
+        {
+            Array.Fill(payload, (sbyte)127);
+            audio.Push(first);
+            audio.Push(second.AsSpan(0, second.Length - 4));
+            Assert.True(audio.HapticsLive);
+            Assert.False(audio.ReadHaptics(payload));
+            Assert.All(payload, sample => Assert.Equal(0, sample));
+
+            audio.Push(second.AsSpan(second.Length - 4));
+            Assert.True(audio.ReadHaptics(payload));
+            Assert.Equal(4, payload[0]);
+            Assert.True(audio.ReadHaptics(payload));
+            Assert.Equal(8, payload[0]);
+            Assert.False(audio.ReadHaptics(payload));
+        }
     }
 
     [Fact]
@@ -84,6 +109,8 @@ public sealed class GameAudioTests
         }
 
         var payload = new sbyte[64];
+        dry.Push(frames);
+        smooth.Push(frames);
         Assert.True(dry.ReadHaptics(payload));
         Assert.Equal(32, payload[0]);
         Assert.True(smooth.ReadHaptics(payload));

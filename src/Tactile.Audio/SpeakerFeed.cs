@@ -8,6 +8,8 @@ public sealed class SpeakerFeed : IDisposable
     private readonly Lock _gate = new();
     private readonly float[] _blocks = new float[Slots * BlockSamples];
     private readonly OpusEncoder _encoder = new();
+    internal const int PrimeBlocks = 2;
+    private bool _primed;
     private int _head;
     private int _count;
     private int _pending;
@@ -54,10 +56,21 @@ public sealed class SpeakerFeed : IDisposable
         Span<float> block = stackalloc float[BlockSamples];
         lock (_gate)
         {
+            // Jitter buffer: capture and the Bluetooth tick run on separate clocks, so reading the moment a
+            // block completes would underrun now and then. Start (and restart after an underrun) only once
+            // PrimeBlocks are queued; each underrun otherwise becomes an audible click.
             if (_count == 0)
+            {
+                _primed = false;
+                return false;
+            }
+
+            if (!_primed && _count < PrimeBlocks)
             {
                 return false;
             }
+
+            _primed = true;
 
             _blocks.AsSpan(_head * BlockSamples, BlockSamples).CopyTo(block);
             _head = (_head + 1) % Slots;
@@ -82,6 +95,7 @@ public sealed class SpeakerFeed : IDisposable
         lock (_gate)
         {
             _head = _count = _pending = 0;
+            _primed = false;
         }
     }
 

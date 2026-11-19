@@ -98,4 +98,25 @@ public sealed class OpusTests
         feed.Push(samples.AsSpan(5));
         Assert.False(feed.Read(frame));
     }
+
+    [Fact]
+    public void Feed_waits_for_two_blocks_before_playing_and_after_an_underrun()
+    {
+        using var feed = new SpeakerFeed();
+        var frame = new byte[200];
+        var block = new float[1024];
+        Array.Fill(block, 0.25f);
+
+        feed.Push(block);
+        Assert.False(feed.Read(frame));
+        feed.Push(block);
+        Assert.True(feed.Read(frame));
+        Assert.True(feed.Read(frame));
+        Assert.False(feed.Read(frame));
+
+        feed.Push(block);
+        Assert.False(feed.Read(frame));
+        feed.Push(block);
+        Assert.True(feed.Read(frame));
+    }
 }

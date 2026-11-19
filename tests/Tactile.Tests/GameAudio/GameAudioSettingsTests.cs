@@ -13,13 +13,16 @@ public sealed class GameAudioSettingsTests
     {
         AppSettings oldSettings = Load<AppSettings>("""{"emulation":{"enabled":false}}""");
         Assert.True(oldSettings.Emulation.Audio);
+        Assert.True(oldSettings.Emulation.KeepAudioDefaults);
+        Assert.True(Validation.Normalize(Load<AppSettings>("""{"emulation":null}""")).Emulation.KeepAudioDefaults);
         Assert.Equal(64, oldSettings.Emulation.HapticBuffer);
         Assert.Equal(GameAudioMode.Both, Load<Profile>("""{"haptics":{}}""").Haptics.GameAudio);
         Assert.Equal(1, Load<Profile>("{}").Haptics.GameStrength);
         Assert.False(Load<Profile>("{}").Haptics.GameLowPass);
 
-        var settings = new AppSettings { Emulation = new EmulationSettings { Audio = false, HapticBuffer = 100 } };
+        var settings = new AppSettings { Emulation = new EmulationSettings { Audio = false, KeepAudioDefaults = false, HapticBuffer = 100 } };
         Assert.Equal(settings.Emulation, RoundTrip(settings).Emulation);
+        Assert.False(Validation.Normalize(settings).Emulation.KeepAudioDefaults);
         var invalidSettings = settings with { Emulation = settings.Emulation with { HapticBuffer = -1 } };
         Assert.Equal(16, Validation.Normalize(invalidSettings).Emulation.HapticBuffer);
         Assert.Equal(128, Validation.Normalize(Load<AppSettings>("""{"emulation":{"hapticBuffer":129}}""")).Emulation.HapticBuffer);

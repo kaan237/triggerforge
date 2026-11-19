@@ -119,6 +119,7 @@ public sealed class HapticEngineTests
         FakeCapture capture = Assert.IsType<FakeCapture>(rig.Audio.Latest);
         float[] data = SineBlock();
         capture.Push(data);
+        capture.Push(data);
         Assert.All(rig.Block(), sample => Assert.Equal(0, sample));
 
         rig.Configure(config with { Strength = 1 });

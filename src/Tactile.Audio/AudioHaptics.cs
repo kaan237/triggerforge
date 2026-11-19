@@ -8,6 +8,7 @@ public sealed class AudioHaptics(HapticMode mode)
     private const int PayloadSamples = 32 * 2;
     private const int Decimation = 16;
     private const int Capacity = 4;
+    private const int PrimeBlocks = 2;
 
     // Cutoffs in Hz, gate in dBFS, envelope attack/release in ms.
     private static readonly Settings Game = new(20, 400, -45, 0.15, 18, 0.55f, 1.5f, 0);
@@ -21,6 +22,7 @@ public sealed class AudioHaptics(HapticMode mode)
     private int _head;
     private int _count;
     private int _pending;
+    private bool _playing;
     private HapticMode _mode = mode;
     private HapticMode? _activeMode;
     private float _gain = 1;
@@ -75,7 +77,7 @@ public sealed class AudioHaptics(HapticMode mode)
         }
     }
 
-    /// <summary>Fills 64 interleaved values, or silence and false when no whole block is queued.</summary>
+    /// <summary>Fills 64 interleaved values, or silence and false while waiting for blocks.</summary>
     public bool Read(Span<sbyte> payload)
     {
         if (payload.Length != PayloadSamples)
@@ -85,7 +87,8 @@ public sealed class AudioHaptics(HapticMode mode)
         _gate.Enter();
         try
         {
-            if (_count == 0)
+            _playing = _count >= (_playing ? 1 : PrimeBlocks);
+            if (!_playing)
             {
                 payload.Clear();
                 return false;
@@ -139,6 +142,7 @@ public sealed class AudioHaptics(HapticMode mode)
         lock (_gate)
         {
             _head = _count = _pending = 0;
+            _playing = false;
             _activeMode = null;
         }
     }

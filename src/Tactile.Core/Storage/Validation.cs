@@ -140,6 +140,7 @@ public static partial class Validation
                 Enabled = s.Emulation?.Enabled ?? true,
                 HideController = s.Emulation?.HideController ?? true,
                 Audio = s.Emulation?.Audio ?? true,
+                KeepAudioDefaults = s.Emulation?.KeepAudioDefaults ?? true,
                 HapticBuffer = Math.Clamp(s.Emulation?.HapticBuffer ?? 64, 16, 128),
             },
         };

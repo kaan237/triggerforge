@@ -142,3 +142,44 @@ Settings/profile JSON round-trip and validation. Existing tests keep passing.
 2. A test program plays 4-channel audio to that device: tone on ch 3-4 → felt on the
    actuators; music on ch 1-2 → heard from the controller speaker.
 3. If KH runs a haptic game: game haptics felt over Bluetooth.
+
+## Job 3: keep the user's default audio devices, jitter buffers on the haptic paths
+
+Found in the hardware check (2026-11-19): when the audio pad attaches, Windows makes
+"DualSense Wireless Controller" the default playback **and** recording device (all PC sound
+goes to the controller, voice apps record the silent virtual mic). And the speaker crackled
+until `SpeakerFeed` got a 2-block jitter buffer; the haptic paths have the same gap.
+
+### Default devices (`src/Tactile.Audio/AudioDefaults.cs`, new)
+
+- Snapshot the default endpoint ids for render and capture, roles console, multimedia and
+  communications (`IMMDeviceEnumerator.GetDefaultAudioEndpoint`).
+- Restore with the policy-config COM object Windows uses for its own sound settings
+  (undocumented but stable since Windows 7, used by common audio tools): CLSID
+  `870af99c-171d-4f9e-af0d-e63df40c2bc9`, interface `f8679f50-850a-41cf-9c72-430f290290c8`,
+  method order: GetMixFormat, GetDeviceFormat, ResetDeviceFormat, SetDeviceFormat,
+  GetProcessingPeriod, SetProcessingPeriod, GetShareMode, SetShareMode, GetPropertyValue,
+  SetPropertyValue, **SetDefaultEndpoint(string deviceId, ERole role)**, SetEndpointVisibility.
+  Declare only up to SetDefaultEndpoint (vtable order matters). Failure → notice, never a crash.
+- Core: `AppSettings.Emulation.KeepAudioDefaults` (bool, default true). `EmulationService`
+  takes a snapshot right before attaching a DualSense pad **with audio**; for 15 s after the
+  attach it checks every 500 ms; for each role whose default changed to an endpoint whose
+  friendly name contains "DualSense", it restores the snapshot id once. After the 15 s window,
+  or once restored, it never touches defaults again (a user who picks the DualSense by hand
+  later keeps it). Injectable (`IAudioDefaults`) so tests use a fake; no real device changes
+  in tests.
+- UI, **Sanal kontrolcü** page under the audio switch: toggle "Varsayılan ses cihazlarımı koru"
+  with hint "Sanal DualSense takılınca Windows sesi ve mikrofonu ona geçirmesin."
+
+### Jitter buffers
+
+- `AudioHaptics` (5a) and `GameAudio` (5b): like `SpeakerFeed`, start reading only once 2 whole
+  blocks are queued, and after an underrun wait again for 2 blocks (return silence / false
+  meanwhile). Keep the existing caps (AudioHaptics 4, GameAudio 3 blocks). `HapticsLive` /
+  live window logic unchanged.
+- Update the existing tests that assumed one block is enough; add priming tests for both.
+
+### Rules
+
+As for jobs 1-2. Tests must not call the real policy-config object or change any Windows
+default device.

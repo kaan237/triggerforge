@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Tactile.Audio;
 using Tactile.Device.DualSense;
 using Tactile.Drivers;
 using Tactile.Emulation;
@@ -50,10 +51,13 @@ public sealed class EmulationService : IDisposable
     public const string GameLayer = "game";
 
     private static readonly TimeSpan DriverCheckInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan AudioDefaultInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan AudioDefaultWindow = TimeSpan.FromSeconds(15);
 
     private readonly DriverPlatform _platform;
     private readonly IUsbIpServer? _server;
     private readonly IEmulationHost _host;
+    private readonly IAudioDefaults? _audioDefaults;
     private readonly Func<TimeSpan> _clock;
     private readonly Func<bool> _steamRunning;
     private readonly Func<long> _timestamp;
@@ -89,17 +93,22 @@ public sealed class EmulationService : IDisposable
     private string? _hiddenId;
     private bool _hideTried;
     private bool _unhideFailNoticed;
+    private Dictionary<AudioDefaultSlot, string>? _audioDefaultsToRestore;
+    private TimeSpan _audioWatchUntil;
+    private TimeSpan _nextAudioCheck;
+    private bool _audioCheckFailed;
 
     // The game's accumulated DualSense output, under _feedbackLock.
     private OutputState _game = OutputState.Default;
     private OutputFields _gameFields;
 
     internal EmulationService(DriverPlatform platform, IUsbIpServer? server, IEmulationHost host, Func<TimeSpan> clock, bool threaded,
-        Func<bool>? steamRunning = null, Func<long>? timestamp = null)
+        Func<bool>? steamRunning = null, Func<long>? timestamp = null, IAudioDefaults? audioDefaults = null)
     {
         _platform = platform;
         _server = server;
         _host = host;
+        _audioDefaults = audioDefaults;
         _clock = clock;
         _threaded = threaded;
         _steamRunning = steamRunning ?? SteamRunning;
@@ -294,7 +303,7 @@ public sealed class EmulationService : IDisposable
     {
         while (!_disposed)
         {
-            _wake.WaitOne(TimeSpan.FromSeconds(1));
+            _wake.WaitOne(ReconcileDelay());
             if (_disposed)
             {
                 break;
@@ -308,6 +317,19 @@ public sealed class EmulationService : IDisposable
             {
                 Fail($"Sanal kontrolcü hatası: {e.Message}");
             }
+        }
+    }
+
+    private TimeSpan ReconcileDelay()
+    {
+        lock (_opLock)
+        {
+            if (_audioDefaultsToRestore is null)
+                return TimeSpan.FromSeconds(1);
+
+            TimeSpan next = _nextAudioCheck < _audioWatchUntil ? _nextAudioCheck : _audioWatchUntil;
+            TimeSpan delay = next - _clock();
+            return delay > TimeSpan.Zero ? delay : TimeSpan.Zero;
         }
     }
 
@@ -362,6 +384,7 @@ public sealed class EmulationService : IDisposable
 
             if (_pad is not null && w is not null)
             {
+                CheckAudioDefaults(w.Settings.KeepAudioDefaults);
                 SyncHide(w);
                 CheckSteam();
             }
@@ -414,6 +437,8 @@ public sealed class EmulationService : IDisposable
 
         Action<PadFeedback> handler = f => OnFeedback(pad, f);
         pad.Feedback += handler;
+        var defaults = kind == VirtualKind.DualSense && w.Settings.Audio && w.Settings.KeepAudioDefaults
+            ? SnapshotAudioDefaults() : null;
         int port;
         try
         {
@@ -431,6 +456,15 @@ public sealed class EmulationService : IDisposable
             return;
         }
 
+        if (defaults is { Count: > 0 })
+        {
+            TimeSpan attachedAt = _clock();
+            _audioDefaultsToRestore = defaults;
+            _audioWatchUntil = attachedAt + AudioDefaultWindow;
+            _nextAudioCheck = attachedAt + AudioDefaultInterval;
+            _audioCheckFailed = false;
+        }
+
         lock (_feedbackLock)
         {
             _game = OutputState.Default;
@@ -446,6 +480,74 @@ public sealed class EmulationService : IDisposable
         _hideTried = false;
         // Published last: input starts flowing only once the pad is attached.
         _pad = pad;
+    }
+
+    private Dictionary<AudioDefaultSlot, string>? SnapshotAudioDefaults()
+    {
+        try
+        {
+            return _audioDefaults?.ReadDefaults(includeNames: false).ToDictionary(entry => entry.Key, entry => entry.Value.Id);
+        }
+        catch (Exception e)
+        {
+            Notify($"Varsayılan ses cihazları kaydedilemedi: {e.Message}");
+            return null;
+        }
+    }
+
+    private void CheckAudioDefaults(bool enabled)
+    {
+        if (_audioDefaultsToRestore is not { } pending || _audioDefaults is not { } audio)
+            return;
+
+        TimeSpan now = _clock();
+        if (!enabled || now >= _audioWatchUntil)
+        {
+            _audioDefaultsToRestore = null;
+            return;
+        }
+
+        if (now < _nextAudioCheck)
+            return;
+
+        _nextAudioCheck = now + AudioDefaultInterval;
+        IReadOnlyDictionary<AudioDefaultSlot, AudioDefaultEndpoint> current;
+        try
+        {
+            current = audio.ReadDefaults(includeNames: true);
+        }
+        catch (Exception e)
+        {
+            if (!_audioCheckFailed)
+            {
+                _audioCheckFailed = true;
+                Notify($"Varsayılan ses cihazları denetlenemedi: {e.Message}");
+            }
+            return;
+        }
+
+        foreach (var (slot, endpoint) in current)
+        {
+            if (_clock() >= _audioWatchUntil)
+                break;
+
+            if (!pending.TryGetValue(slot, out string? original) || original == endpoint.Id ||
+                endpoint.FriendlyName?.Contains("DualSense", StringComparison.OrdinalIgnoreCase) != true)
+                continue;
+
+            pending.Remove(slot);
+            try
+            {
+                audio.Restore(original, slot.Role);
+            }
+            catch (Exception e)
+            {
+                Notify($"Varsayılan ses cihazı geri yüklenemedi: {e.Message}");
+            }
+        }
+
+        if (pending.Count == 0)
+            _audioDefaultsToRestore = null;
     }
 
     private void SyncHide(Wanted w)
@@ -516,6 +618,7 @@ public sealed class EmulationService : IDisposable
     /// <summary>Unhide, detach, remove. True when every step worked (or nothing was attached).</summary>
     private bool StopLocked()
     {
+        _audioDefaultsToRestore = null;
         IVirtualPad? pad = _pad;
         if (pad is null)
         {

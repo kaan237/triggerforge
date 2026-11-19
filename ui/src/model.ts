@@ -128,7 +128,7 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     idleSleepMinutes: 15,
     lowBatteryWarnings: [20, 10],
     runAsAdminHint: false,
-    emulation: { enabled: true, hideController: true, audio: true, hapticBuffer: 64 },
+    emulation: { enabled: true, hideController: true, audio: true, keepAudioDefaults: true, hapticBuffer: 64 },
   };
 }
 

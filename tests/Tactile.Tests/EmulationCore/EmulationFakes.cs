@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Tactile.Audio;
 using Tactile.Core;
 using Tactile.Device.DualSense;
 using Tactile.Drivers;
@@ -37,8 +38,8 @@ internal sealed class EmulationRig
 
     public DriverPlatform Platform => new(Drivers, Vhci, Hider, Recovery, Tree);
 
-    public EmulationService Create(bool withServer = true) =>
-        new(Platform, withServer ? Server : null, Host, () => Clock, threaded: false, () => SteamRunning, () => Now);
+    public EmulationService Create(bool withServer = true, IAudioDefaults? audioDefaults = null) =>
+        new(Platform, withServer ? Server : null, Host, () => Clock, threaded: false, () => SteamRunning, () => Now, audioDefaults);
 
     public static RealController Bluetooth { get; } = new(RealPath, Link.Bluetooth, null);
 

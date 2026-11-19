@@ -149,10 +149,30 @@ internal static partial class CoreAudioInterop
     {
         [PreserveSig] int Activate(in Guid iid, int context, nint parameters,
             [MarshalAs(UnmanagedType.IUnknown)] out object value);
-        [PreserveSig] int OpenPropertyStore(int access, out nint store);
+        [PreserveSig] int OpenPropertyStore(int access, out IPropertyStore store);
         [PreserveSig] int GetId(out nint id);
         [PreserveSig] int GetState(out uint state);
     }
+
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IPropertyStore
+    {
+        [PreserveSig] int GetCount(out uint count);
+        [PreserveSig] int GetAt(uint index, out PropertyKey key);
+        [PreserveSig] int GetValue(in PropertyKey key, out PropertyVariant value);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PropertyVariant
+    {
+        internal ushort Type;
+        private ushort _reserved1, _reserved2, _reserved3;
+        internal nint Pointer;
+        private nint _unionPadding;
+    }
+
+    [LibraryImport("ole32.dll")]
+    internal static partial int PropVariantClear(ref PropertyVariant value);
 
     [ComImport, Guid("7991EEC9-7E89-4D85-8390-6C703CEC60C0"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IMMNotificationClient

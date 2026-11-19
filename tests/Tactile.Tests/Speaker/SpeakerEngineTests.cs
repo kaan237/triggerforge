@@ -65,6 +65,7 @@ public sealed class SpeakerEngineTests
         }
 
         shared.Push(samples);
+        shared.Push(samples);
         var haptic = new sbyte[64];
         Assert.NotNull(source);
         source(0, haptic);
@@ -73,6 +74,7 @@ public sealed class SpeakerEngineTests
         using var reference = new SpeakerFeed();
         var frame = new byte[200];
         var expected = new byte[200];
+        reference.Push(samples);
         reference.Push(samples);
         Assert.True(reference.Read(expected));
         Assert.True(engine.ReadSpeakerFrame(0, frame));

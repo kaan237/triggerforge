@@ -77,7 +77,7 @@ public sealed class AppCore : IDisposable
     public AppCore(string? dataDir = null, IForegroundSource? foreground = null, InputPlatform? platform = null,
         DriverPlatform? drivers = null, IUsbIpServer? server = null, IAudioSystem? audio = null)
         : this(dataDir, foreground, new ControllerService(autoConnect: true, drivers is null ? null : drivers.Tree.IsVirtual),
-            TimeProvider.System, runTimer: true, platform, drivers, server, audio: audio)
+            TimeProvider.System, runTimer: true, platform, drivers, server, audio: audio, audioDefaults: new AudioDefaults())
     {
     }
 
@@ -87,7 +87,7 @@ public sealed class AppCore : IDisposable
     /// </param>
     internal AppCore(string? dataDir, IForegroundSource? foreground, ControllerService controllers, TimeProvider time, bool runTimer,
         InputPlatform? platform = null, DriverPlatform? drivers = null, IUsbIpServer? server = null, Func<bool>? steamRunning = null,
-        IAudioSystem? audio = null)
+        IAudioSystem? audio = null, IAudioDefaults? audioDefaults = null)
     {
         _time = time;
         _platform = platform ?? InputPlatform.None;
@@ -109,7 +109,8 @@ public sealed class AppCore : IDisposable
         if (drivers is not null)
         {
             // Restores a crashed session's leftovers before the controller is used.
-            _emulation = new EmulationService(drivers, server, new EmulationHost(this), Now, threaded: runTimer, steamRunning);
+            _emulation = new EmulationService(drivers, server, new EmulationHost(this), Now, threaded: runTimer, steamRunning,
+                audioDefaults: audioDefaults);
         }
 
         if (foreground is null)

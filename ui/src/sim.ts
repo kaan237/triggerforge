@@ -72,7 +72,10 @@ const audioApps: AudioApp[] = [
 
 export function createSimulator(emit: (m: HostMessage) => void) {
   let profiles = sampleProfiles();
-  let settings: AppSettings = { ...defaultSettings(profiles[0].id), controllerDefaults: { "A0:AB:51:12:34:56": profiles[0].id } };
+  let settings = normalizeSettings({
+    ...defaultSettings(profiles[0].id),
+    controllerDefaults: { "A0:AB:51:12:34:56": profiles[0].id },
+  });
   let activeId = profiles[0].id;
   let activeReason = "controllerDefault";
   let timer: number | undefined;

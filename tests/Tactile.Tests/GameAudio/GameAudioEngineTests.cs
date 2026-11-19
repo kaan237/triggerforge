@@ -22,10 +22,14 @@ public sealed class GameAudioEngineTests
         }
 
         rig.Capture.Push(local);
+        rig.Capture.Push(local);
         rig.Pad.Push(GameAudioTests.Block(8192, 8192, 0, 0));
         sbyte[] payload = rig.Fill();
         Assert.Contains(payload, value => value != 0);
 
+        rig.Capture.Push(local);
+        rig.Pad.Push(GameAudioTests.Block(0, 0, 0, 4096));
+        Assert.All(rig.Fill(), value => Assert.Equal(0, value));
         rig.Capture.Push(local);
         rig.Pad.Push(GameAudioTests.Block(0, 0, 0, 4096));
         payload = rig.Fill();
@@ -36,6 +40,8 @@ public sealed class GameAudioEngineTests
         }
 
         rig.Time.Milliseconds = 99;
+        rig.Capture.Push(local);
+        Assert.Equal(16, rig.Fill()[1]);
         rig.Capture.Push(local);
         Assert.All(rig.Fill(), value => Assert.Equal(0, value));
         rig.Time.Milliseconds = 100;
@@ -52,6 +58,7 @@ public sealed class GameAudioEngineTests
         rig.Engine.PollAudio();
         float[] local = Enumerable.Repeat(-0.5f, 1024).ToArray();
         rig.Capture.Push(local);
+        rig.Capture.Push(local);
 
         byte[] actual = new byte[200], expected = new byte[200];
         using var game = new SpeakerFeed();
@@ -60,7 +67,10 @@ public sealed class GameAudioEngineTests
         Assert.True(rig.Engine.ReadSpeakerFrame(0, actual));
         Assert.Equal(expected, actual);
 
+        // The speaker feed starts once two blocks are queued.
         rig.Pad.Push(GameAudioTests.Block(8192, 8192, 16384, 16384));
+        rig.Pad.Push(GameAudioTests.Block(8192, 8192, 16384, 16384));
+        game.Push(Enumerable.Repeat(0.25f, 1024).ToArray());
         game.Push(Enumerable.Repeat(0.25f, 1024).ToArray());
         Assert.True(game.Read(expected));
         Assert.True(rig.Engine.ReadSpeakerFrame(1, actual));
@@ -70,6 +80,7 @@ public sealed class GameAudioEngineTests
         rig.Pad.SpeakerActive = false;
         rig.Engine.Configure(config, Link.Bluetooth, rig.Pad);
         using var fallback = new SpeakerFeed();
+        fallback.Push(local);
         fallback.Push(local);
         Assert.True(fallback.Read(expected));
         Assert.True(rig.Engine.ReadSpeakerFrame(2, actual));
@@ -86,6 +97,7 @@ public sealed class GameAudioEngineTests
         Assert.True(rig.Pad.Subscribed);
 
         rig.Pad.SpeakerActive = true;
+        rig.Pad.Push(GameAudioTests.Block(0, 0, 4096, 4096));
         rig.Pad.Push(GameAudioTests.Block(0, 0, 4096, 4096));
         rig.Engine.Configure(config, Link.Bluetooth, rig.Pad);
         Assert.All(rig.Fill(), value => Assert.Equal(16, value));

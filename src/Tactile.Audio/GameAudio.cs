@@ -6,6 +6,7 @@ public sealed class GameAudio
     private const int SpeakerBatchFrames = 49;
     private const int BlockSamples = 64;
     private const int QueueCapacity = 3;
+    private const int PrimeBlocks = 2;
     // One-pole low-pass at approximately 400 Hz, before the 16:1 decimation.
     private const float LowPassCoefficient = 0.05f;
     private static readonly TimeSpan LiveWindow = TimeSpan.FromMilliseconds(100);
@@ -18,6 +19,7 @@ public sealed class GameAudio
     private int _head, _count, _samples, _frames;
     private float _sumLeft, _sumRight, _filteredLeft, _filteredRight;
     private bool _nonZero;
+    private bool _playing;
     private long? _lastNonZero;
 
     public GameAudio() : this(TimeProvider.System) { }
@@ -122,6 +124,7 @@ public sealed class GameAudio
             else
             {
                 _head = _count = 0;
+                _playing = false;
             }
         }
     }
@@ -131,6 +134,7 @@ public sealed class GameAudio
         lock (_gate)
         {
             _head = _count = _samples = _frames = 0;
+            _playing = false;
             _sumLeft = _sumRight = _filteredLeft = _filteredRight = 0;
             _nonZero = false;
             _lastNonZero = null;
@@ -162,7 +166,8 @@ public sealed class GameAudio
 
     private bool ReadNext(Span<sbyte> payload)
     {
-        if (_count == 0)
+        _playing = _count >= (_playing ? 1 : PrimeBlocks);
+        if (!_playing)
         {
             payload.Clear();
             return false;

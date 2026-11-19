@@ -11,7 +11,7 @@ public sealed class AudioHapticsTests
         sbyte[] payload = new sbyte[64];
         Array.Fill(payload, (sbyte)127);
 
-        dsp.Push(new float[1024]);
+        dsp.Push(new float[2048]);
 
         Assert.True(dsp.Read(payload));
         Assert.All(payload, sample => Assert.Equal(0, sample));
@@ -141,7 +141,7 @@ public sealed class AudioHapticsTests
     {
         var dsp = new AudioHaptics(HapticMode.Game);
         var reference = new AudioHaptics(HapticMode.Film);
-        float[] sine = Sine(60, 1, 0, blocks: 2);
+        float[] sine = Sine(60, 1, 0, blocks: 3);
         sbyte[] actual = new sbyte[64];
         sbyte[] expected = new sbyte[64];
         dsp.Push(sine);
@@ -171,8 +171,31 @@ public sealed class AudioHapticsTests
 
         Assert.False(dsp.Read(payload));
         dsp.Push(new float[1023]);
+        Assert.False(dsp.Read(payload));
+        dsp.Push(new float[1024]);
         Assert.True(dsp.Read(payload));
         Assert.All(payload, sample => Assert.Equal(0, sample));
+    }
+
+    [Fact]
+    public void Read_waits_for_two_whole_blocks_at_start_and_after_underrun()
+    {
+        var dsp = new AudioHaptics(HapticMode.Game);
+        var payload = new sbyte[64];
+        float[] blocks = Sine(60, 1, 0, blocks: 2);
+        for (int i = 0; i < 2; i++)
+        {
+            Array.Fill(payload, (sbyte)127);
+            dsp.Push(blocks.AsSpan(0, 2047));
+            Assert.False(dsp.Read(payload));
+            Assert.All(payload, sample => Assert.Equal(0, sample));
+            Assert.Equal(1, dsp.BufferedBlocks);
+
+            dsp.Push(blocks.AsSpan(2047));
+            Assert.True(dsp.Read(payload));
+            Assert.True(dsp.Read(payload));
+            Assert.False(dsp.Read(payload));
+        }
     }
 
     private static float[] Sine(int frequency, float amplitude, int channel, int blocks)
@@ -185,10 +208,13 @@ public sealed class AudioHapticsTests
 
     private static void Process(AudioHaptics dsp, float[] sine, sbyte[] payload)
     {
-        for (int start = 0; start < sine.Length; start += 1024)
+        dsp.Push(sine.AsSpan(0, 1024));
+        for (int start = 1024; start < sine.Length; start += 1024)
         {
             dsp.Push(sine.AsSpan(start, 1024));
             Assert.True(dsp.Read(payload));
         }
+
+        Assert.True(dsp.Read(payload));
     }
 }
