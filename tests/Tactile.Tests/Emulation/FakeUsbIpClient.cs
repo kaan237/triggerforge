@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Net.Sockets;
 using Tactile.Emulation;
 
@@ -33,10 +34,11 @@ internal sealed class FakeUsbIpClient : IDisposable
     /// <summary>Next seqnum with the usbip-win2 direction bit in the low bit.</summary>
     public uint NextSeq(bool dirIn) => (++_seq << 1) | (dirIn ? 1u : 0u);
 
-    public uint SendSubmit(uint ep, bool dirIn, int length, SetupPacket? setup = null, byte[]? payload = null, int packets = UsbIpCodec.NonIso)
+    public uint SendSubmit(uint ep, bool dirIn, int length, SetupPacket? setup = null, byte[]? payload = null,
+        int packets = UsbIpCodec.NonIso, int startFrame = 0)
     {
         uint seq = NextSeq(dirIn);
-        var h = new UrbHeader(UsbIpCodec.CmdSubmit, seq, (1u << 16) | 1, dirIn ? 1u : 0u, ep, 0, length, 0, packets, 4,
+        var h = new UrbHeader(UsbIpCodec.CmdSubmit, seq, (1u << 16) | 1, dirIn ? 1u : 0u, ep, 0, length, startFrame, packets, 4,
             setup is { } s ? UsbIpCodec.PackSetup(s) : 0);
         byte[] b = new byte[UsbIpCodec.HeaderSize];
         UsbIpCodec.WriteHeader(b, h);
@@ -47,6 +49,18 @@ internal sealed class FakeUsbIpClient : IDisposable
         }
 
         return seq;
+    }
+
+    public static byte[] IsoDescriptors(params (uint Offset, uint Length)[] packets)
+    {
+        byte[] bytes = new byte[packets.Length * 16];
+        for (int i = 0; i < packets.Length; i++)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(i * 16), packets[i].Offset);
+            BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(i * 16 + 4), packets[i].Length);
+        }
+
+        return bytes;
     }
 
     public uint SendUnlink(uint target)

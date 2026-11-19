@@ -84,6 +84,7 @@ internal abstract class VirtualUsbDevice : IVirtualPad
         lock (_gate)
         {
             _configuration = 0;
+            ResetAlternates();
             _fresh = true;
             _startup.Clear();
             foreach (byte[] p in StartupPackets)
@@ -98,6 +99,7 @@ internal abstract class VirtualUsbDevice : IVirtualPad
     public void Detach()
     {
         InputReady = null;
+        ResetAlternates();
         Volatile.Write(ref _imported, 0);
     }
 
@@ -160,7 +162,9 @@ internal abstract class VirtualUsbDevice : IVirtualPad
         }
     }
 
-    private ControlResult Standard(SetupPacket s)
+    protected virtual void ResetAlternates() { }
+
+    protected virtual ControlResult Standard(SetupPacket s)
     {
         switch (s.Request)
         {
@@ -186,6 +190,7 @@ internal abstract class VirtualUsbDevice : IVirtualPad
                 lock (_gate)
                 {
                     _configuration = (byte)s.Value;
+                    ResetAlternates();
                 }
 
                 return ControlResult.Ok();

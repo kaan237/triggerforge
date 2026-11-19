@@ -21,9 +21,10 @@ public sealed class HapticReport
     private readonly byte[] _primeState = new byte[63];
     private int _sequence;
     private byte _counter;
+    private volatile byte _bufferLength = 64;
 
     /// <summary>Controller-side buffer length, 16-128. Larger = smoother, more latency.</summary>
-    public byte BufferLength { get; set; } = 64;
+    public byte BufferLength { get => _bufferLength; set => _bufferLength = value; }
     public bool IncludeStateBlock { get; set; }
 
     /// <summary>
@@ -62,8 +63,7 @@ public sealed class HapticReport
         r[2] = 0x91;
         r[3] = 4;
         r[4] = 0x66;
-        r[5] = BufferLength;
-        r[6] = BufferLength;
+        r[5] = r[6] = BufferLength;
         r[7] = _counter++;
 
         // Sub-packet 0x12: haptic samples.

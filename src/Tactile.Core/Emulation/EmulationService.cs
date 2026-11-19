@@ -5,6 +5,8 @@ using Tactile.Emulation;
 
 namespace Tactile.Core;
 
+public enum EmulationAudioStatus { Off, Ready, Playing }
+
 /// <param name="Available">False when the USB/IP server or the driver layer could not start.</param>
 /// <param name="Mode">The mode of the pad attached right now, Off when none.</param>
 public sealed record EmulationStatus(
@@ -15,14 +17,15 @@ public sealed record EmulationStatus(
     bool Hidden,
     IReadOnlyList<DriverStatus> Drivers,
     LatencySummary Latency,
-    string? Error)
+    string? Error,
+    EmulationAudioStatus Audio = EmulationAudioStatus.Off)
 {
     public static EmulationStatus Unavailable { get; } = new(false, false, EmulationMode.Off, false, false, [], LatencySummary.Empty, null);
 
     /// <summary>Equal apart from latency, which moves all the time.</summary>
     public bool SameState(EmulationStatus other) =>
         Available == other.Available && Enabled == other.Enabled && Mode == other.Mode && Attached == other.Attached &&
-        Hidden == other.Hidden && Error == other.Error && Drivers.SequenceEqual(other.Drivers);
+        Hidden == other.Hidden && Error == other.Error && Audio == other.Audio && Drivers.SequenceEqual(other.Drivers);
 }
 
 /// <summary>The real controller as the emulation needs it.</summary>
@@ -67,7 +70,7 @@ public sealed class EmulationService : IDisposable
     private readonly Lock _feedbackLock = new();
 
     private Wanted? _wanted;
-    private (string ProfileId, EmulationMode Mode)? _failedFor;
+    private (string ProfileId, EmulationMode Mode, bool Audio)? _failedFor;
     private string? _error;
     private DriverStatus[] _drivers;
     private TimeSpan? _driversCheckedAt;
@@ -80,6 +83,7 @@ public sealed class EmulationService : IDisposable
     private volatile IVirtualPad? _pad;
     private Action<PadFeedback>? _padHandler;
     private VirtualKind _kind;
+    private bool _padAudioEnabled;
     private int _hubPort;
     private string? _padPath;
     private string? _hiddenId;
@@ -145,6 +149,8 @@ public sealed class EmulationService : IDisposable
     /// <summary>Raised when the status (apart from latency) changes. Any thread.</summary>
     public event Action? Changed;
 
+    internal IVirtualAudio? VirtualAudio => _pad as IVirtualAudio;
+
     public EmulationStatus Status
     {
         get
@@ -169,7 +175,7 @@ public sealed class EmulationService : IDisposable
                 return;
             }
 
-            if (_wanted is null || _wanted.ProfileId != wanted.ProfileId || _wanted.Mode != wanted.Mode)
+            if (_wanted is null || _wanted.FailureKey != wanted.FailureKey)
             {
                 ClearFailureLocked();
             }
@@ -338,7 +344,8 @@ public sealed class EmulationService : IDisposable
                 want = WantedKindLocked(w);
             }
 
-            if (_pad is not null && (want != _kind || w?.Controller?.Path != _padPath))
+            if (_pad is not null && (want != _kind || w?.Controller?.Path != _padPath ||
+                _kind == VirtualKind.DualSense && w?.Settings.Audio != _padAudioEnabled))
             {
                 StopLocked();
             }
@@ -370,7 +377,7 @@ public sealed class EmulationService : IDisposable
             return null;
         }
 
-        if (_failedFor == (w.ProfileId, w.Mode))
+        if (_failedFor == w.FailureKey)
         {
             return null;
         }
@@ -391,10 +398,13 @@ public sealed class EmulationService : IDisposable
 
     private void Start(VirtualKind kind, Wanted w, RealController controller)
     {
+        IUsbIpServer server = _server!;
         IVirtualPad pad;
         try
         {
-            pad = _server!.Create(kind, kind == VirtualKind.DualSense ? controller.Identity : null);
+            pad = kind == VirtualKind.DualSense
+                ? server.CreateDualSense(controller.Identity, w.Settings.Audio)
+                : server.Create(kind, null);
         }
         catch (Exception e)
         {
@@ -407,7 +417,7 @@ public sealed class EmulationService : IDisposable
         int port;
         try
         {
-            port = _platform.Vhci.Attach(_server.Port, pad.BusId);
+            port = _platform.Vhci.Attach(server.Port, pad.BusId);
             if (port < 0)
             {
                 throw new InvalidOperationException($"geçersiz hub portu {port}");
@@ -429,6 +439,7 @@ public sealed class EmulationService : IDisposable
 
         _latency.Clear();
         _kind = kind;
+        _padAudioEnabled = w.Settings.Audio;
         _hubPort = port;
         _padPath = controller.Path;
         _padHandler = handler;
@@ -677,7 +688,7 @@ public sealed class EmulationService : IDisposable
             w ??= _wanted;
             if (w is not null)
             {
-                _failedFor = (w.ProfileId, w.Mode);
+                _failedFor = w.FailureKey;
             }
         }
 
@@ -703,7 +714,10 @@ public sealed class EmulationService : IDisposable
             Hidden: pad is not null && _hiddenId is not null,
             Drivers: _drivers,
             Latency: _latency.Summary(),
-            Error: _error);
+            Error: _error,
+            Audio: pad is IVirtualAudio audio
+                ? audio.SpeakerActive ? EmulationAudioStatus.Playing : EmulationAudioStatus.Ready
+                : EmulationAudioStatus.Off);
     }
 
     private void RaiseIfChanged()
@@ -737,7 +751,11 @@ public sealed class EmulationService : IDisposable
         return found.Length > 0;
     }
 
-    private sealed record Wanted(string ProfileId, EmulationMode Mode, EmulationSettings Settings, RealController? Controller);
+    private sealed record Wanted(string ProfileId, EmulationMode Mode, EmulationSettings Settings, RealController? Controller)
+    {
+        public (string ProfileId, EmulationMode Mode, bool Audio) FailureKey =>
+            (ProfileId, Mode, Mode == EmulationMode.DualSense && Settings.Audio);
+    }
 
     private sealed record InputPlan(EmulationConfig Config, Buttons Hidden, double RumbleStrength);
 }

@@ -3,8 +3,8 @@ using Tactile.Device.DualSense;
 
 namespace Tactile.Emulation;
 
-/// <summary>Wired DualSense with only the HID interface (docs/protocol-emulation.md §3.2).</summary>
-internal sealed class VirtualDualSense : VirtualUsbDevice
+/// <summary>Wired DualSense with HID and optional USB audio.</summary>
+internal partial class VirtualDualSense : VirtualUsbDevice
 {
     public const int InputLength = 64;
     public const int OutputStateLength = 47;
@@ -50,9 +50,17 @@ internal sealed class VirtualDualSense : VirtualUsbDevice
     private readonly Dictionary<byte, byte[]> _features = [];
     private byte _sequence;
 
+    private readonly bool _audio;
+
     public VirtualDualSense(UsbIpServer server, int busNum, DualSenseIdentity? identity)
+        : this(server, busNum, identity, audio: false)
+    {
+    }
+
+    private VirtualDualSense(UsbIpServer server, int busNum, DualSenseIdentity? identity, bool audio)
         : base(server, busNum)
     {
+        _audio = audio;
         foreach ((byte id, int size) in FeatureSizes)
         {
             _features[id] = Feature(id, size, null);
@@ -64,9 +72,9 @@ internal sealed class VirtualDualSense : VirtualUsbDevice
     }
 
     public override VirtualKind Kind => VirtualKind.DualSense;
-    public override int Speed => SpeedHigh;
+    public override int Speed => _audio ? SpeedFull : SpeedHigh;
     public override byte[] DeviceDescriptor => Device;
-    public override byte[] ConfigDescriptor => Config;
+    public override byte[] ConfigDescriptor => _audio ? AudioConfig : Config;
     public override int InEndpoint => 4;
     public override int OutEndpoint => 3;
     public override int IntervalMs => 4;
@@ -121,8 +129,8 @@ internal sealed class VirtualDualSense : VirtualUsbDevice
 
     protected override byte[]? ClassDescriptor(SetupPacket s) => (s.Value >> 8) switch
     {
-        0x21 => Config[18..27],
-        0x22 => ReportDescriptor,
+        0x21 when !_audio || s.Index is 0 or 3 => Config[18..27],
+        0x22 when !_audio || s.Index is 0 or 3 => ReportDescriptor,
         _ => null,
     };
 

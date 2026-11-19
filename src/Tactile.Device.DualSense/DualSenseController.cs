@@ -284,7 +284,10 @@ public sealed class HapticStreamer : IDisposable
     private const int PrerollBlocks = 8;
 
     /// <param name="nextBlock">Called with the block index and a buffer for 64 interleaved s8 samples.</param>
-    public HapticStreamer(DualSenseController controller, HapticBlockSource nextBlock, SpeakerFrameSource? nextSpeaker = null)
+    public byte BufferLength { set => _report.BufferLength = value; }
+
+    public HapticStreamer(DualSenseController controller, HapticBlockSource nextBlock, SpeakerFrameSource? nextSpeaker = null,
+        byte bufferLength = 64)
     {
         if (controller.Details.Link != Link.Bluetooth)
         {
@@ -292,6 +295,7 @@ public sealed class HapticStreamer : IDisposable
         }
 
         _controller = controller;
+        _report.BufferLength = bufferLength;
         _nextBlock = nextBlock;
         _nextSpeaker = nextSpeaker;
         _thread = new Thread(Run) { IsBackground = true, Name = "dualsense-haptics", Priority = ThreadPriority.Highest };

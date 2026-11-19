@@ -30,4 +30,6 @@ public sealed record EmulationSettings
     public bool Enabled { get; init; } = true;
     /// <summary>Hide the real controller from other apps while a virtual pad is attached.</summary>
     public bool HideController { get; init; } = true;
+    public bool Audio { get; init; } = true;
+    public int HapticBuffer { get; init; } = 64;
 }

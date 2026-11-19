@@ -90,6 +90,32 @@ export function Haptics() {
         </p>
         {config && (
           <>
+            {draft.emulation.mode === "dualSense" && (
+              <Section title="Oyun haptiği">
+                <div className="row-field">
+                  <Segmented
+                    label="Oyun sesi çıkışı"
+                    value={config.gameAudio}
+                    onChange={(gameAudio) => set({ gameAudio })}
+                    options={[
+                      { id: "both", label: "Hepsi" },
+                      { id: "haptics", label: "Yalnız haptik" },
+                      { id: "speaker", label: "Yalnız hoparlör" },
+                      { id: "off", label: "Kapalı" },
+                    ]}
+                  />
+                </div>
+                {(config.gameAudio === "both" || config.gameAudio === "haptics") && (
+                  <>
+                    <Slider label="Oyun haptiği şiddeti" min={0} max={2} step={0.01} value={config.gameStrength}
+                      onChange={(gameStrength) => set({ gameStrength })} format={pct} />
+                    <Toggle label="Yumuşatma (düşük geçiren)" checked={config.gameLowPass}
+                      onChange={(gameLowPass) => set({ gameLowPass })} />
+                  </>
+                )}
+                <p className="hint">Oyun kendi haptiğini gönderirken sesten haptik geri planda kalır.</p>
+              </Section>
+            )}
             <Section title="Sesten haptik">
               {sourceFields("audio", "Ses kaynağı", config.audio, config.app, (audio) => set({ audio }), (app) => set({ app }))}
               <ul className="effect-list" role="radiogroup" aria-label="Haptik modu">

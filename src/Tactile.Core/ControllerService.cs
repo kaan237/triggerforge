@@ -18,6 +18,7 @@ public sealed class ControllerService : IDisposable
     private long _hapticsStarted;
     private Timer? _hapticStop;
     private volatile HapticBlockSource? _hapticSource;
+    private byte _hapticBuffer = 64;
     internal SpeakerFrameSource? SpeakerSource { get; set; }
     private volatile HapticBlockSource? _tone;
     private bool _disposed;
@@ -56,11 +57,13 @@ public sealed class ControllerService : IDisposable
         }
     }
 
-    internal bool SetHapticSource(HapticBlockSource? source)
+    internal bool SetHapticSource(HapticBlockSource? source, byte bufferLength)
     {
         lock (_lock)
         {
             _hapticSource = source;
+            _hapticBuffer = bufferLength;
+            _haptics?.BufferLength = bufferLength;
             return ReconcileHapticsLocked();
         }
     }
@@ -166,7 +169,7 @@ public sealed class ControllerService : IDisposable
 
             StopHapticsLocked();
             _hapticsStarted = Environment.TickCount64;
-            _haptics = new HapticStreamer(controller, FillHaptics, FillSpeaker);
+            _haptics = new HapticStreamer(controller, FillHaptics, FillSpeaker, _hapticBuffer);
         }
 
         return _haptics.Running;

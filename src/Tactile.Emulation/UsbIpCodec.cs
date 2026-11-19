@@ -56,6 +56,11 @@ internal readonly record struct UrbHeader(
     }
 }
 
+internal sealed record IsoSubmit(UrbHeader Header, byte[] Buffer, byte[] Descriptors)
+{
+    public bool In => Header.Direction == 1;
+}
+
 internal static class UsbIpCodec
 {
     public const ushort Version = 0x0111;
@@ -173,6 +178,71 @@ internal static class UsbIpCodec
 
     public static UrbHeader RetSubmitHeader(uint seqNum, int status, int actualLength) =>
         new(RetSubmit, seqNum, 0, 0, 0, status, actualLength, 0, NonIso, 0, 0);
+
+    public static IsoSubmit ReadIsoSubmit(Stream stream, UrbHeader header)
+    {
+        byte[] buffer = new byte[header.Length];
+        if (header.Direction != 1)
+        {
+            stream.ReadExactly(buffer);
+        }
+
+        byte[] descriptors = new byte[header.Packets * IsoDescriptorSize];
+        stream.ReadExactly(descriptors);
+        return new IsoSubmit(header, buffer, descriptors);
+    }
+
+    public static bool ValidIsoPackets(IsoSubmit submit, int maxPacketSize)
+    {
+        if (maxPacketSize == 0 || submit.Header.Packets is < 1 or > 128)
+        {
+            return false;
+        }
+
+        uint end = 0;
+        for (int i = 0; i < submit.Header.Packets; i++)
+        {
+            Span<byte> descriptor = submit.Descriptors.AsSpan(i * IsoDescriptorSize, IsoDescriptorSize);
+            uint offset = BinaryPrimitives.ReadUInt32BigEndian(descriptor);
+            uint length = BinaryPrimitives.ReadUInt32BigEndian(descriptor[4..]);
+            // IN offsets and lengths must describe a contiguous prefix of the transfer buffer.
+            if (length > maxPacketSize || (ulong)offset + length > (uint)submit.Buffer.Length ||
+                (submit.In && offset != end))
+            {
+                return false;
+            }
+
+            end = offset + length;
+        }
+
+        return true;
+    }
+
+    public static Span<byte> IsoPacketBuffer(IsoSubmit submit, int index)
+    {
+        Span<byte> descriptor = submit.Descriptors.AsSpan(index * IsoDescriptorSize, IsoDescriptorSize);
+        int offset = BinaryPrimitives.ReadInt32BigEndian(descriptor);
+        int length = BinaryPrimitives.ReadInt32BigEndian(descriptor[4..]);
+        BinaryPrimitives.WriteInt32BigEndian(descriptor[8..], length);
+        BinaryPrimitives.WriteInt32BigEndian(descriptor[12..], 0);
+        return submit.Buffer.AsSpan(offset, length);
+    }
+
+    public static void WriteIsoReply(Stream stream, Span<byte> header, IsoSubmit submit, int status, int actualLength)
+    {
+        WriteHeader(header, RetSubmitHeader(submit.Header.SeqNum, status, actualLength) with
+        {
+            StartFrame = submit.Header.StartFrame,
+            Packets = submit.Header.Packets,
+        });
+        stream.Write(header);
+        if (submit.In && actualLength > 0)
+        {
+            stream.Write(submit.Buffer.AsSpan(0, actualLength));
+        }
+
+        stream.Write(submit.Descriptors);
+    }
 
     public static UrbHeader RetUnlinkHeader(uint seqNum, int status) =>
         new(RetUnlink, seqNum, 0, 0, 0, status, 0, 0, 0, 0, 0);

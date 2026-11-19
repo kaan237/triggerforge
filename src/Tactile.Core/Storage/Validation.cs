@@ -97,6 +97,8 @@ public static partial class Validation
                 Speaker = Defined(haptics.Speaker, AudioHapticSource.Off),
                 SpeakerApp = speakerApp[..Math.Min(speakerApp.Length, 260)],
                 SpeakerVolume = Clamp(haptics.SpeakerVolume, 0, 1, 0.8),
+                GameAudio = Defined(haptics.GameAudio, GameAudioMode.Both),
+                GameStrength = Clamp(haptics.GameStrength, 0, 2, 1),
             },
             Mapping = mapping,
             Macros = macros,
@@ -137,6 +139,8 @@ public static partial class Validation
             {
                 Enabled = s.Emulation?.Enabled ?? true,
                 HideController = s.Emulation?.HideController ?? true,
+                Audio = s.Emulation?.Audio ?? true,
+                HapticBuffer = Math.Clamp(s.Emulation?.HapticBuffer ?? 64, 16, 128),
             },
         };
     }

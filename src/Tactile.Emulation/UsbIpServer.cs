@@ -10,14 +10,16 @@ public sealed class UsbIpServer : IUsbIpServer
     private const int HandshakeTimeoutMs = 5000;
 
     private readonly TcpListener _listener;
+    private readonly Func<long>? _isoClock;
     private readonly Lock _gate = new();
     private readonly List<VirtualUsbDevice> _pads = [];
     private readonly List<UsbIpConnection> _connections = [];
     private int _open;
     private volatile bool _disposed;
 
-    internal UsbIpServer(int port)
+    internal UsbIpServer(int port, Func<long>? isoClock = null)
     {
+        _isoClock = isoClock;
         _listener = new TcpListener(IPAddress.Loopback, port);
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
@@ -29,7 +31,11 @@ public sealed class UsbIpServer : IUsbIpServer
     /// <summary>Optional log of every setup packet and connection event (for the first hardware runs).</summary>
     public Action<string>? Log { get; set; }
 
-    public IVirtualPad Create(VirtualKind kind, DualSenseIdentity? identity)
+    internal IVirtualPad CreateDualSense(DualSenseIdentity? identity, bool audio) => Create(VirtualKind.DualSense, identity, audio);
+
+    public IVirtualPad Create(VirtualKind kind, DualSenseIdentity? identity) => Create(kind, identity, audio: false);
+
+    private IVirtualPad Create(VirtualKind kind, DualSenseIdentity? identity, bool audio)
     {
         lock (_gate)
         {
@@ -40,9 +46,12 @@ public sealed class UsbIpServer : IUsbIpServer
                 busNum++;
             }
 
-            VirtualUsbDevice pad = kind == VirtualKind.DualSense
-                ? new VirtualDualSense(this, busNum, identity)
-                : new VirtualXbox360(this, busNum);
+            VirtualUsbDevice pad = kind switch
+            {
+                VirtualKind.DualSense when audio => new VirtualDualSense.WithAudio(this, busNum, identity),
+                VirtualKind.DualSense => new VirtualDualSense(this, busNum, identity),
+                _ => new VirtualXbox360(this, busNum),
+            };
             _pads.Add(pad);
             return pad;
         }
@@ -163,7 +172,7 @@ public sealed class UsbIpServer : IUsbIpServer
                 return;
             }
 
-            connection = new UsbIpConnection(stream, pad);
+            connection = new UsbIpConnection(stream, pad, _isoClock);
             lock (_gate)
             {
                 _connections.Add(connection);

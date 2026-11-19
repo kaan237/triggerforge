@@ -872,3 +872,88 @@ Both files downloaded from the URLs in §8; size and SHA-256 match; `Get-Authent
 |---|---|---|
 | `USBip-0.9.8.1-x64.exe` | `Cloudyne Systems (Scheibling Consulting AB)` (OSSign) | GlobalSign GCC R45 EV CodeSigning CA 2020 |
 | `HidHide_1.5.230_x64.exe` | `Nefarius Software Solutions e.U.` | DigiCert Trusted G4 Code Signing RSA4096 SHA384 2021 CA1 |
+
+---
+
+## 10. Audio function (phase 5b)
+
+Facts gathered 2026-11-19 from the reference sources listed in the clean-room note
+(DualSenseClient emulation layer, DS5Dongle, SAxense), written in our own words. None of
+this is verified on our hardware yet.
+
+### 10.1 ISO URBs over USB/IP
+
+- A SUBMIT is ISO when `number_of_packets` is neither 0 nor `0xFFFFFFFF`.
+- ISO OUT: header, then `transfer_buffer_length` payload bytes, then `number_of_packets` ×
+  16-byte descriptors. ISO IN: header, then the descriptors (no payload).
+- Descriptor (big-endian u32 ×4): `offset` in the transfer buffer, `length` requested,
+  `actual_length`, `status` (signed).
+- RET_SUBMIT for ISO: header (`status` 0, `start_frame` echoed, `number_of_packets` same,
+  `error_count` = failed packets), then IN payload, then the descriptors echoed with
+  `actual_length`/`status` filled in.
+  - OUT: header `actual_length` = full buffer length; each packet `actual_length = length`.
+  - IN: data stays at each packet's `offset` (not packed); payload runs from 0 to the end of
+    the last packet's data. usbip-win2 rejects the reply if the header `actual_length` is not
+    the sum of the packet `actual_length`s, so a short packet before a later one must have its
+    `actual_length` raised to cover the zero gap (simplest: always fill whole packets).
+- Reasonable limits: at most 128 packets per URB; reject packets whose `offset + length`
+  exceeds the buffer or whose `length` exceeds wMaxPacketSize (reply with the descriptors
+  echoed, status −EINVAL).
+- UNLINK of a queued ISO URB: RET_UNLINK −ECONNRESET and no RET_SUBMIT for it.
+
+### 10.2 Pacing
+
+- Each ISO endpoint processes **one packet per 1 ms frame**, in order; a URB is answered
+  only after its last packet (an N-packet URB completes ≈ N ms after it starts). Completing
+  early is what the reference avoids: continuous audio streams drift if frames are lost or
+  rushed.
+- When the timer runs late, the missed frames are processed at once (catch-up), so the
+  average stays 1 ms. Idle time with no URB queued is not replayed; a new URB starts on the
+  next frame.
+- `start_frame` is ignored for scheduling and echoed back.
+- Needs `timeBeginPeriod(1)`; the default 15.6 ms timer breaks the cadence.
+
+### 10.3 Speed, endpoints, descriptors
+
+- With audio, export **full speed** (2). ISO endpoints bInterval 1 (1 ms), interrupt
+  endpoints bInterval 4 (4 ms, the real pad's rate).
+- Speaker EP `0x01` ISO OUT adaptive: 4 ch × 16 bit × 48 = 384 bytes per 1 ms packet,
+  wMaxPacketSize 392 (`88 01`).
+- Mic EP `0x82` ISO IN async: 2 ch × 16 bit × 48 = 192 bytes per packet. Advertise
+  wMaxPacketSize **192** (`C0 00`), not the real pad's 196: over USB/IP the host treats 196
+  as nominal and pulls 49 frames per ms, lowering pitch by 48/49.
+- Interfaces: 0 audio control, 1 speaker streaming (alt 0/1), 2 mic streaming (alt 0/1),
+  3 HID. No IAD, no serial. bcdUSB 2.00. The configuration is section 3.1 with the
+  intervals and mic size above.
+- The HID report descriptor request arrives as an **interface** request (`81 06 2200`) with
+  `wIndex` = 3. Class requests are routed by `wIndex` low byte (interface).
+- Device qualifier, BOS, MS OS descriptors: stall.
+
+### 10.4 Standard and UAC1 control requests
+
+| Request | Reply |
+|---|---|
+| SET_INTERFACE (`01 0B`) on interface 1 or 2, alt 0/1 | accept; other alt: stall. Interface 1 change resets the speaker path; interface 2 alt 1 = mic active |
+| SET_CONFIGURATION | every interface back to alt 0 |
+| GET_INTERFACE (`81 0A`) | 1 byte, current alt |
+| Endpoint sampling frequency SET_CUR/GET_CUR (`22`/`A2`) | stall (the class endpoint descriptor declares no frequency control) — **unverified** whether Windows sends it |
+| Feature unit: `wIndex` high byte = unit (2 speaker, 5 mic), `wValue` high byte = selector (1 mute, 2 volume) | see below; anything else stalls |
+| Mute SET_CUR (`21 01`, 1 B) / GET_CUR (`A1 81`, 1 B) | store / return (starts 0). Mute GET_MIN/MAX/RES: stall |
+| Volume SET_CUR (`21 01`, 2 B LE) | store (not applied to PCM) |
+| Volume GET_CUR/MIN/MAX/RES (`A1 81/82/83/84`, 2 B LE, 1/256 dB) | unit 2: CUR 0x0000, MIN 0x9C00 (−100 dB), MAX 0x0000, RES 0x0100. Unit 5: CUR 0x3000 (+48 dB), MIN 0x0000, MAX 0x3000, RES 0x007A |
+
+### 10.5 Data path
+
+- Speaker stream: 4 ch interleaved S16LE 48 kHz, channel mask 0x0033. Channels 1-2 (front
+  L/R) = speaker; channels 3-4 (rear pair) = left/right voice-coil actuators.
+- Haptics to Bluetooth: take 512 frames (10.667 ms) of channels 3-4, average each 16
+  frames (→ 32 frames at 3 kHz), convert to s8 (sample / 256 × strength, clamp), into the
+  `0x32` / `0x36` haptic payload. Strength 0-2 after decimation.
+- Speaker to Bluetooth: channels 1-2 → the 5a speaker path (512 → 480, Opus 200 B, `0x36`).
+- Priority: while the game sent a non-zero haptic payload in the last 100 ms, the game's
+  haptics win over audio-derived (5a) haptics. All-zero game payloads are ignored until the
+  game sends its first non-zero one.
+- Latency target around 3 blocks (≈ 32 ms); drop a block when the queue grows past that.
+- Mic with no data: zero-filled 192-byte packets every ms (keeps the host streaming).
+- Open (needs a capture): packets per URB Windows sends, whether it sends the endpoint
+  frequency SET_CUR, its reaction to early/late completions, its `start_frame` values.

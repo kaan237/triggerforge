@@ -16,6 +16,7 @@ public enum StickShape { Round, Square }
 public enum EmulationMode { Off, Xbox360, DualSense }
 
 public enum AudioHapticSource { Off, System, App }
+public enum GameAudioMode { Both, Haptics, Speaker, Off }
 
 /// <summary>Everything one profile sets. File format: docs/contract.md.</summary>
 public sealed record Profile
@@ -162,4 +163,7 @@ public sealed record HapticsConfig
     public AudioHapticSource Speaker { get; init; }
     public string SpeakerApp { get; init; } = "";
     public double SpeakerVolume { get; init; } = 0.8;
+    public GameAudioMode GameAudio { get; init; }
+    public double GameStrength { get; init; } = 1;
+    public bool GameLowPass { get; init; }
 }

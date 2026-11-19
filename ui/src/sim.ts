@@ -123,7 +123,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     });
   const sendProfiles = () => emit({ type: "profiles", list: clone(profiles), activeId });
 
-  function sendHaptics(force = false) {
+  function sendHaptics(force = false, gamePlaying = emulationStatus().audio === "playing") {
     const h = active().haptics;
     const source = h.audio === "off" ? h.speaker : h.audio;
     const app = h.audio === "off" ? h.speakerApp : h.app;
@@ -131,7 +131,8 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       .find((name) => name !== null && !audioApps.some((a) => a.name.toLowerCase() === name.toLowerCase()));
     const next: HapticStatus = {
       type: "haptics",
-      streaming: source !== "off" || h.clicks || h.rumbleToHaptics,
+      streaming: source !== "off" || h.clicks || h.rumbleToHaptics ||
+        (gamePlaying && h.gameAudio !== "off"),
       source: source === "app" ? `app:${app}` : source,
       problem: missingApp !== undefined
         ? missingApp ? `${missingApp} çalışmıyor.` : "Uygulamanın dosya adı boş."
@@ -144,15 +145,20 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   }
 
   function emulationStatus(): EmulationStatus {
-    const mode = active().emulation.mode;
+    const profile = active();
+    const mode = profile.emulation.mode;
     const ready = drivers.usbIp.state === "ready" && (!settings.emulation.hideController || drivers.hidHide.state === "ready");
     const attached = settings.emulation.enabled && mode !== "off" && ready && emuError === null;
+    const audio = attached && mode === "dualSense" && settings.emulation.audio
+      ? profile.games.length > 0 ? "playing" : "ready"
+      : "off";
     return {
       type: "emulation",
       available: true,
       enabled: settings.emulation.enabled,
       mode: attached ? mode : "off",
       attached,
+      audio,
       hidden: attached && settings.emulation.hideController,
       drivers: (Object.keys(drivers) as DriverKind[]).map((kind) => ({ kind, state: drivers[kind].state, version: drivers[kind].version, detail: null })),
       latency: attached ? { p50Ms: 2.1 + Math.random() * 0.4, p95Ms: 3.8 + Math.random() * 0.8, samples: 512 } : { p50Ms: 0, p95Ms: 0, samples: 0 },
@@ -167,6 +173,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       emit({ type: "notice", kind: "emulation", message: "Steam Input bu oyunda açıksa çift kontrolcü görünür; oyunun Steam ayarlarında Steam Input'u kapatın." });
     }
     emit(e);
+    sendHaptics(false, e.audio === "playing");
   }
 
   function install(kind: DriverKind) {

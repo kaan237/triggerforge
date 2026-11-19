@@ -368,6 +368,7 @@ internal sealed class Bridge
             mode = s.Mode,
             attached = s.Attached,
             hidden = s.Hidden,
+            audio = s.Audio,
             drivers = s.Drivers.Select(d => new { kind = d.Kind, state = d.State, version = d.Version, detail = d.Detail }),
             latency = new { p50Ms = s.Latency.P50Ms, p95Ms = s.Latency.P95Ms, samples = s.Latency.Samples },
             error = s.Error,

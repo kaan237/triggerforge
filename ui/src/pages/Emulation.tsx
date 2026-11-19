@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { send, type ButtonName, type DriverKind, type DriverState, type DriverStatus, type EmulationConfig, type EmulationMode, type EmulationStatus } from "../host";
 import { buttonDefs, buttonLabel } from "../mapping";
 import { useApp } from "../state";
-import { DraftBar, PageHead, Section, Segmented, Toggle } from "../ui";
+import { DraftBar, PageHead, Section, Segmented, Slider, Toggle } from "../ui";
 
 const driverNames: Record<DriverKind, { name: string; role: string }> = {
   usbIp: { name: "usbip-win2", role: "Sanal kontrolcüyü Windows'a takar" },
@@ -17,6 +17,7 @@ const stateLabel: Record<DriverState, string> = {
 };
 
 const modeLabel: Record<EmulationMode, string> = { off: "Kapalı", xbox360: "Xbox 360", dualSense: "DualSense" };
+const audioLabel: Record<EmulationStatus["audio"], string> = { off: "Kapalı", ready: "Hazır", playing: "Oynatılıyor" };
 
 function DriverCard({ driver }: { driver: DriverStatus }) {
   const { installs } = useApp();
@@ -57,6 +58,8 @@ function LiveStatus({ e }: { e: EmulationStatus }) {
       <dd>{e.attached ? `${modeLabel[e.mode]} takılı` : "takılı değil"}</dd>
       <dt>Gerçek</dt>
       <dd>{e.hidden ? "oyunlardan gizli" : "görünür"}</dd>
+      <dt>Ses arayüzü</dt>
+      <dd>{audioLabel[e.audio]}</dd>
       <dt>Gecikme</dt>
       <dd className="num" title="Oyunun gönderdiği titreşim ve ışığın kontrolcüye yazılması, p50 / p95">
         {latency}
@@ -103,6 +106,17 @@ function SystemPanel() {
             Geri getir
           </button>
         </div>
+      </Section>
+
+      <Section title="Ses ve haptik akışı">
+        <Toggle
+          label="Ses arayüzü (oyun haptiği ve hoparlörü)"
+          hint="Bu ayar değiştiğinde sanal DualSense çıkarılıp yeniden takılır."
+          checked={s.audio}
+          onChange={(audio) => save({ audio })}
+        />
+        <Slider label="Haptik tamponu" min={16} max={128} value={s.hapticBuffer} onChange={(hapticBuffer) => save({ hapticBuffer })} />
+        <p className="hint">Yalnız haptik akışında küçük tampon gecikmeyi, büyük tampon kesintileri azaltır.</p>
       </Section>
 
       <Section title="Sürücüler">

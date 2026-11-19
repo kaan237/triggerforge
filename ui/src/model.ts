@@ -101,6 +101,7 @@ export function defaultProfile(name = "Varsayılan", id = newId()): Profile {
     gyro: { sensitivity: 1, smoothing: 0.2, invertX: false, invertY: false },
     rumble: { strength: 1 },
     haptics: {
+      gameAudio: "both", gameStrength: 1, gameLowPass: false,
       audio: "off", app: "", mode: "game", strength: 1, rumbleToHaptics: false, clicks: false, clickStrength: 0.6,
       speaker: "off", speakerApp: "", speakerVolume: 0.8,
     },
@@ -127,7 +128,7 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     idleSleepMinutes: 15,
     lowBatteryWarnings: [20, 10],
     runAsAdminHint: false,
-    emulation: { enabled: true, hideController: true },
+    emulation: { enabled: true, hideController: true, audio: true, hapticBuffer: 64 },
   };
 }
 
@@ -157,6 +158,9 @@ export function normalizeProfile(p: Partial<Profile> & { id: string }): Profile 
     gyro: { ...d.gyro, ...p.gyro },
     rumble: { ...d.rumble, ...p.rumble },
     haptics: {
+      gameAudio: h?.gameAudio === "haptics" || h?.gameAudio === "speaker" || h?.gameAudio === "off" ? h.gameAudio : d.haptics.gameAudio,
+      gameStrength: typeof h?.gameStrength === "number" && Number.isFinite(h.gameStrength) ? Math.min(2, Math.max(0, h.gameStrength)) : d.haptics.gameStrength,
+      gameLowPass: h?.gameLowPass === true,
       audio: h?.audio === "system" || h?.audio === "app" ? h.audio : d.haptics.audio,
       app: typeof h?.app === "string" ? h.app.trim().slice(0, 260) : d.haptics.app,
       mode: h?.mode === "film" || h?.mode === "music" ? h.mode : d.haptics.mode,

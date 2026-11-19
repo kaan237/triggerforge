@@ -1,5 +1,6 @@
 using Tactile.Audio;
 using Tactile.Device.DualSense;
+using Tactile.Emulation;
 
 namespace Tactile.Core;
 
@@ -17,7 +18,7 @@ internal sealed class HapticEngine : IDisposable
     private readonly Lock _captureLock = new();
     private readonly Lock _speakerLock = new();
     private readonly List<CaptureTarget> _captures = new(2);
-    private volatile State _state = new(new(false, "off", null), null, null, null, null);
+    private volatile State _state = new(new(false, "off", null), null, null, null, null, null);
     private volatile HapticsConfig _config = new();
     private volatile bool _disposed;
 
@@ -38,7 +39,7 @@ internal sealed class HapticEngine : IDisposable
         {
             State state = _state;
             string? problem = state.Status.Problem ?? state.Target?.Problem
-                ?? state.Playback?.Problem ?? state.Speaker?.Problem;
+                ?? state.Game?.ActivePlayback?.Problem ?? state.Playback?.Problem ?? state.Speaker?.Problem;
             return problem == state.Status.Problem ? state.Status : state.Status with { Problem = problem };
         }
     }
@@ -46,12 +47,26 @@ internal sealed class HapticEngine : IDisposable
     internal IReadOnlyList<AudioApp> ListApps() => _audio.ListApps();
 
     // Called by the core's serialized configuration path, independently of WASAPI startup.
-    internal void Configure(HapticsConfig config, Link? link)
+    internal void Configure(HapticsConfig config, Link? link, IVirtualAudio? virtualAudio = null)
     {
+        bool gameEnabled = virtualAudio is not null && config.GameAudio != GameAudioMode.Off;
+        // Windows can keep the speaker interface selected long after a game stops; only recent sound
+        // holds the Bluetooth stream (and with it the loss of motor rumble) open.
+        bool gameActive = gameEnabled && virtualAudio!.SpeakerActive &&
+            _state.Game is { } running && running.Source == virtualAudio && running.HasRecentSound;
         bool needed = config.Audio != AudioHapticSource.Off || config.Speaker != AudioHapticSource.Off
-            || config.Clicks || config.RumbleToHaptics;
+            || config.Clicks || config.RumbleToHaptics || gameActive;
         bool bluetooth = link == Link.Bluetooth;
         State previous = _state;
+        GameInput? game = bluetooth && gameEnabled ? previous.Game : null;
+        if (bluetooth && gameEnabled && (game?.Source != virtualAudio || game?.Mode != config.GameAudio))
+        {
+            SpeakerPlayback? gamePlayback = config.GameAudio is GameAudioMode.Both or GameAudioMode.Speaker
+                ? OpenSpeaker() : null;
+            game = new GameInput(virtualAudio!, config, _time, gamePlayback);
+        }
+
+        game?.Configure(config);
         CaptureTarget? target = bluetooth ? FindTarget(config.Audio, config.App, previous.Target, previous.Speaker) : null;
         CaptureTarget? speaker = bluetooth ? FindTarget(config.Speaker, config.SpeakerApp, target, previous.Speaker, previous.Target) : null;
         AudioHaptics? dsp = target is null ? null : target == previous.Target ? previous.Dsp : new AudioHaptics(config.Mode);
@@ -78,9 +93,9 @@ internal sealed class HapticEngine : IDisposable
             _ => null,
         };
         // The streamer can ask for silence as soon as it starts its preroll.
-        if (previous.Target != target || previous.Speaker != speaker)
+        if (previous.Target != target || previous.Speaker != speaker || previous.Game != game)
         {
-            Publish(new State(previous.Status, target, dsp, speaker, playback));
+            Publish(new State(previous.Status, target, dsp, speaker, playback, game));
         }
 
         bool streaming = _setSource(needed ? _fill : null);
@@ -146,11 +161,16 @@ internal sealed class HapticEngine : IDisposable
     {
         lock (_speakerLock)
         {
-            SpeakerPlayback? old = _state.Playback;
+            State old = _state;
             _state = state;
-            if (old != state.Playback)
+            if (old.Playback != state.Playback)
             {
-                old?.Feed?.Dispose();
+                old.Playback?.Feed?.Dispose();
+            }
+
+            if (old.Game != state.Game)
+            {
+                old.Game?.Dispose();
             }
         }
     }
@@ -159,7 +179,8 @@ internal sealed class HapticEngine : IDisposable
     {
         lock (_speakerLock)
         {
-            if (_state.Playback is not { Feed: { } feed, Problem: null } playback)
+            State state = _state;
+            if ((state.Game?.ActivePlayback ?? state.Playback) is not { Feed: { } feed, Problem: null } playback)
             {
                 return false;
             }
@@ -289,7 +310,7 @@ internal sealed class HapticEngine : IDisposable
     public void Dispose()
     {
         _disposed = true;
-        Publish(new State(new HapticStatus(false, "off", null), null, null, null, null));
+        Publish(new State(new HapticStatus(false, "off", null), null, null, null, null, null));
         _setSource(null);
         lock (_captureLock)
         {
@@ -304,7 +325,8 @@ internal sealed class HapticEngine : IDisposable
 
     private void Fill(int _, Span<sbyte> samples)
     {
-        AudioHaptics? dsp = _state.Dsp;
+        State state = _state;
+        AudioHaptics? dsp = state.Dsp;
         if (dsp is null)
         {
             samples.Clear();
@@ -312,6 +334,11 @@ internal sealed class HapticEngine : IDisposable
         else
         {
             dsp.Read(samples);
+        }
+
+        if (state.Game is { HapticsEnabled: true, Source.SpeakerActive: true } game)
+        {
+            game.Audio.OverrideIfLive(samples);
         }
 
         HapticsConfig config = _config;
@@ -370,10 +397,93 @@ internal sealed class HapticEngine : IDisposable
     }
 
     private sealed record State(HapticStatus Status, CaptureTarget? Target, AudioHaptics? Dsp,
-        CaptureTarget? Speaker, SpeakerPlayback? Playback)
+        CaptureTarget? Speaker, SpeakerPlayback? Playback, GameInput? Game)
     {
         public bool Uses(CaptureTarget target) =>
             Status.Streaming && (Target == target || (Speaker == target && Playback?.Problem is null));
+    }
+
+    private sealed class GameInput : IDisposable
+    {
+        private readonly Lock _gate = new();
+        private readonly SpeakerPlayback? _playback;
+        private static readonly TimeSpan RecentSound = TimeSpan.FromSeconds(3);
+        private readonly TimeProvider _time;
+        private const long NoSound = long.MinValue;
+        private long _lastSound = NoSound;
+        private bool _buffered;
+        private bool _disposed;
+
+        public GameInput(IVirtualAudio source, HapticsConfig config, TimeProvider time, SpeakerPlayback? playback)
+        {
+            Source = source;
+            Mode = config.GameAudio;
+            _time = time;
+            Audio = new GameAudio(time);
+            _playback = playback;
+            if (playback?.Feed is { } feed)
+            {
+                Audio.Speaker += feed.Push;
+            }
+
+            Configure(config);
+            Source.Audio += Push;
+        }
+
+        public IVirtualAudio Source { get; }
+        public GameAudioMode Mode { get; }
+        public GameAudio Audio { get; }
+        public bool HapticsEnabled => Mode is GameAudioMode.Both or GameAudioMode.Haptics;
+        public SpeakerPlayback? ActivePlayback => Source.SpeakerActive ? _playback : null;
+
+        /// <summary>Non-silent game audio arrived in the last few seconds.</summary>
+        public bool HasRecentSound => Volatile.Read(ref _lastSound) is long last && last != NoSound && _time.GetElapsedTime(last) < RecentSound;
+
+        public void Configure(HapticsConfig config)
+        {
+            Audio.HapticStrength = (float)config.GameStrength;
+            Audio.LowPass = config.GameLowPass;
+            if (!Source.SpeakerActive)
+            {
+                lock (_gate)
+                {
+                    if (_buffered && !Source.SpeakerActive)
+                    {
+                        Audio.Clear();
+                        _playback?.Feed?.Clear();
+                        _buffered = false;
+                    }
+                }
+            }
+        }
+
+        private void Push(ReadOnlySpan<short> frames)
+        {
+            lock (_gate)
+            {
+                if (!_disposed && Source.SpeakerActive)
+                {
+                    if (frames.ContainsAnyExcept((short)0))
+                    {
+                        Volatile.Write(ref _lastSound, _time.GetTimestamp());
+                    }
+
+                    Audio.Push(frames);
+                    _buffered = true;
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            Source.Audio -= Push;
+            lock (_gate)
+            {
+                _disposed = true;
+            }
+
+            _playback?.Feed?.Dispose();
+        }
     }
 
     private sealed class CaptureTarget(AudioTarget target)

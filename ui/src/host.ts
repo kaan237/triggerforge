@@ -174,7 +174,7 @@ export type EmulationConfig = {
   hideMappedButtons: boolean;
 };
 
-export type EmulationSettings = { enabled: boolean; hideController: boolean };
+export type EmulationSettings = { enabled: boolean; hideController: boolean; audio: boolean; hapticBuffer: number };
 
 export type DriverKind = "usbIp" | "hidHide";
 export type DriverState = "missing" | "ready" | "unsupported" | "error";
@@ -182,6 +182,7 @@ export type DriverStatus = { kind: DriverKind; state: DriverState; version: stri
 
 export type EmulationStatus = {
   type: "emulation";
+  audio: "off" | "ready" | "playing";
   available?: boolean;
   enabled: boolean;
   mode: EmulationMode;
@@ -195,6 +196,9 @@ export type EmulationStatus = {
 export type DriverProgress = { type: "driver.progress"; kind: DriverKind; message: string; done: boolean; ok: boolean };
 
 export type HapticsConfig = {
+  gameAudio: "both" | "haptics" | "speaker" | "off";
+  gameStrength: number;
+  gameLowPass: boolean;
   audio: "off" | "system" | "app";
   app: string;
   mode: "game" | "film" | "music";

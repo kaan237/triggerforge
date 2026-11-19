@@ -94,11 +94,12 @@ public sealed class AppCore : IDisposable
         _mapper = new Mapper(_platform, new MappingHost(this), Now, threaded: runTimer);
         _startTimestamp = time.GetTimestamp();
         Controllers = controllers;
-        _haptics = new HapticEngine(audio ?? AudioSystemFactory.Create(), Controllers.SetHapticSource,
+        Settings = new SettingsStore(dataDir);
+        _haptics = new HapticEngine(audio ?? AudioSystemFactory.Create(),
+            source => Controllers.SetHapticSource(source, (byte)Settings.Current.Emulation.HapticBuffer),
             () => Controllers.Output, _outbox.Enqueue, time);
         Controllers.SpeakerSource = _haptics.ReadSpeakerFrame;
         Profiles = new ProfileStore(dataDir);
-        Settings = new SettingsStore(dataDir);
 
         foreach (string broken in Profiles.BrokenFiles.Concat(Settings.BrokenFiles))
         {
@@ -459,9 +460,12 @@ public sealed class AppCore : IDisposable
             }
 
             activeProfile = _active.Profile;
+            HapticsConfig haptics = activeProfile.Haptics;
+            bool gameSpeaker = haptics.GameAudio is GameAudioMode.Both or GameAudioMode.Speaker &&
+                _emulation?.VirtualAudio?.SpeakerActive == true;
             byte? speakerVolume = controller is { Connected: true, Details.Link: Link.Bluetooth } &&
-                activeProfile.Haptics.Speaker != AudioHapticSource.Off
-                ? (byte)Math.Round(activeProfile.Haptics.SpeakerVolume * 100)
+                (haptics.Speaker != AudioHapticSource.Off || gameSpeaker)
+                ? (byte)Math.Round(haptics.SpeakerVolume * 100)
                 : null;
             if (_speakerVolume != speakerVolume)
             {
@@ -484,7 +488,7 @@ public sealed class AppCore : IDisposable
             if (!_disposed)
             {
                 Link? link = Controllers.Controller is { Connected: true } connected ? connected.Details.Link : null;
-                _haptics.Configure(ActiveProfile.Haptics, link);
+                _haptics.Configure(ActiveProfile.Haptics, link, _emulation?.VirtualAudio);
             }
         }
 

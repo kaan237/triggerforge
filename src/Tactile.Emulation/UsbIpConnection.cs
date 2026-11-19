@@ -1,29 +1,37 @@
 using System.Diagnostics;
 using System.Net.Sockets;
+using Tactile.Device.DualSense;
 
 namespace Tactile.Emulation;
 
-/// <summary>URB phase of one imported device: one TCP connection, a reader thread and an IN pacer thread.</summary>
+/// <summary>URB phase of one imported device, with separate interrupt and audio pacers.</summary>
 internal sealed class UsbIpConnection
 {
     public const int MaxTransfer = 65536;
     public const int MaxPending = 64;
-    public const int MaxIsoPackets = 1024;
+    private const int MaxWireIsoPackets = 1024;
 
     private readonly NetworkStream _stream;
     private readonly VirtualUsbDevice _device;
-    private readonly Lock _write = new();
+    private readonly object _write = new();
     private readonly List<(uint SeqNum, int Length)> _pending = [];
     private readonly object _wake = new();
     private readonly byte[] _replyHeader = new byte[UsbIpCodec.HeaderSize];
+    private readonly IsoScheduler? _iso;
     private bool _signaled;
     private int _closed;
     private long _lastSend;
 
-    public UsbIpConnection(NetworkStream stream, VirtualUsbDevice device)
+    public UsbIpConnection(NetworkStream stream, VirtualUsbDevice device, Func<long>? isoClock = null)
     {
         _stream = stream;
         _device = device;
+        if (device is VirtualDualSense.WithAudio audio)
+        {
+            long started = Stopwatch.GetTimestamp();
+            _iso = new IsoScheduler(isoClock ?? (() => (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds), audio,
+                (submit, length) => ReplyIso(submit, 0, length));
+        }
     }
 
     public VirtualUsbDevice Device => _device;
@@ -36,8 +44,21 @@ internal sealed class UsbIpConnection
         _device.InputReady = Wake;
         var pacer = new Thread(Pace) { IsBackground = true, Name = $"usbip pacer {_device.BusId}" };
         pacer.Start();
+        Thread? audioPacer = null;
         try
         {
+            if (_iso is { } iso)
+            {
+                var thread = new Thread(() => PaceIso(iso))
+                {
+                    IsBackground = true,
+                    Name = $"usbip audio {_device.BusId}",
+                    Priority = ThreadPriority.AboveNormal,
+                };
+                thread.Start();
+                audioPacer = thread;
+            }
+
             byte[] header = new byte[UsbIpCodec.HeaderSize];
             while (!Closed)
             {
@@ -59,6 +80,7 @@ internal sealed class UsbIpConnection
         finally
         {
             Close();
+            audioPacer?.Join();
         }
     }
 
@@ -69,17 +91,36 @@ internal sealed class UsbIpConnection
             return;
         }
 
-        _device.Detach();
-        _stream.Dispose();
+        if (_iso is null)
+        {
+            _device.Detach();
+            _stream.Dispose();
+        }
+        else
+        {
+            _stream.Dispose();
+            lock (_write)
+            {
+                _device.Detach();
+                Monitor.Pulse(_write);
+            }
+        }
+
         Wake();
     }
 
     private void Submit(UrbHeader h)
     {
         bool iso = h.Packets != UsbIpCodec.NonIso && h.Packets != 0;
-        if (h.Length < 0 || h.Length > MaxTransfer || (iso && (h.Packets < 0 || h.Packets > MaxIsoPackets)))
+        if (h.Length < 0 || h.Length > MaxTransfer || (iso && (h.Packets < 0 || h.Packets > MaxWireIsoPackets)))
         {
             throw new InvalidDataException("bad submit lengths");
+        }
+
+        if (iso && _iso is { } scheduler)
+        {
+            SubmitIso(h, scheduler);
+            return;
         }
 
         bool dirIn = h.Direction == 1;
@@ -105,16 +146,19 @@ internal sealed class UsbIpConnection
 
         if (h.Endpoint == 0)
         {
-            SetupPacket s = h.SetupPacket;
-            ControlResult r = _device.Control(s, payload, timestamp);
-            if (s.In)
+            if (_iso is null)
             {
-                int n = r.Status == 0 ? Math.Min(r.Data.Length, Math.Min(h.Length, s.Length)) : 0;
-                Reply(h.SeqNum, r.Status, r.Data.AsSpan(0, n));
+                Control(h, payload, timestamp);
             }
             else
             {
-                Reply(h.SeqNum, r.Status, [], r.Status == 0 ? payload.Length : 0);
+                lock (_write)
+                {
+                    if (!Closed)
+                    {
+                        Control(h, payload, timestamp);
+                    }
+                }
             }
         }
         else if (dirIn && h.Endpoint == _device.InEndpoint)
@@ -148,6 +192,50 @@ internal sealed class UsbIpConnection
         }
     }
 
+    private void Control(UrbHeader h, ReadOnlySpan<byte> payload, long timestamp)
+    {
+        SetupPacket s = h.SetupPacket;
+        ControlResult r = _device.Control(s, payload, timestamp);
+        if (s.In)
+        {
+            int n = r.Status == 0 ? Math.Min(r.Data.Length, Math.Min(h.Length, s.Length)) : 0;
+            Reply(h.SeqNum, r.Status, r.Data.AsSpan(0, n));
+        }
+        else
+        {
+            Reply(h.SeqNum, r.Status, [], r.Status == 0 ? payload.Length : 0);
+        }
+    }
+
+    private void SubmitIso(UrbHeader header, IsoScheduler scheduler)
+    {
+        IsoSubmit submit = UsbIpCodec.ReadIsoSubmit(_stream, header);
+        int maxPacketSize = VirtualDualSense.WithAudio.IsoPacketSize(header.Endpoint, header.Direction);
+        lock (_write)
+        {
+            if (Closed)
+            {
+                return;
+            }
+
+            if (!UsbIpCodec.ValidIsoPackets(submit, maxPacketSize) || !scheduler.TryEnqueue(submit))
+            {
+                ReplyIso(submit, UsbIpCodec.EInval, 0);
+                return;
+            }
+
+            Monitor.Pulse(_write);
+        }
+    }
+
+    private void ReplyIso(IsoSubmit submit, int status, int actualLength)
+    {
+        if (!Closed)
+        {
+            UsbIpCodec.WriteIsoReply(_stream, _replyHeader, submit, status, actualLength);
+        }
+    }
+
     private void Unlink(UrbHeader h)
     {
         uint target = unchecked((uint)h.Field14);
@@ -159,8 +247,50 @@ internal sealed class UsbIpConnection
                 _pending.RemoveAt(i);
             }
 
-            UsbIpCodec.WriteHeader(_replyHeader, UsbIpCodec.RetUnlinkHeader(h.SeqNum, i >= 0 ? UsbIpCodec.EConnReset : 0));
+            bool cancelled = i >= 0 || _iso?.Unlink(target) == true;
+            UsbIpCodec.WriteHeader(_replyHeader, UsbIpCodec.RetUnlinkHeader(h.SeqNum, cancelled ? UsbIpCodec.EConnReset : 0));
             _stream.Write(_replyHeader);
+        }
+    }
+
+    private void PaceIso(IsoScheduler scheduler)
+    {
+        bool timerActive = false;
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                TimerResolution.Begin();
+                timerActive = true;
+            }
+
+            while (true)
+            {
+                lock (_write)
+                {
+                    if (Closed)
+                    {
+                        return;
+                    }
+
+                    int wait = scheduler.Tick();
+                    if (wait != 0)
+                    {
+                        Monitor.Wait(_write, wait);
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+            Close();
+        }
+        finally
+        {
+            if (timerActive)
+            {
+                TimerResolution.End();
+            }
         }
     }
 
