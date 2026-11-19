@@ -1,5 +1,6 @@
 import { L, modelName } from "./i18n";
 import { useEffect, useState } from "react";
+import logo from "./assets/logo-64.png";
 import { inHost, type Profile, type Status } from "./host";
 import { deepEqual, linkLabel } from "./model";
 import { Notices } from "./Notices";
@@ -97,7 +98,10 @@ function Shell() {
   return (
     <div className="shell">
       <nav className="rail">
-        <div className="wordmark">TriggerForge</div>
+        <div className="wordmark">
+          <img className="brand-icon" src={logo} width={24} height={24} alt="" aria-hidden />
+          TriggerForge
+        </div>
         <ul>
           {sections.map((s) => (
             <li key={s.id}>

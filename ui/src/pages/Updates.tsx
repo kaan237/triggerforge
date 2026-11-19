@@ -1,3 +1,4 @@
+import logo from "../assets/logo-64.png";
 import { send, type UpdateSettings } from "../host";
 import { L, locale } from "../i18n";
 import { useApp } from "../state";
@@ -5,6 +6,7 @@ import { pct, Toggle } from "../ui";
 
 export function Updates({ settings, onChange }: { settings: UpdateSettings; onChange: (settings: UpdateSettings) => void }) {
   const { status, update } = useApp();
+  const currentVersion = update?.current ?? status?.version ?? "—";
   const state = update?.state ?? "idle";
   const busy = state === "checking" || state === "downloading";
   const lastCheck = update?.lastCheck;
@@ -17,7 +19,7 @@ export function Updates({ settings, onChange }: { settings: UpdateSettings; onCh
       <Toggle label={L("Check for updates automatically", "Güncellemeleri otomatik denetle")} checked={settings.autoCheck} onChange={(autoCheck) => onChange({ autoCheck })} />
       <div className="setting-row">
         <span>{L("Current version", "Mevcut sürüm")}</span>
-        <span className="num">{update?.current ?? status?.version ?? "—"}</span>
+        <span className="num">{currentVersion}</span>
       </div>
       <div className="setting-row">
         <span>{L("Last check", "Son denetim")}</span>
@@ -56,6 +58,15 @@ export function Updates({ settings, onChange }: { settings: UpdateSettings; onCh
             <button className="button primary" onClick={() => send({ type: "update.install" })}>{L("Install and restart", "Kur ve yeniden başlat")}</button>
           )}
         </div>
+      </div>
+      <div className="update-about">
+        <span>{L("About", "Hakkında")}</span>
+        <img className="brand-icon" src={logo} width={24} height={24} alt="" aria-hidden />
+        <span>TriggerForge {currentVersion}</span>
+        <span>GPL-3.0-or-later</span>
+        <button type="button" className="update-notes-link" onClick={() => send({ type: "update.openPage" })}>
+          {L("Release notes", "Sürüm notları")}
+        </button>
       </div>
     </section>
   );

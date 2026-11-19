@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon/triggerforge-256.png" width="128" height="128" alt="TriggerForge logo"></p>
+
 # TriggerForge
 
 TriggerForge is a **DualSense PC control center** for Windows. The interface is
@@ -55,7 +57,7 @@ the installer to `artifacts/`. It prints the SHA-256 hashes of the packages.
 For a signed release, omit `-NoSign` and use `-Thumbprint` if you need to select a
 different code-signing certificate in `Cert:\CurrentUser\My`.
 
-TriggerForge is free software under the [GNU General Public License v3.0 or later](LICENSE): you may use, study, change and share it, and anything you distribute that is based on it must be released under the same license with its source code and keep the original copyright notice. Bundled components keep their own licenses, listed in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+TriggerForge is free software under the [GNU General Public License v3.0 or later](LICENSE): you may use, study, change and share it, and anything you distribute that is based on it must be released under the same license with its source code and keep the original copyright notice. Bundled components keep their own licenses, listed in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt). The TriggerForge name and logo are not covered by the GPL and stay reserved to the author: unchanged copies of an official release may be shared under that name, but a modified version must use its own name and logo.
 
 ## Türkçe
 
@@ -116,4 +118,4 @@ paketini `artifacts/` klasörüne yazar. Paketlerin SHA-256 özetlerini gösteri
 İmzalı paket için `-NoSign` seçeneğini kaldırın. `Cert:\CurrentUser\My`
 içinde başka bir imzalama sertifikası seçmek için `-Thumbprint` kullanın.
 
-TriggerForge, [GNU Genel Kamu Lisansı v3.0 veya sonrası](LICENSE) ile özgür yazılımdır: kullanabilir, inceleyebilir, değiştirebilir ve paylaşabilirsiniz; buna dayanarak dağıttığınız her şey aynı lisansla, kaynak koduyla ve özgün telif bildirimi korunarak yayımlanmalıdır. Paketlenen bileşenler kendi lisanslarını korur; liste [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) dosyasındadır.
+TriggerForge, [GNU Genel Kamu Lisansı v3.0 veya sonrası](LICENSE) ile özgür yazılımdır: kullanabilir, inceleyebilir, değiştirebilir ve paylaşabilirsiniz; buna dayanarak dağıttığınız her şey aynı lisansla, kaynak koduyla ve özgün telif bildirimi korunarak yayımlanmalıdır. Paketlenen bileşenler kendi lisanslarını korur; liste [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) dosyasındadır. TriggerForge adı ve logosu GPL kapsamında değildir ve yazarına aittir: resmî bir sürümün değiştirilmemiş kopyaları bu adla paylaşılabilir, değiştirilmiş bir sürüm ise kendi adını ve logosunu kullanmalıdır.

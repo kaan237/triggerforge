@@ -6,7 +6,12 @@
     <AssemblyName>TriggerForge</AssemblyName>
     <RootNamespace>Tactile.Host</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>..\..\assets\icon\triggerforge.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- The window and tray pick the size they need from this copy of the exe icon. -->
+    <EmbeddedResource Include="..\..\assets\icon\triggerforge.ico" LogicalName="TriggerForge.ico" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Tactile.Core\Tactile.Core.csproj" />
     <ProjectReference Include="..\Tactile.Input.Windows\Tactile.Input.Windows.csproj" />

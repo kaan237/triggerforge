@@ -1,5 +1,3 @@
-using System.Drawing.Drawing2D;
-using System.Runtime.InteropServices;
 using Tactile.Core;
 
 namespace Tactile.Host;
@@ -88,68 +86,34 @@ internal sealed class Tray : IDisposable
     public void Balloon(string text, ToolTipIcon kind = ToolTipIcon.Info) =>
         _icon.ShowBalloonTip(5000, "TriggerForge", text, kind);
 
+    private bool _disposed;
+
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
         _icon.Visible = false;
         _icon.Dispose();
         _menu.Dispose();
     }
 }
 
-/// <summary>The app glyph, drawn in code: a blue pad with a white light strip and two buttons.</summary>
-internal sealed partial class Glyph : IDisposable
+/// <summary>The app logo at one size, taken from the icon embedded in the exe.</summary>
+internal sealed class AppIcon : IDisposable
 {
-    private readonly IntPtr _handle;
-
-    public Glyph(int size)
+    public AppIcon(int size)
     {
-        using var bmp = new Bitmap(size, size);
-        using (Graphics g = Graphics.FromImage(bmp))
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Color.Transparent);
-            float s = size / 16f;
-            using var body = new SolidBrush(Color.FromArgb(0x30, 0x60, 0xFF));
-            using var white = new SolidBrush(Color.White);
-            using (GraphicsPath pad = RoundedRect(new RectangleF(0.5f * s, 3.5f * s, 15 * s, 7 * s), 3 * s))
-            {
-                g.FillPath(body, pad);
-            }
-
-            // Grips.
-            g.FillEllipse(body, 0.5f * s, 6.5f * s, 5.5f * s, 8.5f * s);
-            g.FillEllipse(body, 10 * s, 6.5f * s, 5.5f * s, 8.5f * s);
-            // Light strip and buttons.
-            g.FillRectangle(white, 5.5f * s, 4.5f * s, 5 * s, 1.2f * s);
-            g.FillEllipse(white, 2.5f * s, 6.5f * s, 2.5f * s, 2.5f * s);
-            g.FillEllipse(white, 11 * s, 6.5f * s, 2.5f * s, 2.5f * s);
-        }
-
-        _handle = bmp.GetHicon();
-        Icon = Icon.FromHandle(_handle);
+        using Stream stream = typeof(AppIcon).Assembly.GetManifestResourceStream("TriggerForge.ico")
+            ?? throw new InvalidOperationException("The app icon resource is missing.");
+        // Icon picks the frame in the file that is closest to the requested size.
+        Icon = new Icon(stream, new Size(size, size));
     }
 
     public Icon Icon { get; }
 
-    public void Dispose()
-    {
-        Icon.Dispose();
-        DestroyIcon(_handle);
-    }
-
-    private static GraphicsPath RoundedRect(RectangleF r, float radius)
-    {
-        float d = radius * 2;
-        var path = new GraphicsPath();
-        path.AddArc(r.X, r.Y, d, d, 180, 90);
-        path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-        path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        return path;
-    }
-
-    [LibraryImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool DestroyIcon(IntPtr handle);
+    public void Dispose() => Icon.Dispose();
 }

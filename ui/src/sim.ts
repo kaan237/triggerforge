@@ -121,10 +121,10 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   });
   settings.integration = { ...settings.integration, udpEnabled: true, forzaEnabled: true };
   const previewOptions = new URLSearchParams(window.location.search);
-  const nextVersion = "0.10.0";
+  const nextVersion = "1.1.0";
   let failNextCheck = previewOptions.get("update") === "error";
   let update: UpdateStatus = {
-    type: "update.status", state: "idle", current: "0.9.0",
+    type: "update.status", state: "idle", current: "1.0.0",
     latest: null, notes: null, released: null, progress: null,
     portable: previewOptions.get("portable") === "1",
     error: null, message: null, lastCheck: null,
@@ -636,9 +636,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         }
         return;
       case "update.openPage":
-        if (update.state === "available" && update.portable) {
-          emit({ type: "notice", kind: "info", message: L("The download page is unavailable in preview.", "Önizlemede indirme sayfası açılmaz.") });
-        }
+        emit({ type: "notice", kind: "info", message: L("The releases page does not open in the browser preview.", "Tarayıcı önizlemesinde sürümler sayfası açılmaz.") });
         return;
       case "integration.status":
         sendIntegration();

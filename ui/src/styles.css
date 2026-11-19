@@ -39,12 +39,16 @@ button:disabled { cursor: default; }
   padding: 18px 10px 14px;
 }
 .wordmark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
   font-weight: 600;
   font-size: 15px;
   letter-spacing: 0.02em;
   padding: 0 10px 20px;
 }
+.brand-icon { width: 24px; height: 24px; flex: none; object-fit: contain; }
 .rail ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
 .rail button {
   width: 100%;
@@ -95,6 +99,7 @@ main { display: grid; grid-template-rows: 44px 1fr; min-width: 0; min-height: 0;
 .page { animation: page-in 120ms ease-out; max-width: 1280px; }
 .setup-window { display: block; height: 100%; overflow: auto; padding: clamp(16px, 5vw, 48px); }
 .setup-window .setup-panel { max-width: 720px; margin: 0 auto; padding: clamp(16px, 4vw, 36px); overflow: auto; }
+.setup-logo { display: block; width: 96px; height: 96px; margin-bottom: 8px; object-fit: contain; }
 .setup-brand { font-size: 16px; font-weight: 600; }
 .setup-panel h1 { margin: 0 0 16px; }
 .setup-panel .dot { display: inline-block; }
@@ -513,6 +518,8 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 2px; }
 .update-state p { margin: 0 0 8px; }
 .update-state progress { display: block; width: 100%; accent-color: var(--accent); }
 .update-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
+.update-about { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.update-notes-link { padding: 4px 0; color: var(--text); text-decoration: underline; }
 .settings-group .toggle-text > span:first-child, .setting-row > span:first-child { font-size: 13px; }
 .number-field { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .number-field input { width: 76px; text-align: right; font-variant-numeric: tabular-nums; }

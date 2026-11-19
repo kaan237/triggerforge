@@ -18,6 +18,8 @@ UninstallDisplayIcon={app}\TriggerForge.exe
 OutputDir=..\artifacts
 OutputBaseFilename=TriggerForge-{#AppVersion}-setup
 WizardStyle=modern
+SetupIconFile=..\assets\icon\triggerforge.ico
+WizardSmallImageFile=..\assets\icon\wizard-small-55.bmp,..\assets\icon\wizard-small-110.bmp
 ShowLanguageDialog=yes
 LanguageDetectionMethod=uilanguage
 #ifdef SignRelease

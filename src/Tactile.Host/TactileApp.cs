@@ -23,8 +23,8 @@ internal sealed class TactileApp : ApplicationContext
     private readonly UpdateService _updates;
     private readonly Stopwatch _uptime = Stopwatch.StartNew();
     private TimeSpan _nextAutomaticCheck = TimeSpan.FromSeconds(60);
-    private readonly Glyph _smallGlyph = new(SystemInformation.SmallIconSize.Width);
-    private readonly Glyph _largeGlyph = new(SystemInformation.IconSize.Width);
+    private readonly AppIcon _smallIcon = new(SystemInformation.SmallIconSize.Width);
+    private readonly AppIcon _largeIcon = new(SystemInformation.IconSize.Width);
     private readonly MainWindow _window;
     private readonly Tray _tray;
     private readonly System.Windows.Forms.Timer _inputTimer = new() { Interval = 33 };
@@ -45,14 +45,14 @@ internal sealed class TactileApp : ApplicationContext
         _core = new AppCore(paths.DataDirectory, platform: WindowsInputPlatform.Create(),
             drivers: drivers, server: server, portable: paths.Portable);
         _updates = new UpdateService(paths, typeof(TactileApp).Assembly.GetName().Version!);
-        _window = new MainWindow(_core, _largeGlyph.Icon, paths, _updates);
+        _window = new MainWindow(_core, _largeIcon.Icon, paths, _updates);
         // A handle now, so core events can be marshalled even while the window was never shown.
         _ = _window.Handle;
         _window.FormClosing += OnWindowClosing;
         _window.FormClosed += (_, _) => Exit();
 
         // Exit later: the tray disposes itself, which must not happen inside its own menu click.
-        _tray = new Tray(_smallGlyph.Icon, ShowWindow, Activate, RestoreController, () => Ui(Exit));
+        _tray = new Tray(_smallIcon.Icon, ShowWindow, Activate, RestoreController, () => Ui(Exit));
         _tray.SetProfiles(_core.Profiles.All, _core.ActiveProfile.Id);
         UpdateTrayStatus();
 
@@ -439,8 +439,10 @@ internal sealed class TactileApp : ApplicationContext
                 _window.Dispose();
             }
 
-            _smallGlyph.Dispose();
-            _largeGlyph.Dispose();
+            // The tray shows the small icon, so it goes first (a no-op after Exit).
+            _tray.Dispose();
+            _smallIcon.Dispose();
+            _largeIcon.Dispose();
         }
 
         base.Dispose(disposing);

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import logo from "./assets/logo-256.png";
 import { send, type AppSettings } from "./host";
 import { L, modelName } from "./i18n";
 import { Live } from "./Live";
@@ -99,6 +100,7 @@ export function SetupWizard({ settings }: { settings: AppSettings }) {
     <main className="setup-window" aria-labelledby="setup-heading">
       <div className="setup-panel panel">
         <header>
+          {step === 0 && <img className="setup-logo" src={logo} width={96} height={96} alt="TriggerForge" />}
           <div className="setup-brand">TriggerForge</div>
           <p className="small muted-text">{L(`Step ${step + 1} of ${titles.length}`, `Adım ${step + 1} / ${titles.length}`)}</p>
           <h1 id="setup-heading" ref={heading} tabIndex={-1}>{titles[step]}</h1>

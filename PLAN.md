@@ -444,6 +444,13 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 - İmza yedekleri: `secrets/` (git dışı) içinde parolalı güncelleme anahtarı ve Wiaus PFX, parola repo dışında `Documents\TriggerForge-imza-parolasi.txt`; geri yükleme `secrets/OKU-BENI.txt`, yayın aracında `restore`.
 - 0.9.0 yayınlandı (2026-11-19). Çoklu controller ve Edge donanımda denenmedi; tek controller ile sorun çıkarsa Ayarlar → Kontrolcüler → en çok controller = 1 eski davranışa döndürür.
 
+### 1.0.0 (2026-11-19)
+
+- Logo: KH'nin verdiği gümüş ouroboros (`assets/icon/source.ico`, NexoGameST'in kendi simgesi). Açık zeminde (beyaz görev çubuğu) küçük boyutlarda kaybolduğu için çevresine ince, yarı saydam koyu kontur eklendi; 16, 20, 24, 32, 40, 48, 64, 128, 256 piksel `assets/icon/triggerforge.ico`.
+- Kullanıldığı yerler: exe simgesi (Gezgin, görev çubuğu, Başlat menüsü, Uygulamalar listesi), pencere ve tepsi simgesi (kodla çizilen eski mavi controller simgesi kaldırıldı; boyut Windows'un istediğine göre ico'dan seçiliyor), installer simgesi ve kurulum sihirbazının sağ üst logosu, kaldırıcı, arayüzde yan menü, ilk açılış sihirbazı ve Ayarlar → Güncellemeler → Hakkında satırı, sekme simgesi, README.
+- README: TriggerForge adı ve logosu GPL kapsamında değil; resmî sürümün değiştirilmemiş kopyaları bu adla paylaşılabilir, değiştirilmiş sürüm kendi adını ve logosunu kullanmalı.
+- Denetim (salt okunur Codex): 4 bulgu (logo dosyaları git'te izlenmiyordu, alışılmadık kapanışta tepsi simgesi erken bırakılıyordu, önizlemede "Sürüm notları" sessizdi, README'de ad/logo cümlesi çelişkiliydi), hepsi düzeltildi. Testler 620/620.
+
 ### Faz 9 — Yedek yol: Pico 2 W köprü (isteğe bağlı)
 
 Faz 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse: Pico 2 W firmware'i ile gerçek USB DualSense görünümü; uygulama aynı UI ve profil motoruyla Pico'yu yönetir. Referans: DS5Dongle (MIT).
