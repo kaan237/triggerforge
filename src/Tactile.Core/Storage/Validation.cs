@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Tactile.Audio;
+using Tactile.Core.Integration;
 using Tactile.Device.DualSense;
 
 namespace Tactile.Core;
@@ -103,11 +104,97 @@ public static partial class Validation
             Mapping = mapping,
             Macros = macros,
             Emulation = NormalizeEmulation(p.Emulation, issues),
+            Telemetry = NormalizeTelemetry(p.Telemetry, issues),
         };
     }
 
+    private static TelemetryConfig NormalizeTelemetry(TelemetryConfig? config, List<string> issues)
+    {
+        const int maxRules = 32;
+        IReadOnlyList<TelemetryRule> input = config?.Rules ?? [];
+        var rules = new List<TelemetryRule>(Math.Min(input.Count, maxRules));
+        if (input.Count > maxRules)
+        {
+            issues.Add("Telemetri: ilk 32 kuraldan sonrakiler kaldırıldı.");
+        }
+
+        foreach (TelemetryRule? rule in input.Take(maxRules))
+        {
+            if (rule is null || rule.Signal == TelemetrySignal.Unknown || rule.Target == TelemetryTarget.Unknown ||
+                !Enum.IsDefined(rule.Signal) || !Enum.IsDefined(rule.Target))
+            {
+                issues.Add("Telemetri: geçersiz sinyal veya hedef içeren kural kaldırıldı.");
+                continue;
+            }
+
+            (double Min, double Max) inputRange = rule.Signal switch
+            {
+                TelemetrySignal.SpeedKmh => (0, Math.Sqrt(3) * float.MaxValue * 3.6),
+                TelemetrySignal.SlipFront or TelemetrySignal.SlipRear or TelemetrySignal.Surface => (0, float.MaxValue),
+                TelemetrySignal.Gear => (0, 255),
+                TelemetrySignal.Steer => (-1, 1),
+                TelemetrySignal.Boost => (-float.MaxValue, float.MaxValue),
+                _ => (0, 1),
+            };
+            int outputMin = 0;
+            int outputMax = rule.Target == TelemetryTarget.PlayerLeds ? 5 : 255;
+            TriggerConfig? trigger = null;
+            if (rule.Target is TelemetryTarget.LeftTrigger or TelemetryTarget.RightTrigger)
+            {
+                trigger = rule.Trigger;
+                if (trigger?.Params is null || trigger.Params.Values.Any(v => !double.IsFinite(v) || v < int.MinValue || v > int.MaxValue))
+                {
+                    issues.Add("Telemetri: geçersiz tetik şablonu içeren kural kaldırıldı.");
+                    continue;
+                }
+
+                if (rule.Param is { } param)
+                {
+                    if (TelemetryRules.ParameterRange(trigger.Mode, param) is not { } range)
+                    {
+                        issues.Add("Telemetri: geçersiz tetik parametresi içeren kural kaldırıldı.");
+                        continue;
+                    }
+
+                    (outputMin, outputMax) = range;
+                }
+
+                trigger = trigger with
+                {
+                    Params = new Dictionary<string, double>(trigger.Params),
+                    Zones = trigger.Zones?.ToArray(),
+                    Frequency = Math.Clamp(trigger.Frequency, 0, 255),
+                };
+                if (!TelemetryRules.TryTrigger(trigger, rule.Param, outputMin, out _))
+                {
+                    issues.Add("Telemetri: geçersiz tetik şablonu içeren kural kaldırıldı.");
+                    continue;
+                }
+            }
+
+            rules.Add(rule with
+            {
+                From = Clamp(rule.From, inputRange.Min, inputRange.Max, 0),
+                To = Clamp(rule.To, inputRange.Min, inputRange.Max, 1),
+                Exponent = Clamp(rule.Exponent, 0.2, 5, 1),
+                Trigger = trigger,
+                Min = Clamp(rule.Min, outputMin, outputMax, outputMin),
+                Max = Clamp(rule.Max, outputMin, outputMax, outputMin),
+                ColorFrom = NormalizeTelemetryColor(rule.ColorFrom.GetValueOrDefault()),
+                ColorTo = NormalizeTelemetryColor(rule.ColorTo.GetValueOrDefault()),
+                BlinkAt = rule.BlinkAt is double blink && double.IsFinite(blink) ? Math.Clamp(blink, 0, 1) : null,
+            });
+        }
+
+        return new TelemetryConfig { Rules = rules.AsReadOnly() };
+    }
+
+    private static TelemetryColor NormalizeTelemetryColor(TelemetryColor color) =>
+        new(Math.Clamp(color.R, 0, 255), Math.Clamp(color.G, 0, 255), Math.Clamp(color.B, 0, 255));
+
     public static AppSettings Normalize(AppSettings s)
     {
+        IntegrationSettings integration = s.Integration ?? new();
         var defaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach ((string mac, string id) in s.ControllerDefaults ?? new Dictionary<string, string>())
         {
@@ -135,6 +222,12 @@ public static partial class Validation
                 .Take(5)
                 .ToArray(),
             RunAsAdminHint = s.RunAsAdminHint,
+            Integration = integration with
+            {
+                UdpPort = Math.Clamp(integration.UdpPort, 1024, 65535),
+                ReleaseAfterSeconds = Math.Clamp(integration.ReleaseAfterSeconds, 0, 3600),
+                ForzaPort = Math.Clamp(integration.ForzaPort, 1024, 65535),
+            },
             Emulation = new EmulationSettings
             {
                 Enabled = s.Emulation?.Enabled ?? true,

@@ -162,6 +162,16 @@ main { display: grid; grid-template-rows: 44px 1fr; min-width: 0; min-height: 0;
 .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .panel-head h2 { margin: 0; }
 .haptics-sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; overflow-wrap: anywhere; }
+.integration-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.integration-layout > :last-child { grid-column: 1 / -1; }
+.integration-layout input[type="number"] { width: 88px; }
+.integration-rules { padding-left: 24px; margin: 12px 0 0; }
+.integration-rules > li { border-top: 1px solid var(--line); padding: 4px 0; }
+.integration-rule-editor { padding-left: 0; padding-right: 0; }
+.integration-actions { flex-wrap: wrap; }
+@media (max-width: 900px) {
+  .integration-layout { grid-template-columns: minmax(0, 1fr); }
+}
 
 .button {
   display: inline-flex;

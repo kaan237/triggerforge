@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { send, subscribe, type AppSettings, type DriverKind, type DriverProgress, type EmulationStatus, type HapticStatus, type Input, type NoticeKind, type Output, type Profile, type Status } from "./host";
+import { send, subscribe, type AppSettings, type DriverKind, type DriverProgress, type EmulationStatus, type HapticStatus, type Input, type NoticeKind, type Output, type Profile, type Status, type TelemetryRule } from "./host";
 import { clone, deepEqual, normalizeProfile, normalizeSettings } from "./model";
 
 export type Notice = { id: number; kind: NoticeKind | "error"; message: string; progress?: number };
@@ -25,6 +25,8 @@ type AppState = {
   edit: (fn: (p: Profile) => Profile) => void;
   saveDraft: () => void;
   revertDraft: () => void;
+  telemetryDrafts: ReadonlyMap<string, TelemetryRule[]>;
+  setTelemetryDraft: (id: string, rules?: TelemetryRule[]) => void;
 };
 
 const Ctx = createContext<AppState | null>(null);
@@ -63,6 +65,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [recent, setRecent] = useState<string[] | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [draft, setDraft] = useState<Profile | null>(null);
+  const [telemetryDrafts, setTelemetryDrafts] = useState<ReadonlyMap<string, TelemetryRule[]>>(new Map());
   const touched = useRef(false);
   const profilesRef = useRef<Profile[]>([]);
 
@@ -134,7 +137,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         touched.current = false;
         return active ? clone(active) : null;
       }
-      return d;
+      // Telemetry is saved separately and must survive a later save of this draft.
+      return deepEqual(d.telemetry, base.telemetry) ? d : { ...d, telemetry: base.telemetry };
     });
   }, [profiles, activeId]);
 
@@ -158,9 +162,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDraft(active ? clone(active) : null);
   }, [activeId]);
 
+  const setTelemetryDraft = useCallback((id: string, rules?: TelemetryRule[]) => {
+    setTelemetryDrafts((drafts) => {
+      const next = new Map(drafts);
+      if (rules) next.set(id, rules);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
   const value = useMemo<AppState>(
-    () => ({ status, output, profiles, activeId, settings, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft }),
-    [status, output, profiles, activeId, settings, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft],
+    () => ({ status, output, profiles, activeId, settings, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, telemetryDrafts, setTelemetryDraft }),
+    [status, output, profiles, activeId, settings, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, telemetryDrafts, setTelemetryDraft],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

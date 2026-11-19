@@ -1,4 +1,5 @@
 using Tactile.Audio;
+using Tactile.Core.Integration;
 using Tactile.Device.DualSense;
 
 namespace Tactile.Core;
@@ -43,6 +44,7 @@ public sealed record Profile
     public IReadOnlyList<Macro> Macros { get; init; } = [];
     /// <summary>Virtual controller (phase 4).</summary>
     public EmulationConfig Emulation { get; init; } = new();
+    public TelemetryConfig Telemetry { get; init; } = new();
 }
 
 /// <summary>What the virtual controller looks like for this profile. File format: docs/contract-phase4.md.</summary>

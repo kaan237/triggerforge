@@ -369,6 +369,16 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 
 **Risk:** dış ağdan UDP komutu → yalnız loopback dinleme. **Geri alma:** entegrasyon kapalı anahtarı.
 
+**Faz 6 sonucu (2026-11-19, ilk sürüm kodu tamam, donanımda denenmedi)**
+- Sözleşme `docs/contract-phase6.md` (3 iş + inceleme düzeltmesi, sırayla, her biri kontrol edilerek). Biçimler `docs/protocol-integrations.md`'de kendi cümlelerimizle: DSX UDP biçimi Paliverse/DualSenseX'in açık örneklerinden, Forza "Data Out" Forza Support'un resmî FH6 ve Forza Motorsport belgelerinden.
+- Plan denetimi düzeltmeleri uygulandı: öncelik sırası profil < UDP API < telemetri kuralları < oyunun kendi geri bildirimi < arayüz önizlemesi; DSX uyumu ilk sürüme alındı; port doluysa uyarı ve 5 sn'de bir yeniden deneme; UDP komutları program çalıştıramıyor (yalnız tetik, ışık, oyuncu LED, mikrofon LED, titreşim, profil seçimi).
+- UDP API (`127.0.0.1`, varsayılan 6969, kapalı başlar): kendi JSON biçimimiz ve DSX biçimi aynı soket üzerinde; DSX modları için `C:\Temp\DualSenseX\DualSenseX_PortNumber.txt` port dosyası; 16 KB / 32 komut / saniyede 500 paket sınırı; bozuk paket sayılıp atlanıyor; "sessiz kalınca bırak" ayarı.
+- Forza telemetrisi (varsayılan 5555; FH6 5200-5300'ü kendisi kullanıyor): 232/311/323/324/331 baytlık paketler (Sled, FM7, FM 2023, FH4-6). Sinyaller: hız, devir, gaz, fren, debriyaj, el freni, vites, direksiyon, ön/arka kayma, yol titreşimi, kasis, turbo, ABS, patinaj.
+- Kural motoru: profil başına en çok 32 kural, "sinyal aralığı → tetik parametresi / ışık rengi (yanıp sönme) / oyuncu LED çubuğu / titreşim", hedef başına son etkin kural kazanır. Forza şablonu: frenle L2 direnci, ABS'de L2 titreşimi, devirle R2 direnci, patinajda R2 titreşimi, devirle ışık yeşil → kırmızı, devir LED çubuğu, kasiste titreşim.
+- Arayüz: **Entegrasyonlar** sayfası (UDP ve Forza kartları, canlı durum ve değerler, kural düzenleyici, "Forza şablonunu uygula", "Efektleri bırak"); tarayıcıda simülasyonla denendi. Test göndericisi `tools/integration-test/udptest.py` (native, dsx, garbage, forza).
+- Testler 536/536. Code-review high: 7 bulgu; 5'i düzeltildi (controller'a yazma ve profil seçimi dinleyici kilidi dışında, sıra numaralı katman yayını; bozuk DSX komutları sayılıyor; boşta 10 ms'de uyanma kalktı; arayüzdeki sıfırlama UDP durumunu da bırakıyor; gerçek DSX için port dosyası uyarısı), 1'i yanlış alarm, 1'i (iki dinleyicide ortak bağlanma kodu) bırakıldı.
+- Kalan (KH ile): uygulamada test göndericisiyle deneme, gerçek bir DSX modu, Forza'da Data Out ile deneme; DSX v3 (Steam) modlarının yeni alanları bilinmiyor; AC/ACC, F1, eklenti sistemi ve profil paylaşımı sonraki adım.
+
 ---
 
 ### Faz 7 — Dağıtım (1-2 hafta)

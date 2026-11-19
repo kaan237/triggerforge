@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Tactile.Audio;
+using Tactile.Core.Integration;
 using Tactile.Device.DualSense;
 using Tactile.Drivers;
 using Tactile.Emulation;
@@ -69,6 +70,8 @@ public sealed class AppCore : IDisposable
     private volatile bool _mappingPaused;
 
     private readonly EmulationService? _emulation;
+    private readonly UdpApiServer _udpApi;
+    private readonly TelemetryListener _telemetry;
     private (DualSenseController? Source, RealController? Value) _real;
 
     /// <param name="platform">Keyboard, mouse, microphone and launcher; null = <see cref="InputPlatform.None"/> (no output).</param>
@@ -135,11 +138,16 @@ public sealed class AppCore : IDisposable
         ApplyTriggers(_active.Profile);
         _mapper.Configure(_active.Profile);
 
+        _udpApi = new UdpApiServer(Now, layer => SetOutputLayerNow(IntegrationLayers.Udp, layer),
+            ActivateProfile, GetUdpControllerStatus, _outbox.Enqueue);
+        _telemetry = new TelemetryListener(Now, () => ActiveProfile.Telemetry,
+            layer => SetOutputLayerNow(IntegrationLayers.Telemetry, layer), _outbox.Enqueue);
         _foreground.Changed += OnForeground;
         Profiles.Changed += Refresh;
-        Settings.Changed += Refresh;
+        Settings.Changed += OnSettingsChanged;
         Controllers.Input += OnInput;
         Controllers.ConnectionChanged += OnConnection;
+        ConfigureIntegration();
 
         if (runTimer)
         {
@@ -156,6 +164,10 @@ public sealed class AppCore : IDisposable
     public ProfileStore Profiles { get; }
 
     public SettingsStore Settings { get; }
+
+    public IntegrationStatus Integration => new(_udpApi.Status, _telemetry.Status);
+
+    public void ReleaseIntegration() => _udpApi.Release();
 
     public IForegroundSource Foreground => _foreground;
 
@@ -330,8 +342,8 @@ public sealed class AppCore : IDisposable
     }
 
     /// <summary>
-    /// Adds, replaces or (with null) removes a named layer applied on top of the profile output,
-    /// in the order first added. Used for the live controls in the UI.
+    /// Adds, replaces or (with null) removes a named layer applied on top of the profile output.
+    /// Layers with the same priority are applied in the order first added.
     /// </summary>
     public void SetOverride(string key, Func<OutputState, OutputState>? layer)
     {
@@ -347,7 +359,7 @@ public sealed class AppCore : IDisposable
     {
         lock (_lock)
         {
-            _overrides.Clear();
+            _overrides.RemoveAll(kv => kv.Key is not (IntegrationLayers.Udp or IntegrationLayers.Telemetry));
             _speakerVolume = null;
         }
 
@@ -391,13 +403,16 @@ public sealed class AppCore : IDisposable
             return;
         }
 
-        // First, while output still works: the game layers clear and the journal is closed.
+        // Stop receiving integration commands while output still works.
+        Settings.Changed -= OnSettingsChanged;
+        _udpApi.Dispose();
+        _telemetry.Dispose();
+        // The game layers clear and the journal is closed before output stops.
         _emulation?.Dispose();
         _disposed = true;
         _timer?.Dispose();
         _foreground.Changed -= OnForeground;
         Profiles.Changed -= Refresh;
-        Settings.Changed -= Refresh;
         Controllers.Input -= OnInput;
         Controllers.ConnectionChanged -= OnConnection;
         _mapper.Dispose();
@@ -671,7 +686,7 @@ public sealed class AppCore : IDisposable
             RumbleRight = 0,
         };
 
-        foreach ((string _, Func<OutputState, OutputState> layer) in _overrides.OrderBy(kv => kv.Key.StartsWith("preview.", StringComparison.Ordinal)))
+        foreach ((string _, Func<OutputState, OutputState> layer) in _overrides.OrderBy(kv => IntegrationLayers.Order(kv.Key)))
         {
             o = layer(o);
         }
@@ -685,6 +700,31 @@ public sealed class AppCore : IDisposable
         Triggers.TryToEffect(p.Triggers.Left, out _leftEffect, out _);
         Triggers.TryToEffect(p.Triggers.Right, out _rightEffect, out _);
     }
+
+    private void OnSettingsChanged()
+    {
+        ConfigureIntegration();
+        Refresh();
+    }
+
+    private void ConfigureIntegration()
+    {
+        IntegrationSettings settings = Settings.Current.Integration;
+        if (settings.UdpEnabled && _telemetry.Status is
+            { State: ForzaListenerState.Listening or ForzaListenerState.Receiving } forza && forza.Port == settings.UdpPort)
+        {
+            // Release Forza's old port before handing it to the UDP API.
+            _telemetry.Configure(settings with { ForzaEnabled = false });
+        }
+
+        _udpApi.Configure(settings);
+        _telemetry.Configure(settings);
+    }
+
+    private UdpControllerStatus GetUdpControllerStatus() =>
+        Controllers.Controller is { Connected: true } controller
+            ? new(controller.Details.Link, controller.Latest?.Battery.Percent)
+            : default;
 
     private void OnForeground(string exe)
     {

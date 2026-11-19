@@ -212,6 +212,58 @@ export type HapticsConfig = {
   speakerVolume: number;
 };
 
+export type IntegrationSettings = {
+  udpEnabled: boolean;
+  udpPort: number;
+  dsx: boolean;
+  dsxPortFile: boolean;
+  releaseAfterSeconds: number;
+  forzaEnabled: boolean;
+  forzaPort: number;
+};
+
+export type TelemetrySignal =
+  | "raceOn" | "speedKmh" | "rpm" | "gas" | "brake" | "clutch" | "handbrake" | "gear"
+  | "steer" | "slipFront" | "slipRear" | "surface" | "rumbleStrip" | "boost" | "abs" | "traction";
+export type TelemetryTarget = "leftTrigger" | "rightTrigger" | "lightbar" | "playerLeds" | "rumbleLeft" | "rumbleRight";
+export type TelemetryColor = { r: number; g: number; b: number };
+export type TelemetryValues = Record<TelemetrySignal, number>;
+export type TelemetryRule = {
+  signal: TelemetrySignal;
+  from: number;
+  to: number;
+  exponent: number;
+  target: TelemetryTarget;
+  trigger: TriggerConfig | null;
+  param: string | null;
+  min: number;
+  max: number;
+  colorFrom: TelemetryColor | null;
+  colorTo: TelemetryColor | null;
+  blinkAt: number | null;
+};
+export type TelemetryConfig = { rules: TelemetryRule[] };
+
+export type UdpStatus = {
+  state: "off" | "listening" | "portBusy";
+  port: number;
+  packets: number;
+  rejected: number;
+  unsupported: number;
+  lastPacketAgoMs: number | null;
+  holding: boolean;
+  format: "native" | "dsx" | null;
+};
+export type ForzaStatus = {
+  state: "off" | "listening" | "receiving" | "portBusy" | "portConflict";
+  port: number;
+  format: "sled" | "fm7" | "fm" | "fh" | null;
+  packets: number;
+  rejected: number;
+  values: TelemetryValues | null;
+};
+export type IntegrationStatus = { type: "integration"; udp: UdpStatus; forza: ForzaStatus };
+
 export type Profile = {
   version: number;
   id: string;
@@ -229,6 +281,7 @@ export type Profile = {
   mapping: Mapping;
   macros: Macro[];
   emulation: EmulationConfig;
+  telemetry: TelemetryConfig;
 };
 
 export type AppSettings = {
@@ -244,6 +297,7 @@ export type AppSettings = {
   lowBatteryWarnings: number[];
   runAsAdminHint: boolean;
   emulation: EmulationSettings;
+  integration: IntegrationSettings;
 };
 
 // ---- host → UI ----
@@ -309,6 +363,7 @@ export type HostMessage =
   | { type: "runPicked"; path: string | null }
   | { type: "notice"; kind: NoticeKind; message: string; progress?: number }
   | EmulationStatus
+  | IntegrationStatus
   | HapticStatus
   | { type: "audioApps"; apps: AudioApp[] }
   | DriverProgress
@@ -333,6 +388,8 @@ export type UiMessage =
   | { type: "run.pick" }
   | { type: "app.restartElevated" }
   | { type: "emulation.status" }
+  | { type: "integration.status" | "integration.release" }
+  | { type: "telemetry.applyTemplate"; profileId: string; template: "forza" }
   | { type: "driver.install"; kind: DriverKind }
   | { type: "emulation.retry" }
   | { type: "emulation.restore" };

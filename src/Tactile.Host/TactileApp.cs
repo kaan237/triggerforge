@@ -69,6 +69,7 @@ internal sealed class TactileApp : ApplicationContext
             if (_window.OnScreen)
             {
                 _window.Bridge.PostEmulation();
+                _window.Bridge.PostIntegration();
             }
         };
         _emulationTimer.Start();

@@ -16,6 +16,7 @@ import type {
   Lightbar,
   Profile,
   StickConfig,
+  TelemetryRule,
   TriggerConfig,
   TriggerMode,
   TriggerResponse,
@@ -24,6 +25,11 @@ import type {
 // ---- defaults ----
 
 export const defaultTrigger = (): TriggerConfig => ({ mode: "off", params: {}, zones: null, frequency: 0 });
+export const defaultTelemetryRule = (): TelemetryRule => ({
+  signal: "brake", from: 0, to: 1, exponent: 1, target: "leftTrigger",
+  trigger: defaultTrigger(), param: null, min: 0, max: 0,
+  colorFrom: { r: 0, g: 0, b: 0 }, colorTo: { r: 0, g: 0, b: 0 }, blinkAt: null,
+});
 export const defaultResponse = (): TriggerResponse => ({ deadzone: 0, max: 255, curve: "linear", exponent: 1, points: null });
 export const defaultStick = (): StickConfig => ({
   innerDeadzone: 0.05,
@@ -108,6 +114,7 @@ export function defaultProfile(name = "Varsayılan", id = newId()): Profile {
     mapping: defaultMapping(),
     macros: [],
     emulation: defaultEmulation(),
+    telemetry: { rules: [] },
   };
 }
 
@@ -129,6 +136,10 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     lowBatteryWarnings: [20, 10],
     runAsAdminHint: false,
     emulation: { enabled: true, hideController: true, audio: true, keepAudioDefaults: true, hapticBuffer: 64, speakerPacket: "single36" },
+    integration: {
+      udpEnabled: false, udpPort: 6969, dsx: true, dsxPortFile: true,
+      releaseAfterSeconds: 0, forzaEnabled: false, forzaPort: 5555,
+    },
   };
 }
 
@@ -175,6 +186,18 @@ export function normalizeProfile(p: Partial<Profile> & { id: string }): Profile 
     mapping: normalizeMapping(p.mapping),
     macros: (p.macros ?? []).map(normalizeMacro),
     emulation: { ...defaultEmulation(), ...p.emulation, remap: { ...(p.emulation?.remap ?? {}) } },
+    telemetry: {
+      rules: (p.telemetry?.rules ?? []).slice(0, 32).map((rule) => {
+        const defaults = defaultTelemetryRule();
+        return {
+          ...defaults,
+          ...rule,
+          trigger: rule.trigger ? trig(rule.trigger) : null,
+          colorFrom: rule.colorFrom ?? defaults.colorFrom,
+          colorTo: rule.colorTo ?? defaults.colorTo,
+        };
+      }),
+    },
   };
 }
 
@@ -226,7 +249,7 @@ export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
   const d = defaultSettings();
   const emulation = { ...d.emulation, ...s.emulation };
   if (emulation.speakerPacket !== "single36") emulation.speakerPacket = d.emulation.speakerPacket;
-  return { ...d, ...s, controllerDefaults: { ...(s.controllerDefaults ?? {}) }, emulation };
+  return { ...d, ...s, controllerDefaults: { ...(s.controllerDefaults ?? {}) }, emulation, integration: { ...d.integration, ...s.integration } };
 }
 
 export function clone<T>(v: T): T {
@@ -438,8 +461,8 @@ export function triggerSummary(c: TriggerConfig): string {
   const def = modeDef(c.mode);
   const p = c.params;
   if (c.mode === "off") return "Kapalı";
-  if (def.edit === "range") return `${def.label} ${p.start}–${p.end}`;
-  if (def.edit === "start") return `${def.label} ${p.start}'den`;
+  if (def.edit === "range") return `${def.label} (bölge ${p.start + 1}–${p.end + 1})`;
+  if (def.edit === "start") return `${def.label} (bölge ${p.start + 1}–10)`;
   return def.label;
 }
 
@@ -507,7 +530,7 @@ export function processTrigger(v: number, r: TriggerResponse): number {
 
 const playerColors = ["#2050FF", "#FF2828", "#20D040", "#FF40B0"];
 
-function hexToRgb(hex: string): [number, number, number] {
+export function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.replace("#", "").padEnd(6, "0").slice(0, 6), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }

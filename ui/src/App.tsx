@@ -4,6 +4,7 @@ import { deepEqual } from "./model";
 import { Notices } from "./Notices";
 import { Emulation } from "./pages/Emulation";
 import { Haptics } from "./pages/Haptics";
+import { Integrations } from "./pages/Integrations";
 import { Light } from "./pages/Light";
 import { Mapping } from "./pages/Mapping";
 import { Overview } from "./pages/Overview";
@@ -22,6 +23,7 @@ const sections = [
   { id: "sticks", label: "Analoglar", keys: ["sticks", "gyro"] },
   { id: "mapping", label: "Tuşlar", keys: ["mapping", "macros"] },
   { id: "emulation", label: "Sanal kontrolcü", keys: ["emulation"] },
+  { id: "integrations", label: "Entegrasyonlar", keys: [] },
   { id: "profiles", label: "Profiller", keys: [] },
 ] as const satisfies readonly { id: string; label: string; keys: readonly (keyof Profile)[] }[];
 
@@ -74,8 +76,12 @@ function StatusBar() {
 
 function Shell() {
   const [section, setSection] = useState<SectionId>("controller");
-  const { status, output, dirty, draft, draftBase } = useApp();
+  const { status, output, dirty, draft, draftBase, profiles, telemetryDrafts } = useApp();
   const changed = (keys: readonly (keyof Profile)[]) => dirty && !!draft && !!draftBase && keys.some((k) => !deepEqual(draft[k], draftBase[k]));
+  const telemetryChanged = profiles.some((p) => {
+    const rules = telemetryDrafts.get(p.id);
+    return rules !== undefined && !deepEqual(rules, p.telemetry.rules);
+  });
 
   // The interface accent follows the controller lightbar.
   useEffect(() => {
@@ -92,7 +98,7 @@ function Shell() {
             <li key={s.id}>
               <button className={section === s.id ? "active" : ""} onClick={() => setSection(s.id)}>
                 {s.label}
-                {changed(s.keys) && <span className="dirty-mark" title="Kaydedilmemiş değişiklik" />}
+                {(s.id === "integrations" ? telemetryChanged : changed(s.keys)) && <span className="dirty-mark" title="Kaydedilmemiş değişiklik" />}
               </button>
             </li>
           ))}
@@ -115,6 +121,7 @@ function Shell() {
           {section === "sticks" && <Sticks />}
           {section === "mapping" && <Mapping />}
           {section === "emulation" && <Emulation />}
+          {section === "integrations" && <Integrations />}
           {section === "profiles" && <Profiles />}
           {section === "settings" && <Settings />}
         </section>

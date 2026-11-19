@@ -20,7 +20,7 @@ const H = 248;
 const zoneAt = (x: number) => clamp(Math.floor((x - X0) / ZW), 0, 9);
 const levelAt = (y: number) => clamp(Math.round((BASE - y) / UNIT), 0, 8);
 
-function ZoneEditor({ config, onChange, pull }: { config: TriggerConfig; onChange: (c: TriggerConfig) => void; pull: number }) {
+function ZoneEditor({ config, onChange, pull }: { config: TriggerConfig; onChange: (c: TriggerConfig) => void; pull?: number }) {
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<{ target: "graph" | "start" | "end"; last: number } | null>(null);
   const def = modeDef(config.mode);
@@ -101,7 +101,7 @@ function ZoneEditor({ config, onChange, pull }: { config: TriggerConfig; onChang
   };
 
   const tops = level.map((lv, i) => `${X0 + i * ZW + ZW / 2},${BASE - lv * UNIT}`).join(" ");
-  const liveX = X0 + clamp(pull, 0, 1) * ZW * 10;
+  const liveX = X0 + clamp(pull ?? 0, 0, 1) * ZW * 10;
 
   return (
     <svg
@@ -155,10 +155,10 @@ function ZoneEditor({ config, onChange, pull }: { config: TriggerConfig; onChang
         </g>
       )}
 
-      <g className="pull">
+      {pull !== undefined && <g className="pull">
         <line x1={liveX} x2={liveX} y1={TOP - 6} y2={BASE} />
         <rect x={liveX - 3} y={TOP - 9} width="6" height="6" rx="1" />
-      </g>
+      </g>}
     </svg>
   );
 }
@@ -193,6 +193,36 @@ function hint(config: TriggerConfig): string {
   if (config.mode === "slope") return "Grafikte iki ucu sürükle. Alttaki tutamaklar aralığı belirler.";
   if (config.mode === "off") return "Tetik serbest, direnç yok.";
   return "Alttaki tutamaklarla aralığı seç, gücü kaydırıcılardan ayarla.";
+}
+
+export function TriggerModeSelect({ config, onChange }: { config: TriggerConfig; onChange: (c: TriggerConfig) => void }) {
+  return (
+    <label className="field-inline">
+      <span>Mod</span>
+      <select value={config.mode} onChange={(e) => onChange(withMode(config, e.target.value as TriggerMode))}>
+        {triggerModes.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+      </select>
+    </label>
+  );
+}
+
+export function TriggerEffectEditor({ config, onChange, raw }: { config: TriggerConfig; onChange: (c: TriggerConfig) => void; raw?: number }) {
+  const def = modeDef(config.mode);
+  return (
+    <>
+      <div className="panel-head">
+        <h2>Direnç</h2>
+        <span className="graph-meta num">
+          {def.edit === "range" && `aralık ${config.params.start + 1}–${config.params.end + 1}`}
+          {def.edit === "start" && `başlangıç ${config.params.start + 1}`}
+          {raw !== undefined && <span className="faint"> · basınç {raw}</span>}
+        </span>
+      </div>
+      <ZoneEditor config={config} onChange={onChange} pull={raw === undefined ? undefined : raw / 255} />
+      <p className="hint">{hint(config)}</p>
+      {(def.params.some((f) => f.key !== "start" && f.key !== "end") || config.mode === "zonesVibration") && <ParamSliders config={config} onChange={onChange} />}
+    </>
+  );
 }
 
 function ResponseEditor({ value, onChange, raw }: { value: TriggerResponse; onChange: (r: TriggerResponse) => void; raw: number }) {
@@ -238,7 +268,6 @@ export function Triggers() {
   const setCfg = (c: TriggerConfig) => edit((p) => ({ ...p, triggers: { ...p.triggers, [side]: c } }));
   const setResp = (r: TriggerResponse) => edit((p) => ({ ...p, triggerResponse: { ...p.triggerResponse, [side]: r } }));
   const raw = input ? (side === "left" ? input.l2 : input.r2) : 0;
-  const def = modeDef(cfg.mode);
 
   return (
     <div className="page triggers-page">
@@ -257,16 +286,7 @@ export function Triggers() {
                 </button>
               ))}
             </div>
-            <label className="field-inline">
-              <span>Mod</span>
-              <select value={cfg.mode} onChange={(e) => setCfg(withMode(cfg, e.target.value as TriggerMode))}>
-                {triggerModes.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <TriggerModeSelect config={cfg} onChange={setCfg} />
             <span className="spacer" />
             <button className={trying ? "button try on" : "button try"} aria-pressed={trying} onClick={() => setTrying(!trying)}>
               <span className="try-dot" aria-hidden />
@@ -275,17 +295,7 @@ export function Triggers() {
           </div>
 
           <section className="panel graph-panel">
-            <div className="panel-head">
-              <h2>Direnç</h2>
-              <span className="graph-meta num">
-                {def.edit === "range" && `aralık ${cfg.params.start + 1}–${cfg.params.end + 1}`}
-                {def.edit === "start" && `başlangıç ${cfg.params.start + 1}`}
-                <span className="faint"> · basınç {raw}</span>
-              </span>
-            </div>
-            <ZoneEditor config={cfg} onChange={setCfg} pull={raw / 255} />
-            <p className="hint">{hint(cfg)}</p>
-            {(def.params.some((f) => f.key !== "start" && f.key !== "end") || cfg.mode === "zonesVibration") && <ParamSliders config={cfg} onChange={setCfg} />}
+            <TriggerEffectEditor config={cfg} onChange={setCfg} raw={raw} />
           </section>
 
           <section className="panel">

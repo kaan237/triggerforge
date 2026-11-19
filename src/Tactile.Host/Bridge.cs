@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Tactile.Core;
+using Tactile.Core.Integration;
 using Tactile.Device.DualSense;
 using Tactile.Drivers;
 using Tactile.Input.Windows;
@@ -83,6 +84,7 @@ internal sealed class Bridge
                 PostProfiles();
                 PostSettings();
                 PostEmulation();
+                PostIntegration();
                 _lastHaptics = null;
                 PostHapticsIfChanged();
                 foreach (string q in _queued)
@@ -202,6 +204,28 @@ internal sealed class Bridge
                 PostEmulation();
                 break;
 
+            case "integration.status":
+                PostIntegration();
+                break;
+
+            case "integration.release":
+                _core.ReleaseIntegration();
+                PostIntegration();
+                PostOutputIfChanged();
+                break;
+
+            case "telemetry.applyTemplate":
+            {
+                Profile profile = _core.Profiles.Get(Str(m, "profileId")) ?? throw new BadMessage("Profil bulunamadı.");
+                if (Str(m, "template") != "forza")
+                {
+                    throw new BadMessage("Telemetri şablonu bulunamadı.");
+                }
+
+                _core.Profiles.Save(profile with { Telemetry = TelemetryTemplates.Forza });
+                break;
+            }
+
             case "emulation.retry":
                 (_core.Emulation ?? throw new BadMessage(Unavailable)).Retry();
                 break;
@@ -306,6 +330,7 @@ internal sealed class Bridge
             case "reset":
                 _core.Controllers.StopHaptics();
                 _core.ClearOverrides();
+                _core.ReleaseIntegration();
                 break;
 
             case null:
@@ -373,6 +398,12 @@ internal sealed class Bridge
             latency = new { p50Ms = s.Latency.P50Ms, p95Ms = s.Latency.P95Ms, samples = s.Latency.Samples },
             error = s.Error,
         });
+    }
+
+    public void PostIntegration()
+    {
+        IntegrationStatus status = _core.Integration;
+        Post(new { type = "integration", status.Udp, status.Forza });
     }
 
     private void PickRun()

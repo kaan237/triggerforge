@@ -1,12 +1,14 @@
 // Browser-only stand-in for the host. Keeps profiles and settings in memory and fakes
 // a controller so every screen can be used without hardware.
 
-import type { Action, AppSettings, AudioApp, Binding, DriverKind, DriverState, EmulationStatus, HapticStatus, HostMessage, Output, Profile, TriggerConfig } from "./host";
+import type { Action, AppSettings, AudioApp, Binding, DriverKind, DriverState, EmulationStatus, HapticStatus, HostMessage, Output, Profile, TelemetryConfig, TelemetryRule, TelemetryValues, TriggerConfig, UdpStatus } from "./host";
 import {
   clone,
   defaultBinding,
   defaultProfile,
   defaultSettings,
+  defaultTelemetryRule,
+  defaultTrigger,
   effectColor,
   ledMask,
   newId,
@@ -70,12 +72,51 @@ const audioApps: AudioApp[] = [
   { pid: 1002, name: "firefox.exe", display: "Firefox" },
 ];
 
+function forzaTemplate(): TelemetryConfig {
+  const feedback = (start: number): TriggerConfig => ({ ...defaultTrigger(), mode: "feedback", params: { start, strength: 1 } });
+  const vibration = (start: number, amplitude: number, frequency: number): TriggerConfig =>
+    ({ ...defaultTrigger(), mode: "vibration", params: { start, amplitude, frequency } });
+  const rule = (signal: TelemetryRule["signal"], target: TelemetryRule["target"], patch: Partial<TelemetryRule>): TelemetryRule =>
+    ({ ...defaultTelemetryRule(), trigger: null, signal, target, ...patch });
+  return { rules: [
+    rule("brake", "leftTrigger", { trigger: feedback(1), param: "strength", min: 1, max: 5 }),
+    rule("abs", "leftTrigger", { from: 0.5, trigger: vibration(1, 6, 35) }),
+    rule("rpm", "rightTrigger", { trigger: feedback(2), param: "strength", min: 1, max: 4 }),
+    rule("traction", "rightTrigger", { from: 0.5, trigger: vibration(2, 5, 40) }),
+    rule("rpm", "lightbar", { colorFrom: { r: 0, g: 255, b: 0 }, colorTo: { r: 255, g: 0, b: 0 }, blinkAt: 0.95 }),
+    rule("rpm", "playerLeds", { from: 0.4, max: 5 }),
+    rule("rumbleStrip", "rumbleRight", { from: 0.5, to: 0.5, max: 120 }),
+  ] };
+}
+
+function sampleTelemetry(time: number): TelemetryValues {
+  const wave = (speed: number, offset = 0) => (1 + Math.sin(time * speed + offset)) / 2;
+  const gas = wave(0.65);
+  const brake = 1 - gas;
+  const speedKmh = 35 + wave(0.65, -0.7) * 175;
+  const slipFront = wave(1.3) * brake * 1.8;
+  const slipRear = wave(1.1, 2) * gas * 1.8;
+  return {
+    raceOn: 1, speedKmh, rpm: 0.2 + wave(1.2) * 0.8, gas, brake,
+    clutch: 0, handbrake: 0, gear: 1 + Math.floor(speedKmh / 36), steer: Math.sin(time * 0.8),
+    slipFront, slipRear, surface: wave(3.2) * 0.35, rumbleStrip: Number(wave(2) > 0.9),
+    boost: gas * 15, abs: Number(slipFront > 1), traction: Number(slipRear > 1),
+  };
+}
+
 export function createSimulator(emit: (m: HostMessage) => void) {
   let profiles = sampleProfiles();
   let settings = normalizeSettings({
     ...defaultSettings(profiles[0].id),
     controllerDefaults: { "A0:AB:51:12:34:56": profiles[0].id },
   });
+  settings.integration = { ...settings.integration, udpEnabled: true, forzaEnabled: true };
+  let udpPackets = 3;
+  let udpLastPacket = performance.now();
+  let udpHolding = true;
+  let udpFormat: UdpStatus["format"] = "dsx";
+  let forzaPackets = 1;
+  let telemetry = sampleTelemetry(performance.now() / 1000);
   let activeId = profiles[0].id;
   let activeReason = "controllerDefault";
   let timer: number | undefined;
@@ -125,6 +166,25 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       elevated: false,
     });
   const sendProfiles = () => emit({ type: "profiles", list: clone(profiles), activeId });
+
+  function sendIntegration() {
+    const s = settings.integration;
+    const elapsed = Math.floor(performance.now() - udpLastPacket);
+    if (!s.udpEnabled || (s.releaseAfterSeconds > 0 && elapsed >= s.releaseAfterSeconds * 1000)) udpHolding = false;
+    const forzaState = !s.forzaEnabled ? "off" : s.forzaPort === s.udpPort ? "portConflict" : "receiving";
+    emit({
+      type: "integration",
+      udp: {
+        state: s.udpEnabled ? "listening" : "off", port: s.udpPort,
+        packets: udpPackets, rejected: 0, unsupported: 0, lastPacketAgoMs: elapsed,
+        holding: udpHolding, format: udpFormat,
+      },
+      forza: {
+        state: forzaState, port: s.forzaPort, format: forzaState === "receiving" ? "fh" : null,
+        packets: forzaPackets, rejected: 0, values: forzaState === "receiving" ? telemetry : null,
+      },
+    });
+  }
 
   function sendHaptics(force = false, gamePlaying = emulationStatus().audio === "playing") {
     const h = active().haptics;
@@ -272,7 +332,15 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     });
     // Animated effects: about 10 Hz is plenty for a preview.
     if (tick % 3 === 0) pushOutput();
-    if (tick % 30 === 0) sendEmulation();
+    if (tick % 30 === 0) {
+      sendEmulation();
+      const s = settings.integration;
+      if (s.forzaEnabled && s.forzaPort !== s.udpPort) {
+        forzaPackets += 30;
+        telemetry = sampleTelemetry(t);
+      }
+      sendIntegration();
+    }
     // Slow drain so the low battery notice shows up once in a long session.
     if (tick % 1800 === 0 && battery > 5) {
       battery--;
@@ -289,6 +357,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         output = computeOutput();
         emit(output);
         sendEmulation();
+        sendIntegration();
         sendHaptics(true);
         timer ??= window.setInterval(simTick, 33);
         return;
@@ -353,14 +422,39 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         if (p) emit({ type: "export", id: p.id, json: JSON.stringify(p, null, 2) });
         return;
       }
+      case "telemetry.applyTemplate": {
+        const index = profiles.findIndex((p) => p.id === m.profileId);
+        if (index < 0) return emit({ type: "error", message: "Profil bulunamadı." });
+        if (m.template !== "forza") return emit({ type: "error", message: "Telemetri şablonu bulunamadı." });
+        profiles[index] = { ...profiles[index], telemetry: forzaTemplate() };
+        sendProfiles();
+        return;
+      }
       case "trigger.preview":
         preview[m.side === "left" ? "left" : "right"] = (m.config as TriggerConfig | null) ?? null;
         pushOutput();
         return;
-      case "settings.save":
+      case "settings.save": {
+        const before = settings.integration;
         settings = normalizeSettings(m.settings as AppSettings);
+        const after = settings.integration;
+        if (after.udpEnabled && (!before.udpEnabled || before.udpPort !== after.udpPort)) {
+          udpPackets += 3;
+          udpLastPacket = performance.now();
+          udpHolding = true;
+          udpFormat = after.dsx ? "dsx" : "native";
+        }
         emit({ type: "settings", settings: clone(settings) });
         sendEmulation();
+        sendIntegration();
+        return;
+      }
+      case "integration.status":
+        sendIntegration();
+        return;
+      case "integration.release":
+        udpHolding = false;
+        sendIntegration();
         return;
       case "emulation.status":
         sendEmulation();

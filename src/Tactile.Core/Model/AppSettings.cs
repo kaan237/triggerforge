@@ -24,6 +24,18 @@ public sealed record AppSettings
     public IReadOnlyList<int> LowBatteryWarnings { get; init; } = [20, 10];
     public bool RunAsAdminHint { get; init; }
     public EmulationSettings Emulation { get; init; } = new();
+    public IntegrationSettings Integration { get; init; } = new();
+}
+
+public sealed record IntegrationSettings
+{
+    public bool UdpEnabled { get; init; }
+    public int UdpPort { get; init; } = 6969;
+    public bool Dsx { get; init; } = true;
+    public bool DsxPortFile { get; init; } = true;
+    public int ReleaseAfterSeconds { get; init; }
+    public bool ForzaEnabled { get; init; }
+    public int ForzaPort { get; init; } = 5555;
 }
 
 public sealed record EmulationSettings
