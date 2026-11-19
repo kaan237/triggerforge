@@ -100,6 +100,10 @@ export function defaultProfile(name = "Varsayılan", id = newId()): Profile {
     sticks: { left: defaultStick(), right: defaultStick() },
     gyro: { sensitivity: 1, smoothing: 0.2, invertX: false, invertY: false },
     rumble: { strength: 1 },
+    haptics: {
+      audio: "off", app: "", mode: "game", strength: 1, rumbleToHaptics: false, clicks: false, clickStrength: 0.6,
+      speaker: "off", speakerApp: "", speakerVolume: 0.8,
+    },
     mapping: defaultMapping(),
     macros: [],
     emulation: defaultEmulation(),
@@ -130,6 +134,7 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
 // Missing fields take defaults (the contract allows partial objects).
 export function normalizeProfile(p: Partial<Profile> & { id: string }): Profile {
   const d = defaultProfile(p.name ?? "Profil", p.id);
+  const h = p.haptics;
   const trig = (t?: Partial<TriggerConfig>): TriggerConfig => ({
     ...defaultTrigger(),
     ...t,
@@ -151,6 +156,18 @@ export function normalizeProfile(p: Partial<Profile> & { id: string }): Profile 
     sticks: { left: { ...defaultStick(), ...p.sticks?.left }, right: { ...defaultStick(), ...p.sticks?.right } },
     gyro: { ...d.gyro, ...p.gyro },
     rumble: { ...d.rumble, ...p.rumble },
+    haptics: {
+      audio: h?.audio === "system" || h?.audio === "app" ? h.audio : d.haptics.audio,
+      app: typeof h?.app === "string" ? h.app.trim().slice(0, 260) : d.haptics.app,
+      mode: h?.mode === "film" || h?.mode === "music" ? h.mode : d.haptics.mode,
+      strength: typeof h?.strength === "number" && Number.isFinite(h.strength) ? Math.min(2, Math.max(0, h.strength)) : d.haptics.strength,
+      rumbleToHaptics: h?.rumbleToHaptics === true,
+      clicks: h?.clicks === true,
+      clickStrength: typeof h?.clickStrength === "number" && Number.isFinite(h.clickStrength) ? Math.min(1, Math.max(0, h.clickStrength)) : d.haptics.clickStrength,
+      speaker: h?.speaker === "system" || h?.speaker === "app" ? h.speaker : d.haptics.speaker,
+      speakerApp: typeof h?.speakerApp === "string" ? h.speakerApp.trim().slice(0, 260) : d.haptics.speakerApp,
+      speakerVolume: typeof h?.speakerVolume === "number" && Number.isFinite(h.speakerVolume) ? Math.min(1, Math.max(0, h.speakerVolume)) : d.haptics.speakerVolume,
+    },
     mapping: normalizeMapping(p.mapping),
     macros: (p.macros ?? []).map(normalizeMacro),
     emulation: { ...defaultEmulation(), ...p.emulation, remap: { ...(p.emulation?.remap ?? {}) } },

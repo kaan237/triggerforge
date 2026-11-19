@@ -1,7 +1,7 @@
 // Browser-only stand-in for the host. Keeps profiles and settings in memory and fakes
 // a controller so every screen can be used without hardware.
 
-import type { Action, AppSettings, Binding, DriverKind, DriverState, EmulationStatus, HostMessage, Output, Profile, TriggerConfig } from "./host";
+import type { Action, AppSettings, AudioApp, Binding, DriverKind, DriverState, EmulationStatus, HapticStatus, HostMessage, Output, Profile, TriggerConfig } from "./host";
 import {
   clone,
   defaultBinding,
@@ -65,6 +65,11 @@ const recentExes = [
   "Discord.exe",
 ];
 
+const audioApps: AudioApp[] = [
+  { pid: 1001, name: "Spotify.exe", display: "Spotify" },
+  { pid: 1002, name: "firefox.exe", display: "Firefox" },
+];
+
 export function createSimulator(emit: (m: HostMessage) => void) {
   let profiles = sampleProfiles();
   let settings: AppSettings = { ...defaultSettings(profiles[0].id), controllerDefaults: { "A0:AB:51:12:34:56": profiles[0].id } };
@@ -86,6 +91,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   const installing = new Set<DriverKind>();
   let emuError: string | null = null;
   let steamNoticed = false;
+  let lastHaptics: HapticStatus | undefined;
 
   const active = () => profiles.find((p) => p.id === activeId) ?? profiles[0];
 
@@ -116,6 +122,26 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       elevated: false,
     });
   const sendProfiles = () => emit({ type: "profiles", list: clone(profiles), activeId });
+
+  function sendHaptics(force = false) {
+    const h = active().haptics;
+    const source = h.audio === "off" ? h.speaker : h.audio;
+    const app = h.audio === "off" ? h.speakerApp : h.app;
+    const missingApp = [h.audio === "app" ? h.app : null, h.speaker === "app" ? h.speakerApp : null]
+      .find((name) => name !== null && !audioApps.some((a) => a.name.toLowerCase() === name.toLowerCase()));
+    const next: HapticStatus = {
+      type: "haptics",
+      streaming: source !== "off" || h.clicks || h.rumbleToHaptics,
+      source: source === "app" ? `app:${app}` : source,
+      problem: missingApp !== undefined
+        ? missingApp ? `${missingApp} çalışmıyor.` : "Uygulamanın dosya adı boş."
+        : null,
+    };
+    if (force || next.streaming !== lastHaptics?.streaming || next.source !== lastHaptics?.source || next.problem !== lastHaptics?.problem) {
+      lastHaptics = next;
+      emit(next);
+    }
+  }
 
   function emulationStatus(): EmulationStatus {
     const mode = active().emulation.mode;
@@ -184,6 +210,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     activeReason = reason;
     status();
     sendProfiles();
+    sendHaptics();
     pushOutput();
   }
 
@@ -252,6 +279,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         output = computeOutput();
         emit(output);
         sendEmulation();
+        sendHaptics(true);
         timer ??= window.setInterval(simTick, 33);
         return;
 
@@ -262,6 +290,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         else profiles = [...profiles, p];
         sendProfiles();
         if (p.id === activeId) status();
+        sendHaptics();
         pushOutput();
         sendEmulation();
         return;
@@ -344,6 +373,9 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         return;
       case "foreground.pick":
         emit({ type: "foreground", recent: [...recentExes] });
+        return;
+      case "audio.apps":
+        emit({ type: "audioApps", apps: audioApps });
         return;
       case "mapping.pause":
         mappingPaused = m.paused === true;

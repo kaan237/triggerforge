@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Tactile.Audio;
 using Tactile.Device.DualSense;
 
 namespace Tactile.Core;
@@ -19,6 +20,9 @@ public static partial class Validation
         StickPair sticks = p.Sticks ?? new();
         GyroConfig gyro = p.Gyro ?? new();
         RumbleConfig rumble = p.Rumble ?? new();
+        HapticsConfig haptics = p.Haptics ?? new();
+        string audioApp = (haptics.App ?? "").Trim();
+        string speakerApp = (haptics.SpeakerApp ?? "").Trim();
 
         string name = (p.Name ?? "").Trim();
         if (name.Length == 0)
@@ -83,6 +87,17 @@ public static partial class Validation
                 InvertY = gyro.InvertY,
             },
             Rumble = new RumbleConfig { Strength = Clamp(rumble.Strength, 0, 2, 1) },
+            Haptics = haptics with
+            {
+                Audio = Defined(haptics.Audio, AudioHapticSource.Off),
+                App = audioApp[..Math.Min(audioApp.Length, 260)],
+                Mode = Defined(haptics.Mode, HapticMode.Game),
+                Strength = Clamp(haptics.Strength, 0, 2, 1),
+                ClickStrength = Clamp(haptics.ClickStrength, 0, 1, 0.6),
+                Speaker = Defined(haptics.Speaker, AudioHapticSource.Off),
+                SpeakerApp = speakerApp[..Math.Min(speakerApp.Length, 260)],
+                SpeakerVolume = Clamp(haptics.SpeakerVolume, 0, 1, 0.8),
+            },
             Mapping = mapping,
             Macros = macros,
             Emulation = NormalizeEmulation(p.Emulation, issues),

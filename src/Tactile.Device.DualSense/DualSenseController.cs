@@ -41,7 +41,7 @@ public sealed class DualSenseController : IDisposable
         _device = device;
         Details = details;
         Features = features;
-        _writeBuffer = new byte[Math.Max(device.Info.OutputReportLength, HapticReport.Length)];
+        _writeBuffer = new byte[Math.Max(device.Info.OutputReportLength, HapticReport.SpeakerLength)];
         _reader = new Thread(ReadLoop) { IsBackground = true, Name = "dualsense-reader", Priority = ThreadPriority.AboveNormal };
     }
 
@@ -147,13 +147,19 @@ public sealed class DualSenseController : IDisposable
         get => _hapticsActive;
         set
         {
-            if (_hapticsActive == value)
+            lock (_writeLock)
             {
-                return;
-            }
+                if (_hapticsActive == value)
+                {
+                    return;
+                }
 
-            _hapticsActive = value;
-            Send(LastSent, force: true);
+                _hapticsActive = value;
+                if (Connected)
+                {
+                    Send(LastSent, force: true);
+                }
+            }
         }
     }
 
@@ -261,18 +267,22 @@ public sealed class DualSenseController : IDisposable
     }
 }
 
-/// <summary>Streams 0x32 haptic reports on a fixed 10.667 ms clock from a sample source.</summary>
+public delegate void HapticBlockSource(int block, Span<sbyte> samples);
+public delegate bool SpeakerFrameSource(int block, Span<byte> frame);
+
+/// <summary>Streams haptic and optional speaker samples on a fixed 10.667 ms clock.</summary>
 public sealed class HapticStreamer : IDisposable
 {
     private readonly DualSenseController _controller;
-    private readonly Func<int, sbyte[]> _nextBlock;
+    private readonly HapticBlockSource _nextBlock;
+    private readonly SpeakerFrameSource? _nextSpeaker;
     private readonly HapticReport _report = new();
     private readonly Thread _thread;
     private volatile bool _running = true;
     private const int PrerollBlocks = 8;
 
-    /// <param name="nextBlock">Called with the block index; returns 64 interleaved s8 samples.</param>
-    public HapticStreamer(DualSenseController controller, Func<int, sbyte[]> nextBlock)
+    /// <param name="nextBlock">Called with the block index and a buffer for 64 interleaved s8 samples.</param>
+    public HapticStreamer(DualSenseController controller, HapticBlockSource nextBlock, SpeakerFrameSource? nextSpeaker = null)
     {
         if (controller.Details.Link != Link.Bluetooth)
         {
@@ -281,6 +291,7 @@ public sealed class HapticStreamer : IDisposable
 
         _controller = controller;
         _nextBlock = nextBlock;
+        _nextSpeaker = nextSpeaker;
         _thread = new Thread(Run) { IsBackground = true, Name = "dualsense-haptics", Priority = ThreadPriority.Highest };
         _controller.HapticsActive = true;
         _controller.WriteRaw(_report.BuildPrime(_controller.LastSent, _controller.CurrentOptions()));
@@ -288,6 +299,8 @@ public sealed class HapticStreamer : IDisposable
     }
 
     public int Sent { get; private set; }
+
+    public bool Running => _thread.IsAlive;
 
     public void Dispose()
     {
@@ -303,11 +316,18 @@ public sealed class HapticStreamer : IDisposable
         {
             var clock = Stopwatch.StartNew();
             double intervalMs = HapticReport.Interval.TotalMilliseconds;
-            var silence = new sbyte[HapticReport.PayloadLength];
+            var samples = new sbyte[HapticReport.PayloadLength];
+            var speaker = new byte[HapticReport.SpeakerFrameLength];
             for (int block = -PrerollBlocks; _running && _controller.Connected; block++)
             {
                 // A few silent blocks first so the controller's buffer is filled before real samples.
-                if (!_controller.WriteRaw(_report.Build(block < 0 ? silence : _nextBlock(block))))
+                if (block >= 0)
+                {
+                    _nextBlock(block, samples);
+                }
+
+                bool hasSpeaker = _nextSpeaker?.Invoke(block, speaker) ?? false;
+                if (!_running || !_controller.WriteRaw(hasSpeaker ? _report.BuildSpeaker(samples, speaker) : _report.Build(samples)))
                 {
                     break;
                 }
@@ -319,7 +339,7 @@ public sealed class HapticStreamer : IDisposable
                     Thread.Sleep(1);
                 }
 
-                while (clock.Elapsed.TotalMilliseconds < due)
+                while (_running && clock.Elapsed.TotalMilliseconds < due)
                 {
                     Thread.SpinWait(50);
                 }
@@ -332,26 +352,24 @@ public sealed class HapticStreamer : IDisposable
     }
 
     /// <summary>Test signal: a sine burst on one or both actuators.</summary>
-    public static Func<int, sbyte[]> Tone(float frequencyHz, float amplitude, bool left = true, bool right = true, int blocks = int.MaxValue)
+    public static HapticBlockSource Tone(float frequencyHz, float amplitude, bool left = true, bool right = true, int blocks = int.MaxValue)
     {
         amplitude = Math.Clamp(amplitude, 0f, 1f);
-        return block =>
+        return (block, samples) =>
         {
-            var samples = new sbyte[HapticReport.PayloadLength];
             if (block >= blocks)
             {
-                return samples;
+                samples.Clear();
+                return;
             }
 
             for (int f = 0; f < HapticReport.FramesPerReport; f++)
             {
-                double t = (block * HapticReport.FramesPerReport + f) / (double)HapticReport.SampleRate;
+                double t = ((double)block * HapticReport.FramesPerReport + f) / HapticReport.SampleRate;
                 sbyte v = (sbyte)Math.Round(Math.Sin(2 * Math.PI * frequencyHz * t) * 127 * amplitude);
                 samples[f * 2] = left ? v : (sbyte)0;
                 samples[f * 2 + 1] = right ? v : (sbyte)0;
             }
-
-            return samples;
         };
     }
 }

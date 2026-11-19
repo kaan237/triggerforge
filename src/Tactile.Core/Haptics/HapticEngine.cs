@@ -1,0 +1,400 @@
+using Tactile.Audio;
+using Tactile.Device.DualSense;
+
+namespace Tactile.Core;
+
+public sealed record HapticStatus(bool Streaming, string Source, string? Problem);
+
+internal sealed class HapticEngine : IDisposable
+{
+    private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(3);
+    private readonly IAudioSystem _audio;
+    private readonly Func<HapticBlockSource?, bool> _setSource;
+    private readonly Action<Notice> _notice;
+    private readonly TimeProvider _time;
+    private readonly HapticMixer _mixer;
+    private readonly HapticBlockSource _fill;
+    private readonly Lock _captureLock = new();
+    private readonly Lock _speakerLock = new();
+    private readonly List<CaptureTarget> _captures = new(2);
+    private volatile State _state = new(new(false, "off", null), null, null, null, null);
+    private volatile HapticsConfig _config = new();
+    private volatile bool _disposed;
+
+    internal HapticEngine(IAudioSystem audio, Func<HapticBlockSource?, bool> setSource,
+        Func<OutputState> output, Action<Notice> notice, TimeProvider time)
+    {
+        _audio = audio;
+        _setSource = setSource;
+        _notice = notice;
+        _time = time;
+        _mixer = new HapticMixer(output);
+        _fill = Fill;
+    }
+
+    internal HapticStatus Status
+    {
+        get
+        {
+            State state = _state;
+            string? problem = state.Status.Problem ?? state.Target?.Problem
+                ?? state.Playback?.Problem ?? state.Speaker?.Problem;
+            return problem == state.Status.Problem ? state.Status : state.Status with { Problem = problem };
+        }
+    }
+
+    internal IReadOnlyList<AudioApp> ListApps() => _audio.ListApps();
+
+    // Called by the core's serialized configuration path, independently of WASAPI startup.
+    internal void Configure(HapticsConfig config, Link? link)
+    {
+        bool needed = config.Audio != AudioHapticSource.Off || config.Speaker != AudioHapticSource.Off
+            || config.Clicks || config.RumbleToHaptics;
+        bool bluetooth = link == Link.Bluetooth;
+        State previous = _state;
+        CaptureTarget? target = bluetooth ? FindTarget(config.Audio, config.App, previous.Target, previous.Speaker) : null;
+        CaptureTarget? speaker = bluetooth ? FindTarget(config.Speaker, config.SpeakerApp, target, previous.Speaker, previous.Target) : null;
+        AudioHaptics? dsp = target is null ? null : target == previous.Target ? previous.Dsp : new AudioHaptics(config.Mode);
+        if (dsp is not null)
+        {
+            if (config.Mode != _config.Mode)
+            {
+                dsp.Mode = config.Mode;
+            }
+
+            // Strength goes in before the DSP's soft clip, so >100% lifts quiet parts instead of hard-clipping.
+            dsp.Gain = (float)config.Strength;
+        }
+
+        SpeakerPlayback? playback = speaker is null ? null
+            : speaker == previous.Speaker ? previous.Playback : OpenSpeaker();
+        string source = config.Audio == AudioHapticSource.Off
+            ? SourceName(config.Speaker, config.SpeakerApp) : SourceName(config.Audio, config.App);
+        _config = config;
+        string? problem = !needed ? null : link switch
+        {
+            Link.Usb => "Bluetooth gerekli.",
+            null => "Kontrolcü bağlı değil.",
+            _ => null,
+        };
+        // The streamer can ask for silence as soon as it starts its preroll.
+        if (previous.Target != target || previous.Speaker != speaker)
+        {
+            Publish(new State(previous.Status, target, dsp, speaker, playback));
+        }
+
+        bool streaming = _setSource(needed ? _fill : null);
+        _mixer.ConfigureClicks(bluetooth, streaming && config.Clicks);
+        if (!streaming || !needed)
+        {
+            _mixer.ResetRumble();
+        }
+
+        if (bluetooth && needed && !streaming)
+        {
+            problem = "Haptik akışı başlatılamadı.";
+        }
+
+        State current = _state;
+        if (current.Status.Streaming != streaming || current.Status.Source != source || current.Status.Problem != problem)
+        {
+            _state = current with { Status = new HapticStatus(streaming, source, problem) };
+        }
+    }
+
+    private static CaptureTarget? FindTarget(AudioHapticSource source, string app,
+        CaptureTarget? first, CaptureTarget? second, CaptureTarget? third = null)
+    {
+        if (source == AudioHapticSource.Off)
+        {
+            return null;
+        }
+
+        return Match(first) ?? Match(second) ?? Match(third) ??
+            new CaptureTarget(source == AudioHapticSource.System ? new SystemAudio() : new AppAudio(app));
+
+        CaptureTarget? Match(CaptureTarget? candidate) => candidate?.Target switch
+        {
+            SystemAudio when source == AudioHapticSource.System => candidate,
+            AppAudio existing when source == AudioHapticSource.App &&
+                string.Equals(existing.ProcessName, app, StringComparison.OrdinalIgnoreCase) => candidate,
+            _ => null,
+        };
+    }
+
+    private static string SourceName(AudioHapticSource source, string app) => source switch
+    {
+        AudioHapticSource.System => "system",
+        AudioHapticSource.App => $"app:{app}",
+        _ => "off",
+    };
+
+    private SpeakerPlayback OpenSpeaker()
+    {
+        try
+        {
+            return new SpeakerPlayback(new SpeakerFeed());
+        }
+        catch (AudioUnavailableException e)
+        {
+            _notice(new Notice(NoticeKinds.Info, e.Message));
+            return new SpeakerPlayback(null) { Problem = e.Message };
+        }
+    }
+
+    private void Publish(State state)
+    {
+        lock (_speakerLock)
+        {
+            SpeakerPlayback? old = _state.Playback;
+            _state = state;
+            if (old != state.Playback)
+            {
+                old?.Feed?.Dispose();
+            }
+        }
+    }
+
+    internal bool ReadSpeakerFrame(int block, Span<byte> frame)
+    {
+        lock (_speakerLock)
+        {
+            if (_state.Playback is not { Feed: { } feed, Problem: null } playback)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (block < 0 || !feed.Read(frame))
+                {
+                    feed.EncodeSilence(frame);
+                }
+
+                return true;
+            }
+            catch (AudioUnavailableException e)
+            {
+                playback.Problem = e.Message;
+                _notice(new Notice(NoticeKinds.Info, e.Message));
+                return false;
+            }
+        }
+    }
+
+    internal void Observe(InputState input) => _mixer.Observe(input);
+
+    internal void PollAudio()
+    {
+        if (_disposed || !_captureLock.TryEnter())
+        {
+            return;
+        }
+
+        try
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            State state = _state;
+            for (int i = _captures.Count - 1; i >= 0; i--)
+            {
+                CaptureTarget capture = _captures[i];
+                if (!state.Uses(capture))
+                {
+                    StopCapture(capture);
+                    _captures.RemoveAt(i);
+                }
+            }
+
+            if (state.Target is { } target)
+            {
+                PollCapture(target);
+            }
+
+            if (state.Speaker is { } speaker && speaker != state.Target && state.Playback?.Problem is null)
+            {
+                PollCapture(speaker);
+            }
+        }
+        finally
+        {
+            _captureLock.Exit();
+        }
+    }
+
+    private void PollCapture(CaptureTarget target)
+    {
+        if (_disposed || !_state.Uses(target))
+        {
+            return;
+        }
+
+        if (target.Attempt is { } attempt)
+        {
+            if (attempt.Failure is null && attempt.Capture.Running)
+            {
+                return;
+            }
+
+            string problem = attempt.Failure ?? "Ses yakalama durdu.";
+            StopCapture(target);
+            Fail(target, problem);
+            return;
+        }
+
+        if (target.FailedAt is long failedAt && _time.GetElapsedTime(failedAt) < RetryInterval)
+        {
+            return;
+        }
+
+        try
+        {
+            IAudioCapture capture = _audio.Start(target.Target);
+            if (_disposed || !_state.Uses(target))
+            {
+                capture.Dispose();
+                return;
+            }
+
+            var started = new CaptureAttempt(capture, samples => Push(target, samples));
+            target.Attempt = started;
+            if (!_captures.Contains(target))
+            {
+                _captures.Add(target);
+            }
+
+            capture.Failed += started.OnFailure;
+            capture.Data += started.Data;
+            if (started.Failure is null && capture.Running)
+            {
+                target.Problem = null;
+                target.FailedAt = null;
+            }
+            else
+            {
+                string problem = started.Failure ?? "Ses yakalama durdu.";
+                StopCapture(target);
+                Fail(target, problem);
+            }
+        }
+        catch (AudioUnavailableException e)
+        {
+            Fail(target, e.Message);
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Publish(new State(new HapticStatus(false, "off", null), null, null, null, null));
+        _setSource(null);
+        lock (_captureLock)
+        {
+            foreach (CaptureTarget target in _captures)
+            {
+                StopCapture(target);
+            }
+
+            _captures.Clear();
+        }
+    }
+
+    private void Fill(int _, Span<sbyte> samples)
+    {
+        AudioHaptics? dsp = _state.Dsp;
+        if (dsp is null)
+        {
+            samples.Clear();
+        }
+        else
+        {
+            dsp.Read(samples);
+        }
+
+        HapticsConfig config = _config;
+        _mixer.Mix(samples, 1f, (float)config.ClickStrength);
+    }
+
+    private void Fail(CaptureTarget target, string problem)
+    {
+        target.FailedAt = _time.GetTimestamp();
+        if (_disposed || !_state.Uses(target))
+        {
+            return;
+        }
+
+        bool firstFailure = target.Problem is null;
+        target.Problem = problem;
+        if (firstFailure)
+        {
+            _notice(new Notice(NoticeKinds.Info, problem));
+        }
+    }
+
+    private void Push(CaptureTarget target, ReadOnlySpan<float> samples)
+    {
+        State state = _state;
+        if (state.Target == target)
+        {
+            state.Dsp?.Push(samples);
+        }
+
+        if (state.Speaker == target && state.Playback is { Problem: null } playback)
+        {
+            playback.Feed?.Push(samples);
+        }
+    }
+
+    private void StopCapture(CaptureTarget target)
+    {
+        if (target.Attempt is { } attempt)
+        {
+            attempt.Capture.Data -= attempt.Data;
+            attempt.Capture.Failed -= attempt.OnFailure;
+            attempt.Capture.Dispose();
+            target.Attempt = null;
+            State state = _state;
+            if (state.Target == target)
+            {
+                state.Dsp?.Clear();
+            }
+
+            if (state.Speaker == target)
+            {
+                state.Playback?.Feed?.Clear();
+            }
+        }
+    }
+
+    private sealed record State(HapticStatus Status, CaptureTarget? Target, AudioHaptics? Dsp,
+        CaptureTarget? Speaker, SpeakerPlayback? Playback)
+    {
+        public bool Uses(CaptureTarget target) =>
+            Status.Streaming && (Target == target || (Speaker == target && Playback?.Problem is null));
+    }
+
+    private sealed class CaptureTarget(AudioTarget target)
+    {
+        public AudioTarget Target { get; } = target;
+        public CaptureAttempt? Attempt;
+        public long? FailedAt;
+        public volatile string? Problem;
+    }
+
+    private sealed class SpeakerPlayback(SpeakerFeed? feed)
+    {
+        public SpeakerFeed? Feed { get; } = feed;
+        public volatile string? Problem;
+    }
+
+    private sealed class CaptureAttempt(IAudioCapture capture, AudioDataHandler data)
+    {
+        public IAudioCapture Capture { get; } = capture;
+        public AudioDataHandler Data { get; } = data;
+        public volatile string? Failure;
+        public void OnFailure(string problem) => Failure = problem;
+    }
+}

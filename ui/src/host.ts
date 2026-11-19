@@ -194,6 +194,19 @@ export type EmulationStatus = {
 
 export type DriverProgress = { type: "driver.progress"; kind: DriverKind; message: string; done: boolean; ok: boolean };
 
+export type HapticsConfig = {
+  audio: "off" | "system" | "app";
+  app: string;
+  mode: "game" | "film" | "music";
+  strength: number;
+  rumbleToHaptics: boolean;
+  clicks: boolean;
+  clickStrength: number;
+  speaker: HapticsConfig["audio"];
+  speakerApp: string;
+  speakerVolume: number;
+};
+
 export type Profile = {
   version: number;
   id: string;
@@ -207,6 +220,7 @@ export type Profile = {
   sticks: Pair<StickConfig>;
   gyro: { sensitivity: number; smoothing: number; invertX: boolean; invertY: boolean };
   rumble: { strength: number };
+  haptics: HapticsConfig;
   mapping: Mapping;
   macros: Macro[];
   emulation: EmulationConfig;
@@ -276,6 +290,9 @@ export type Output = {
 
 export type NoticeKind = "lowBattery" | "brokenFile" | "idleSleep" | "gyroCalibration" | "info" | "elevated" | "mapping" | "emulation";
 
+export type AudioApp = { pid: number; name: string; display: string };
+export type HapticStatus = { type: "haptics"; streaming: boolean; source: "off" | "system" | `app:${string}`; problem: string | null };
+
 export type HostMessage =
   | Status
   | Input
@@ -287,6 +304,8 @@ export type HostMessage =
   | { type: "runPicked"; path: string | null }
   | { type: "notice"; kind: NoticeKind; message: string; progress?: number }
   | EmulationStatus
+  | HapticStatus
+  | { type: "audioApps"; apps: AudioApp[] }
   | DriverProgress
   | { type: "error"; message: string };
 
@@ -304,6 +323,7 @@ export type UiMessage =
   | { type: "settings.save"; settings: AppSettings }
   | { type: "gyro.calibrate" }
   | { type: "foreground.pick" }
+  | { type: "audio.apps" }
   | { type: "mapping.pause"; paused: boolean }
   | { type: "run.pick" }
   | { type: "app.restartElevated" }

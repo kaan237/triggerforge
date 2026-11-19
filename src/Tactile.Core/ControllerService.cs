@@ -11,12 +11,18 @@ public sealed class ControllerService : IDisposable
     private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(1.5);
 
     private readonly Lock _lock = new();
+    private readonly Lock _scanLock = new();
     private readonly Timer _scan;
-    private DualSenseController? _controller;
+    private volatile DualSenseController? _controller;
     private HapticStreamer? _haptics;
+    private long _hapticsStarted;
     private Timer? _hapticStop;
+    private volatile HapticBlockSource? _hapticSource;
+    internal SpeakerFrameSource? SpeakerSource { get; set; }
+    private volatile HapticBlockSource? _tone;
+    private bool _disposed;
     private readonly Func<string, bool>? _isVirtual;
-    private OutputState _output = OutputState.Default;
+    private volatile OutputState _output = OutputState.Default;
 
     public ControllerService()
         : this(autoConnect: true)
@@ -29,7 +35,7 @@ public sealed class ControllerService : IDisposable
     {
         _isVirtual = isVirtual;
         _scan = autoConnect
-            ? new Timer(_ => Scan(), null, TimeSpan.Zero, ScanInterval)
+            ? new Timer(_ => ScanIfIdle(), null, TimeSpan.Zero, ScanInterval)
             : new Timer(_ => { }, null, Timeout.Infinite, Timeout.Infinite);
     }
 
@@ -50,13 +56,22 @@ public sealed class ControllerService : IDisposable
         }
     }
 
+    internal bool SetHapticSource(HapticBlockSource? source)
+    {
+        lock (_lock)
+        {
+            _hapticSource = source;
+            return ReconcileHapticsLocked();
+        }
+    }
+
     /// <summary>Plays a test tone on the haptic actuators (Bluetooth only).</summary>
     public string? PlayHapticTone(float frequencyHz, float amplitude, bool left, bool right, int milliseconds)
     {
         lock (_lock)
         {
             DualSenseController? c = _controller;
-            if (c is null)
+            if (c is not { Connected: true })
             {
                 return "Kontrolcü bağlı değil.";
             }
@@ -66,11 +81,23 @@ public sealed class ControllerService : IDisposable
                 return "Haptik test şimdilik yalnız Bluetooth'ta.";
             }
 
-            StopHapticsLocked();
+            ClearToneLocked();
             int blocks = (int)Math.Ceiling(milliseconds / HapticReport.Interval.TotalMilliseconds);
-            _haptics = new HapticStreamer(c, HapticStreamer.Tone(frequencyHz, amplitude, left, right, blocks));
+            HapticBlockSource tone = HapticStreamer.Tone(frequencyHz, amplitude, left, right, blocks);
+            int firstBlock = -1;
+            HapticBlockSource playback = (block, samples) =>
+            {
+                if (firstBlock < 0)
+                {
+                    firstBlock = block;
+                }
+
+                tone(block - firstBlock, samples);
+            };
+            _tone = playback;
+            ReconcileHapticsLocked();
             // Keep streaming silence briefly so the controller buffer drains, then stop.
-            _hapticStop = new Timer(_ => StopHaptics(), null, milliseconds + 300, Timeout.Infinite);
+            _hapticStop = new Timer(_ => FinishTone(playback), null, milliseconds + 300, Timeout.Infinite);
             return null;
         }
     }
@@ -79,34 +106,117 @@ public sealed class ControllerService : IDisposable
     {
         lock (_lock)
         {
-            StopHapticsLocked();
+            ClearToneLocked();
+            ReconcileHapticsLocked();
         }
     }
 
     public void Dispose()
     {
         _scan.Dispose();
+        DualSenseController? controller;
         lock (_lock)
         {
+            _disposed = true;
+            ClearToneLocked();
+            _hapticSource = null;
             StopHapticsLocked();
-            _controller?.Dispose();
+            controller = _controller;
             _controller = null;
+        }
+
+        controller?.Dispose();
+    }
+
+    private void FinishTone(HapticBlockSource playback)
+    {
+        lock (_lock)
+        {
+            if (_tone == playback)
+            {
+                ClearToneLocked();
+                ReconcileHapticsLocked();
+            }
         }
     }
 
-    private void StopHapticsLocked()
+    private void ClearToneLocked()
     {
+        _tone = null;
         _hapticStop?.Dispose();
         _hapticStop = null;
+    }
+
+    private bool ReconcileHapticsLocked()
+    {
+        if (_disposed || _controller is not { Connected: true, Details.Link: Link.Bluetooth } controller ||
+            (_hapticSource is null && _tone is null))
+        {
+            StopHapticsLocked();
+            return false;
+        }
+
+        if (_haptics is not { Running: true })
+        {
+            // A streamer that stopped on a failed write is retried at most once a second.
+            if (_haptics is not null && Environment.TickCount64 - _hapticsStarted < 1000)
+            {
+                return false;
+            }
+
+            StopHapticsLocked();
+            _hapticsStarted = Environment.TickCount64;
+            _haptics = new HapticStreamer(controller, FillHaptics, FillSpeaker);
+        }
+
+        return _haptics.Running;
+    }
+
+    private void FillHaptics(int block, Span<sbyte> samples)
+    {
+        HapticBlockSource? source = _hapticSource;
+        if (source is null)
+        {
+            samples.Clear();
+        }
+        else
+        {
+            source(block, samples);
+        }
+
+        _tone?.Invoke(block, samples);
+    }
+
+    private bool FillSpeaker(int block, Span<byte> frame) => SpeakerSource?.Invoke(block, frame) ?? false;
+
+    private void StopHapticsLocked()
+    {
         _haptics?.Dispose();
         _haptics = null;
+    }
+
+    private void ScanIfIdle()
+    {
+        if (!_scanLock.TryEnter())
+        {
+            return;
+        }
+
+        try
+        {
+            Scan();
+        }
+        finally
+        {
+            _scanLock.Exit();
+        }
     }
 
     private void Scan()
     {
         lock (_lock)
         {
-            if (_controller is { Connected: true })
+            if (_disposed || _controller is not null)
             {
                 return;
             }
@@ -128,15 +238,32 @@ public sealed class ControllerService : IDisposable
             return;
         }
 
-        controller.InputReceived += (_, state) => Input?.Invoke(state);
-        controller.Disconnected += OnDisconnected;
+        bool accepted;
         lock (_lock)
         {
-            _controller = controller;
-            controller.Send(_output, force: true);
+            accepted = !_disposed && _controller is null && controller.Connected;
+            if (accepted)
+            {
+                _controller = controller;
+                controller.InputReceived += OnInput;
+                controller.Disconnected += OnDisconnected;
+                controller.Send(_output, force: true);
+                ReconcileHapticsLocked();
+            }
         }
 
-        ConnectionChanged?.Invoke(controller);
+        if (!accepted)
+        {
+            controller.Dispose();
+        }
+        else if (controller.Connected)
+        {
+            ConnectionChanged?.Invoke(controller);
+        }
+        else
+        {
+            OnDisconnected(controller);
+        }
     }
 
     internal bool IsVirtual(string path)
@@ -167,6 +294,14 @@ public sealed class ControllerService : IDisposable
         }
     }
 
+    private void OnInput(DualSenseController controller, InputState state)
+    {
+        if (_controller == controller)
+        {
+            Input?.Invoke(state);
+        }
+    }
+
     private void OnDisconnected(DualSenseController c)
     {
         lock (_lock)
@@ -176,6 +311,7 @@ public sealed class ControllerService : IDisposable
                 return;
             }
 
+            ClearToneLocked();
             StopHapticsLocked();
             _controller = null;
         }

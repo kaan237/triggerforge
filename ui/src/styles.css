@@ -161,6 +161,7 @@ main { display: grid; grid-template-rows: 44px 1fr; min-width: 0; min-height: 0;
 }
 .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .panel-head h2 { margin: 0; }
+.haptics-sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; overflow-wrap: anywhere; }
 
 .button {
   display: inline-flex;

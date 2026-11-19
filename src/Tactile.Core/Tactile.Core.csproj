@@ -7,6 +7,7 @@
     <ProjectReference Include="../Tactile.Input/Tactile.Input.csproj" />
     <ProjectReference Include="../Tactile.Emulation/Tactile.Emulation.csproj" />
     <ProjectReference Include="../Tactile.Drivers/Tactile.Drivers.csproj" />
+    <ProjectReference Include="../Tactile.Audio/Tactile.Audio.csproj" />
   </ItemGroup>
   <ItemGroup><InternalsVisibleTo Include="Tactile.Tests" /></ItemGroup>
 </Project>

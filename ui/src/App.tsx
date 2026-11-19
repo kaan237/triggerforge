@@ -3,6 +3,7 @@ import { inHost, type Profile, type Status } from "./host";
 import { deepEqual } from "./model";
 import { Notices } from "./Notices";
 import { Emulation } from "./pages/Emulation";
+import { Haptics } from "./pages/Haptics";
 import { Light } from "./pages/Light";
 import { Mapping } from "./pages/Mapping";
 import { Overview } from "./pages/Overview";
@@ -16,6 +17,7 @@ import { AppProvider, useApp, useInput } from "./state";
 const sections = [
   { id: "controller", label: "Kontrolcü", keys: [] },
   { id: "triggers", label: "Tetikler", keys: ["triggers", "triggerResponse"] },
+  { id: "haptics", label: "Haptik", keys: ["haptics"] },
   { id: "light", label: "Işık", keys: ["lightbar", "playerLeds", "micLed"] },
   { id: "sticks", label: "Analoglar", keys: ["sticks", "gyro"] },
   { id: "mapping", label: "Tuşlar", keys: ["mapping", "macros"] },
@@ -108,6 +110,7 @@ function Shell() {
         <section className="content" key={section}>
           {section === "controller" && <Overview />}
           {section === "triggers" && <Triggers />}
+          {section === "haptics" && <Haptics />}
           {section === "light" && <Light />}
           {section === "sticks" && <Sticks />}
           {section === "mapping" && <Mapping />}

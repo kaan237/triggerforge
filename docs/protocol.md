@@ -202,6 +202,44 @@ Speaker audio is Opus, 48 kHz stereo, 10 ms frames, constant bitrate padded to
 Exact sub-packet flag values come from community reverse engineering and are not
 documented by Sony; treat firmware updates as a risk.
 
+**Speaker + haptics — report `0x36`, 398 bytes** (sources read 2026-11-19: dualsense-companion
+`media.py` (MIT), LinuxAudio4Dualsense5 README (AGPL, facts only); not verified on our
+hardware yet). Offsets from the report id:
+
+| Offset | Content |
+|---|---|
+| 0 | `0x36` |
+| 1 | sequence (`seq << 4`), same counter rules as `0x32` |
+| 2-3 | sub-packet `0x11` header: `0x91`, length 7 |
+| 4 | stream mask: `0xFE` = speaker (+ haptics), `0xFF` = also microphone |
+| 5-9 | five buffer bytes, all `0x40` |
+| 10 | packet counter (mod 256) |
+| 11-12 | sub-packet `0x12` header: `0x92`, 64 |
+| 13-76 | 32 haptic frames, s8 stereo, as in `0x32` |
+| 77-78 | sub-packet `0x13` header: `0x93`, 200 (`0x96` instead routes to the headphone jack) |
+| 79-278 | one Opus frame, exactly 200 bytes |
+| 279-393 | zero |
+| 394-397 | CRC32, seed `0xA2`, little-endian |
+
+One source puts an extra `0x90` state sub-packet (63 bytes) between the config and the
+haptics, shifting the rest by 65 bytes; the other (tested against a PS5 capture) has no state
+block. We default to **no state block** and keep the other as a switch for hardware testing.
+
+Opus for the speaker: 48 kHz, stereo (internal speaker is mono: same signal on L and R),
+480-sample (10 ms) frames, CBR 160 kbit/s = 200 bytes per frame. Each 10.667 ms tick takes
+512 captured samples and linearly resamples them to 480 before encoding, so one frame goes
+out per tick and the controller plays it at its own pace. Pacing at exactly 10 ms instead
+underruns/stutters.
+
+Main report settings for the speaker (0x31 common block): audio-control and speaker-volume
+enable flags, speaker volume (0-100 used in practice), audio path `0x30` (speaker), audio
+control 2 = `0x02` (preamp). This is what the haptic prime already sends.
+
+`0x35` (334 bytes) is named in one source as audio + haptics but no layout was found; we do
+not use it. `0x39` (547 bytes) carries two Opus frames and two haptic blocks every 21.3 ms
+(`0xD5` speaker, `0xD2` haptics sub-ids); one source reports it survives Bluetooth stalls
+better than `0x36`. Kept as a later option.
+
 ## Virtual device (for games)
 
 To make games see a wired controller while the real one is on Bluetooth, the app

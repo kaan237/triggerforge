@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Tactile.Audio;
 using Tactile.Device.DualSense;
 using Tactile.Drivers;
 using Tactile.Emulation;
@@ -22,6 +23,7 @@ public sealed class AppCore : IDisposable
     private readonly Lock _lock = new();
     // Serialises device writes without holding _lock, so input handling never waits on HID I/O.
     private readonly Lock _sendLock = new();
+    private readonly Lock _hapticsLock = new();
     private long _outputVersion;
     private readonly TimeProvider _time;
     private readonly long _startTimestamp;
@@ -34,6 +36,8 @@ public sealed class AppCore : IDisposable
     private readonly BatteryMonitor _battery = new();
     private readonly RecentNames _recent = new();
     private readonly ConcurrentQueue<Notice> _outbox = new();
+    private readonly HapticEngine _haptics;
+    private byte? _speakerVolume;
 
     private ProfileSelection _active;
     private TriggerEffect _leftEffect;
@@ -71,9 +75,9 @@ public sealed class AppCore : IDisposable
     /// <param name="drivers">Driver layer for the virtual controller; null = emulation unavailable.</param>
     /// <param name="server">USB/IP server; null with drivers set = drivers shown, no virtual pad.</param>
     public AppCore(string? dataDir = null, IForegroundSource? foreground = null, InputPlatform? platform = null,
-        DriverPlatform? drivers = null, IUsbIpServer? server = null)
+        DriverPlatform? drivers = null, IUsbIpServer? server = null, IAudioSystem? audio = null)
         : this(dataDir, foreground, new ControllerService(autoConnect: true, drivers is null ? null : drivers.Tree.IsVirtual),
-            TimeProvider.System, runTimer: true, platform, drivers, server)
+            TimeProvider.System, runTimer: true, platform, drivers, server, audio: audio)
     {
     }
 
@@ -82,13 +86,17 @@ public sealed class AppCore : IDisposable
     /// worker and macros then also run on the calling thread, driven by the same clock.
     /// </param>
     internal AppCore(string? dataDir, IForegroundSource? foreground, ControllerService controllers, TimeProvider time, bool runTimer,
-        InputPlatform? platform = null, DriverPlatform? drivers = null, IUsbIpServer? server = null, Func<bool>? steamRunning = null)
+        InputPlatform? platform = null, DriverPlatform? drivers = null, IUsbIpServer? server = null, Func<bool>? steamRunning = null,
+        IAudioSystem? audio = null)
     {
         _time = time;
         _platform = platform ?? InputPlatform.None;
         _mapper = new Mapper(_platform, new MappingHost(this), Now, threaded: runTimer);
         _startTimestamp = time.GetTimestamp();
         Controllers = controllers;
+        _haptics = new HapticEngine(audio ?? AudioSystemFactory.Create(), Controllers.SetHapticSource,
+            () => Controllers.Output, _outbox.Enqueue, time);
+        Controllers.SpeakerSource = _haptics.ReadSpeakerFrame;
         Profiles = new ProfileStore(dataDir);
         Settings = new SettingsStore(dataDir);
 
@@ -134,6 +142,10 @@ public sealed class AppCore : IDisposable
     }
 
     public ControllerService Controllers { get; }
+
+    public HapticStatus Haptics => _haptics.Status;
+
+    public IReadOnlyList<AudioApp> ListAudioApps() => _haptics.ListApps();
 
     public ProfileStore Profiles { get; }
 
@@ -330,6 +342,7 @@ public sealed class AppCore : IDisposable
         lock (_lock)
         {
             _overrides.Clear();
+            _speakerVolume = null;
         }
 
         Refresh();
@@ -387,6 +400,11 @@ public sealed class AppCore : IDisposable
             d.Dispose();
         }
 
+        lock (_hapticsLock)
+        {
+            _haptics.Dispose();
+        }
+
         Controllers.Dispose();
     }
 
@@ -441,6 +459,16 @@ public sealed class AppCore : IDisposable
             }
 
             activeProfile = _active.Profile;
+            byte? speakerVolume = controller is { Connected: true, Details.Link: Link.Bluetooth } &&
+                activeProfile.Haptics.Speaker != AudioHapticSource.Off
+                ? (byte)Math.Round(activeProfile.Haptics.SpeakerVolume * 100)
+                : null;
+            if (_speakerVolume != speakerVolume)
+            {
+                _speakerVolume = speakerVolume;
+                SetLayerLocked("speaker", speakerVolume is byte volume ? o => o with { SpeakerVolume = volume } : null);
+            }
+
             OutputState output = Build(now);
             if (!output.Equals(_lastOutput))
             {
@@ -451,6 +479,15 @@ public sealed class AppCore : IDisposable
         }
 
         Send(toSend, version);
+        lock (_hapticsLock)
+        {
+            if (!_disposed)
+            {
+                Link? link = Controllers.Controller is { Connected: true } connected ? connected.Details.Link : null;
+                _haptics.Configure(ActiveProfile.Haptics, link);
+            }
+        }
+
         _emulation?.Update(activeProfile, activeSettings, RealOf(activeController));
 
         if (sleepMac is not null)
@@ -580,6 +617,7 @@ public sealed class AppCore : IDisposable
             }
         }
 
+        _haptics.Observe(s);
         _emulation?.OnInput(s);
 
         if (firstInput)
@@ -792,6 +830,19 @@ public sealed class AppCore : IDisposable
         try
         {
             Refresh();
+            // Starting a WASAPI capture can take seconds; keep it off the output tick.
+            // PollAudio skips itself while a previous poll is still running.
+            ThreadPool.QueueUserWorkItem(static engine =>
+            {
+                try
+                {
+                    engine.PollAudio();
+                }
+                catch (Exception)
+                {
+                    // A failed poll is retried on the next tick.
+                }
+            }, _haptics, preferLocal: false);
         }
         catch (Exception e) when (!_tickFailed)
         {

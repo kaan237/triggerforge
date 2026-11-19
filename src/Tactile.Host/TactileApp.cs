@@ -273,6 +273,8 @@ internal sealed class TactileApp : ApplicationContext
         {
             _window.Bridge.PostOutputIfChanged();
         }
+
+        _window.Bridge.PostHapticsIfChanged();
     }
 
     private void UpdateTrayStatus()

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { send, subscribe, type AppSettings, type DriverKind, type DriverProgress, type EmulationStatus, type Input, type NoticeKind, type Output, type Profile, type Status } from "./host";
+import { send, subscribe, type AppSettings, type DriverKind, type DriverProgress, type EmulationStatus, type HapticStatus, type Input, type NoticeKind, type Output, type Profile, type Status } from "./host";
 import { clone, deepEqual, normalizeProfile, normalizeSettings } from "./model";
 
 export type Notice = { id: number; kind: NoticeKind | "error"; message: string; progress?: number };
@@ -11,6 +11,7 @@ type AppState = {
   activeId: string;
   settings: AppSettings | null;
   emulation: EmulationStatus | null;
+  haptics: HapticStatus | null;
   // Last install message per driver; cleared when a new install starts.
   installs: Partial<Record<DriverKind, DriverProgress>>;
   recent: string[] | null;
@@ -57,6 +58,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeId, setActiveId] = useState("");
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [emulation, setEmulation] = useState<EmulationStatus | null>(null);
+  const [haptics, setHaptics] = useState<HapticStatus | null>(null);
   const [installs, setInstalls] = useState<Partial<Record<DriverKind, DriverProgress>>>({});
   const [recent, setRecent] = useState<string[] | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
@@ -100,6 +102,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
         case "emulation":
           setEmulation(m);
+          break;
+        case "haptics":
+          setHaptics(m);
           break;
         case "driver.progress":
           setInstalls((all) => ({ ...all, [m.kind]: m }));
@@ -154,8 +159,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [activeId]);
 
   const value = useMemo<AppState>(
-    () => ({ status, output, profiles, activeId, settings, emulation, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft }),
-    [status, output, profiles, activeId, settings, emulation, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft],
+    () => ({ status, output, profiles, activeId, settings, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft }),
+    [status, output, profiles, activeId, settings, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -19,6 +19,7 @@ internal sealed class Bridge
     private readonly Action<string> _postRaw;
     private readonly List<string> _queued = [];
     private OutputState? _lastOutput;
+    private HapticStatus? _lastHaptics;
     private bool _ready;
 
     public Bridge(AppCore core, Control owner, Action<string> postRaw)
@@ -82,6 +83,8 @@ internal sealed class Bridge
                 PostProfiles();
                 PostSettings();
                 PostEmulation();
+                _lastHaptics = null;
+                PostHapticsIfChanged();
                 foreach (string q in _queued)
                 {
                     _postRaw(q);
@@ -218,6 +221,22 @@ internal sealed class Bridge
 
             case "foreground.pick":
                 Post(new { type = "foreground", recent = _core.RecentForeground });
+                break;
+
+            case "audio.apps":
+                // Session enumeration is COM work that can stall on a busy audio device; keep it off the UI thread.
+                Task.Run(() =>
+                {
+                    var apps = _core.ListAudioApps().Select(a => new { pid = a.ProcessId, name = a.ProcessName, display = a.DisplayName }).ToArray();
+                    try
+                    {
+                        _owner.BeginInvoke(() => Post(new { type = "audioApps", apps }));
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // Window already closed.
+                    }
+                });
                 break;
 
             // Phase 1 live controls: layers over the profile until reset.
@@ -471,6 +490,16 @@ internal sealed class Bridge
             leftTrigger = o.LeftTrigger.ToString(),
             rightTrigger = o.RightTrigger.ToString(),
         });
+    }
+
+    public void PostHapticsIfChanged()
+    {
+        HapticStatus status = _core.Haptics;
+        if (_ready && status != _lastHaptics)
+        {
+            _lastHaptics = status;
+            Post(new { type = "haptics", status.Streaming, status.Source, status.Problem });
+        }
     }
 
     public void PostProfiles() =>

@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace Tactile.Device.DualSense;
 
 /// <summary>
@@ -7,17 +9,22 @@ namespace Tactile.Device.DualSense;
 public sealed class HapticReport
 {
     public const int Length = 142;
+    public const int SpeakerLength = 398;
+    public const int SpeakerFrameLength = 200;
     public const int FramesPerReport = 32;
     public const int SampleRate = 3000;
     public const int PayloadLength = FramesPerReport * 2;
     public static readonly TimeSpan Interval = TimeSpan.FromSeconds(512.0 / 48000);
 
     private readonly byte[] _report = new byte[Length];
+    private readonly byte[] _speakerReport = new byte[SpeakerLength];
+    private readonly byte[] _primeState = new byte[63];
     private int _sequence;
     private byte _counter;
 
     /// <summary>Controller-side buffer length, 16-128. Larger = smoother, more latency.</summary>
     public byte BufferLength { get; set; } = 64;
+    public bool IncludeStateBlock { get; set; }
 
     /// <summary>
     /// Opens the controller's Bluetooth audio/haptics session. Must precede haptic reports;
@@ -31,6 +38,7 @@ public sealed class HapticReport
         r[2] = 0x90;
         r[3] = 0x3F;
         OutputReport.WriteState(state, r.AsSpan(4), options with { Rumble = false, AudioStream = true });
+        r.AsSpan(4, _primeState.Length).CopyTo(_primeState);
         Crc32.Stamp(Crc32.OutputSeed, r);
         _sequence = 0;
         _counter = 0;
@@ -48,8 +56,7 @@ public sealed class HapticReport
         byte[] r = _report;
         Array.Clear(r);
         r[0] = 0x32;
-        r[1] = (byte)((_sequence & 0x0F) << 4);
-        _sequence = (_sequence + 1) & 0x0F;
+        r[1] = NextSequence();
 
         // Sub-packet 0x11: session flags, buffer lengths, packet counter.
         r[2] = 0x91;
@@ -69,6 +76,55 @@ public sealed class HapticReport
 
         Crc32.Stamp(Crc32.OutputSeed, r);
         return r;
+    }
+
+    public byte[] BuildSpeaker(ReadOnlySpan<sbyte> haptics64, ReadOnlySpan<byte> opus200)
+    {
+        if (haptics64.Length != PayloadLength)
+        {
+            throw new ArgumentException($"Expected {PayloadLength} samples.", nameof(haptics64));
+        }
+
+        if (opus200.Length != SpeakerFrameLength)
+        {
+            throw new ArgumentException($"Expected {SpeakerFrameLength} bytes.", nameof(opus200));
+        }
+
+        byte[] r = _speakerReport;
+        Array.Clear(r);
+        r[0] = 0x36;
+        r[1] = NextSequence();
+        r[2] = 0x91;
+        r[3] = 7;
+        r[4] = 0xFE;
+        r.AsSpan(5, 5).Fill(0x40);
+        r[10] = _counter++;
+
+        int offset = 11;
+        if (IncludeStateBlock)
+        {
+            r[offset++] = 0x90;
+            r[offset++] = (byte)_primeState.Length;
+            _primeState.CopyTo(r.AsSpan(offset));
+            offset += _primeState.Length;
+        }
+
+        r[offset++] = 0x92;
+        r[offset++] = PayloadLength;
+        MemoryMarshal.AsBytes(haptics64).CopyTo(r.AsSpan(offset));
+        offset += PayloadLength;
+        r[offset++] = 0x93;
+        r[offset++] = SpeakerFrameLength;
+        opus200.CopyTo(r.AsSpan(offset));
+        Crc32.Stamp(Crc32.OutputSeed, r);
+        return r;
+    }
+
+    private byte NextSequence()
+    {
+        byte value = (byte)(_sequence << 4);
+        _sequence = (_sequence + 1) & 0x0F;
+        return value;
     }
 
     /// <summary>Downsamples one 512-frame 48 kHz stereo block (floats -1..1) to a 3 kHz payload by averaging 16-frame windows.</summary>

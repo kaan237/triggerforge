@@ -1,3 +1,4 @@
+using Tactile.Audio;
 using Tactile.Device.DualSense;
 
 namespace Tactile.Core;
@@ -13,6 +14,8 @@ public enum CurveKind { Linear, Exponential, Custom }
 public enum StickShape { Round, Square }
 
 public enum EmulationMode { Off, Xbox360, DualSense }
+
+public enum AudioHapticSource { Off, System, App }
 
 /// <summary>Everything one profile sets. File format: docs/contract.md.</summary>
 public sealed record Profile
@@ -32,6 +35,7 @@ public sealed record Profile
     public StickPair Sticks { get; init; } = new();
     public GyroConfig Gyro { get; init; } = new();
     public RumbleConfig Rumble { get; init; } = new();
+    public HapticsConfig Haptics { get; init; } = new();
     /// <summary>Keyboard and mouse output (phase 3).</summary>
     public MappingConfig Mapping { get; init; } = new();
     /// <summary>At most 50.</summary>
@@ -144,4 +148,18 @@ public sealed record RumbleConfig
 {
     /// <summary>0-2 multiplier.</summary>
     public double Strength { get; init; } = 1.0;
+}
+
+public sealed record HapticsConfig
+{
+    public AudioHapticSource Audio { get; init; }
+    public string App { get; init; } = "";
+    public HapticMode Mode { get; init; }
+    public double Strength { get; init; } = 1;
+    public bool RumbleToHaptics { get; init; }
+    public bool Clicks { get; init; }
+    public double ClickStrength { get; init; } = 0.6;
+    public AudioHapticSource Speaker { get; init; }
+    public string SpeakerApp { get; init; } = "";
+    public double SpeakerVolume { get; init; } = 0.8;
 }

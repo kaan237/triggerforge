@@ -301,6 +301,16 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 
 **Kabul ölçütü:** müzik çalınca haptik ritimle titreşiyor; seçili uygulamanın sesi controller hoparlöründen duyuluyor; 30 dk kesintisiz.
 
+**Faz 5a sonucu (2026-11-19, kod tamam, donanımda denenmedi)**
+- Sözleşme `docs/contract-phase5a.md`; üç iş sırayla yazıldı, her biri kontrol edildikten sonra bir sonrakine geçildi. Hoparlör raporu `0x36` bilgisi `docs/protocol.md`'ye kendi cümlelerimizle eklendi (kaynaklar MIT ve AGPL; yalnız bilgi okundu, kod alınmadı).
+- `src/Tactile.Audio` (yeni): kendi COM interop'umuzla WASAPI sistem sesi ve tek uygulama sesi yakalama (uygulama sesi Windows 20348 ve sonrası), çalan uygulama listesi, ses → haptik DSP (Oyun / Film / Müzik: biquad filtre, gürültü kapısı, sıkıştırma, Müzik'te vuruş vurgusu; gecikme sınırı 4 blok ≈ 43 ms), Opus kodlayıcı ve hoparlör beslemesi (512 → 480 yeniden örnekleme, mono, 200 B CBR).
+- libopus 1.6.1: resmi Xiph kaynağından SHA-256 doğrulanarak derlendi (`third_party/opus/build-opus.sh`, statik CRT, yalnız KERNEL32 bağımlılığı). Lisans metni `third_party/opus/COPYING`, çıktıya `licenses/opus.txt` olarak kopyalanıyor; faz 7'de `licenses.txt`'e girecek.
+- Çekirdek: `HapticEngine` tek akışta sesi, rumble'ı (sol ≈ 50 Hz, sağ ≈ 175 Hz yumuşak rampalı dalga) ve tık hissini karıştırıyor. Akış açıkken controller motor rumble'ını yok saydığı için rumble her zaman dalgaya çevriliyor. Hoparlör açıkken her tik `0x36`, değilse `0x32`. Aynı kaynak hem haptiği hem hoparlörü tek yakalamayla besliyor. Test tonu akışı geçici olarak devralıyor.
+- Profil: `haptics` (ses kaynağı, uygulama, mod, şiddet, rumble → haptik, tık, hoparlör kaynağı ve sesi). Eski profiller varsayılanlarla açılıyor.
+- Arayüz: "Haptik" sayfası (sesten haptik, rumble, tık hissi, kontrolcü hoparlörü, çalan uygulamalar listesi, USB uyarısı). Tarayıcı önizlemesinde kontrol edildi.
+- Testler 369/369. İnceleme düzeltmeleri: ses yakalamanın başlatılması ana döngüyü bloklamıyor; uygulama sesi için 20 ms tampon süresi; akış yazma hatasıyla durursa en fazla saniyede bir yeniden kuruluyor; şiddet DSP'nin yumuşak kırpmasından önce uygulanıyor; uygulama listesi arayüz iş parçacığı dışında alınıyor.
+- Denenmeyenler (hepsi donanım): müzikle ritim, tek uygulama yakalama, `0x36` hoparlör sesi (durum bloklu ve bloksuz düzenin hangisinin çalıştığı: `HapticReport.IncludeStateBlock`), rumble dalgasının hissi, tık hissi, 30 dk kesintisizlik, hoparlör ses seviyesi aralığı (0-100 varsayıldı).
+
 ### Faz 5b — Sanal DualSense ses arayüzü (3-5 hafta) ⚠ en riskli faz
 
 **Yapılacaklar**
