@@ -41,7 +41,7 @@ public sealed class DualSenseController : IDisposable
         _device = device;
         Details = details;
         Features = features;
-        _writeBuffer = new byte[Math.Max(device.Info.OutputReportLength, HapticReport.SpeakerLength)];
+        _writeBuffer = new byte[Math.Max(device.Info.OutputReportLength, HapticReport.SpeakerDoubleLength)];
         _reader = new Thread(ReadLoop) { IsBackground = true, Name = "dualsense-reader", Priority = ThreadPriority.AboveNormal };
     }
 
@@ -281,13 +281,15 @@ public sealed class HapticStreamer : IDisposable
     private readonly HapticReport _report = new();
     private readonly Thread _thread;
     private volatile bool _running = true;
+    private volatile SpeakerPacket _speakerPacket;
     private const int PrerollBlocks = 8;
 
     /// <param name="nextBlock">Called with the block index and a buffer for 64 interleaved s8 samples.</param>
     public byte BufferLength { set => _report.BufferLength = value; }
+    public SpeakerPacket SpeakerPacket { set => _speakerPacket = value; }
 
     public HapticStreamer(DualSenseController controller, HapticBlockSource nextBlock, SpeakerFrameSource? nextSpeaker = null,
-        byte bufferLength = 64)
+        byte bufferLength = 64, SpeakerPacket speakerPacket = SpeakerPacket.Single36)
     {
         if (controller.Details.Link != Link.Bluetooth)
         {
@@ -296,6 +298,7 @@ public sealed class HapticStreamer : IDisposable
 
         _controller = controller;
         _report.BufferLength = bufferLength;
+        _speakerPacket = speakerPacket;
         _nextBlock = nextBlock;
         _nextSpeaker = nextSpeaker;
         _thread = new Thread(Run) { IsBackground = true, Name = "dualsense-haptics", Priority = ThreadPriority.Highest };
@@ -324,6 +327,8 @@ public sealed class HapticStreamer : IDisposable
             double intervalMs = HapticReport.Interval.TotalMilliseconds;
             var samples = new sbyte[HapticReport.PayloadLength];
             var speaker = new byte[HapticReport.SpeakerFrameLength];
+            var pairing = new SpeakerPairing();
+            Func<byte[], bool> write = Write;
             for (int block = -PrerollBlocks; _running && _controller.Connected; block++)
             {
                 // A few silent blocks first so the controller's buffer is filled before real samples.
@@ -333,12 +338,11 @@ public sealed class HapticStreamer : IDisposable
                 }
 
                 bool hasSpeaker = _nextSpeaker?.Invoke(block, speaker) ?? false;
-                if (!_running || !_controller.WriteRaw(hasSpeaker ? _report.BuildSpeaker(samples, speaker) : _report.Build(samples)))
+                if (!_running || !WriteTick(_report, pairing, _speakerPacket, hasSpeaker, samples, speaker, write))
                 {
                     break;
                 }
 
-                Sent++;
                 double due = (block + PrerollBlocks + 1) * intervalMs;
                 while (_running && clock.Elapsed.TotalMilliseconds < due - 1.5)
                 {
@@ -350,11 +354,45 @@ public sealed class HapticStreamer : IDisposable
                     Thread.SpinWait(50);
                 }
             }
+
+            if (!_running && _controller.Connected && pairing.HasPending)
+            {
+                Write(_report.Build(pairing.PendingHaptics));
+            }
         }
         finally
         {
             TimerResolution.End();
         }
+    }
+
+    internal static bool WriteTick(HapticReport builder, SpeakerPairing pairing, SpeakerPacket mode, bool hasSpeaker,
+        ReadOnlySpan<sbyte> samples, ReadOnlySpan<byte> speaker, Func<byte[], bool> write)
+    {
+        SpeakerTick action = pairing.Tick(mode, hasSpeaker, samples, speaker, out bool flushPending);
+        if (flushPending && !write(builder.Build(pairing.PendingHaptics)))
+        {
+            return false;
+        }
+
+        return action switch
+        {
+            SpeakerTick.Hold => true,
+            SpeakerTick.Double => write(builder.BuildSpeakerDouble(pairing.PendingHaptics, samples, pairing.PendingOpus, speaker)),
+            SpeakerTick.Single => write(builder.BuildSpeaker(samples, speaker)),
+            _ => write(builder.Build(samples)),
+        };
+    }
+
+    private bool Write(byte[] report)
+    {
+        if (!_controller.WriteRaw(report))
+        {
+            return false;
+        }
+
+        Sent++;
+        return true;
     }
 
     /// <summary>Test signal: a sine burst on one or both actuators.</summary>

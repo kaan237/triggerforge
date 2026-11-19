@@ -10,6 +10,7 @@ public sealed class HapticReport
 {
     public const int Length = 142;
     public const int SpeakerLength = 398;
+    public const int SpeakerDoubleLength = 547;
     public const int SpeakerFrameLength = 200;
     public const int FramesPerReport = 32;
     public const int SampleRate = 3000;
@@ -18,6 +19,7 @@ public sealed class HapticReport
 
     private readonly byte[] _report = new byte[Length];
     private readonly byte[] _speakerReport = new byte[SpeakerLength];
+    private readonly byte[] _speakerDoubleReport = new byte[SpeakerDoubleLength];
     private readonly byte[] _primeState = new byte[63];
     private int _sequence;
     private byte _counter;
@@ -116,6 +118,43 @@ public sealed class HapticReport
         r[offset++] = 0x93;
         r[offset++] = SpeakerFrameLength;
         opus200.CopyTo(r.AsSpan(offset));
+        Crc32.Stamp(Crc32.OutputSeed, r);
+        return r;
+    }
+
+    public byte[] BuildSpeakerDouble(ReadOnlySpan<sbyte> haptics1, ReadOnlySpan<sbyte> haptics2,
+        ReadOnlySpan<byte> opus1, ReadOnlySpan<byte> opus2)
+    {
+        if (haptics1.Length != PayloadLength || haptics2.Length != PayloadLength)
+        {
+            throw new ArgumentException($"Expected {PayloadLength} samples in each haptic block.");
+        }
+
+        if (opus1.Length != SpeakerFrameLength || opus2.Length != SpeakerFrameLength)
+        {
+            throw new ArgumentException($"Expected {SpeakerFrameLength} bytes in each Opus frame.");
+        }
+
+        byte[] r = _speakerDoubleReport;
+        r[0] = 0x39;
+        r[1] = NextSequence();
+        r[2] = 0x91;
+        r[3] = 6;
+        r[4] = 0x7E;
+        r[5] = 0x51;
+        r[6] = 0x1F;
+        r[7] = 0x62;
+        r[8] = 0x3C;
+        r[9] = _counter++;
+        r[10] = 0xD5;
+        r[11] = SpeakerFrameLength;
+        opus1.CopyTo(r.AsSpan(12));
+        opus2.CopyTo(r.AsSpan(212));
+        r[412] = 0xD2;
+        r[413] = PayloadLength;
+        MemoryMarshal.AsBytes(haptics1).CopyTo(r.AsSpan(414));
+        MemoryMarshal.AsBytes(haptics2).CopyTo(r.AsSpan(478));
+        r[542] = 0;
         Crc32.Stamp(Crc32.OutputSeed, r);
         return r;
     }

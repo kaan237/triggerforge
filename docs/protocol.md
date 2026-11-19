@@ -236,7 +236,31 @@ enable flags, speaker volume (0-100 used in practice), audio path `0x30` (speake
 control 2 = `0x02` (preamp). This is what the haptic prime already sends.
 
 `0x35` (334 bytes) is named in one source as audio + haptics but no layout was found; we do
-not use it. `0x39` (547 bytes) carries two Opus frames and two haptic blocks every 21.3 ms
+not use it.
+
+**Two frames per report — `0x39`, 547 bytes** (dualsense-companion `media.py`, MIT, derived
+from a PS5 capture; facts only). One report every 21.333 ms carries two ticks:
+
+| Offset | Content |
+|---|---|
+| 0 | `0x39` |
+| 1 | sequence (`seq << 4`) |
+| 2-3 | sub-packet `0x11` header: `0x91`, length 6 |
+| 4 | flags `0x7E` (bit 0 = microphone, `0x7F`) |
+| 5-8 | `0x51 0x1F 0x62 0x3C` (last byte = speaker buffer depth; the PS5 sends `0x28`, `0x3C` measured cleaner) |
+| 9 | packet counter (mod 256) |
+| 10-11 | sub-packet `0x15` header: `0xD5` (`0xD6` = headphone jack), 200 |
+| 12-211 | Opus frame 1 (200 bytes) |
+| 212-411 | Opus frame 2 (200 bytes) |
+| 412-413 | sub-packet `0x12` header: `0xD2`, 64 |
+| 414-477 | haptic block 1 (32 frames s8 stereo) |
+| 478-541 | haptic block 2 |
+| 542 | zero |
+| 543-546 | CRC32, seed `0xA2`, little-endian |
+
+Hardware note (2026-11-19, ours): with `0x36` every 10.667 ms the speaker gives about one
+audible dropout every 2-3 s; the source above measured ~20 dropouts / 5 s for `0x36` against
+~3 / 5 s for `0x39` on Bluetooth stalls. `0x39` (547 bytes) carries two Opus frames and two haptic blocks every 21.3 ms
 (`0xD5` speaker, `0xD2` haptics sub-ids); one source reports it survives Bluetooth stalls
 better than `0x36`. Kept as a later option.
 

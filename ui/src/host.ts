@@ -174,7 +174,8 @@ export type EmulationConfig = {
   hideMappedButtons: boolean;
 };
 
-export type EmulationSettings = { enabled: boolean; hideController: boolean; audio: boolean; keepAudioDefaults: boolean; hapticBuffer: number };
+export type SpeakerPacket = "double39" | "single36";
+export type EmulationSettings = { enabled: boolean; hideController: boolean; audio: boolean; keepAudioDefaults: boolean; hapticBuffer: number; speakerPacket: SpeakerPacket };
 
 export type DriverKind = "usbIp" | "hidHide";
 export type DriverState = "missing" | "ready" | "unsupported" | "error";

@@ -142,6 +142,7 @@ public static partial class Validation
                 Audio = s.Emulation?.Audio ?? true,
                 KeepAudioDefaults = s.Emulation?.KeepAudioDefaults ?? true,
                 HapticBuffer = Math.Clamp(s.Emulation?.HapticBuffer ?? 64, 16, 128),
+                SpeakerPacket = Defined(s.Emulation?.SpeakerPacket ?? SpeakerPacket.Single36, SpeakerPacket.Single36),
             },
         };
     }

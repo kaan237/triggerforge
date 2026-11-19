@@ -1,3 +1,5 @@
+using Tactile.Device.DualSense;
+
 namespace Tactile.Core;
 
 public enum Language { Tr, En }
@@ -33,4 +35,6 @@ public sealed record EmulationSettings
     public bool Audio { get; init; } = true;
     public bool KeepAudioDefaults { get; init; } = true;
     public int HapticBuffer { get; init; } = 64;
+    // 0x39 gave no sound on our controller in the 2026-11-19 hardware test; it stays an experimental option.
+    public SpeakerPacket SpeakerPacket { get; init; } = SpeakerPacket.Single36;
 }

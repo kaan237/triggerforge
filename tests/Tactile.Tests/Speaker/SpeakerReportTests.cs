@@ -32,6 +32,28 @@ public sealed class SpeakerReportTests
     }
 
     [Fact]
+    public void Double_report_matches_protocol()
+    {
+        var builder = new HapticReport { IncludeStateBlock = true, BufferLength = 16 };
+        sbyte[] haptics1 = Enumerable.Range(-64, 64).Select(i => (sbyte)i).ToArray();
+        sbyte[] haptics2 = Enumerable.Range(0, 64).Select(i => (sbyte)i).ToArray();
+        byte[] opus1 = Enumerable.Range(0, 200).Select(i => (byte)i).ToArray();
+        byte[] opus2 = Enumerable.Range(1, 200).Select(i => (byte)i).Reverse().ToArray();
+        byte[] report = builder.BuildSpeakerDouble(haptics1, haptics2, opus1, opus2);
+
+        Assert.Equal(547, report.Length);
+        Assert.Equal(new byte[] { 0x39, 0, 0x91, 6, 0x7E, 0x51, 0x1F, 0x62, 0x3C, 0, 0xD5, 0xC8 }, report[..12]);
+        Assert.Equal(opus1, report[12..212]);
+        Assert.Equal(opus2, report[212..412]);
+        Assert.Equal(new byte[] { 0xD2, 0x40 }, report[412..414]);
+        Assert.Equal(haptics1.Select(i => unchecked((byte)i)), report[414..478]);
+        Assert.Equal(haptics2.Select(i => unchecked((byte)i)), report[478..542]);
+        Assert.Equal(0, report[542]);
+        Assert.True(Crc32.Verify(Crc32.OutputSeed, report));
+        Assert.False(Crc32.Verify(Crc32.InputSeed, report));
+    }
+
+    [Fact]
     public void Report_types_share_sequence_and_packet_counter_and_wrap()
     {
         var builder = new HapticReport();
@@ -39,11 +61,15 @@ public sealed class SpeakerReportTests
         var opus = new byte[200];
         for (int i = 0; i <= 257; i++)
         {
-            bool hasSpeaker = i % 2 == 1;
-            byte[] report = hasSpeaker ? builder.BuildSpeaker(haptics, opus) : builder.Build(haptics);
-            Assert.Equal(hasSpeaker ? 0x36 : 0x32, report[0]);
+            (byte[] report, int id, int counterOffset) = (i % 3) switch
+            {
+                0 => (builder.Build(haptics), 0x32, 7),
+                1 => (builder.BuildSpeaker(haptics, opus), 0x36, 10),
+                _ => (builder.BuildSpeakerDouble(haptics, haptics, opus, opus), 0x39, 9),
+            };
+            Assert.Equal(id, report[0]);
             Assert.Equal((i % 16) << 4, report[1]);
-            Assert.Equal(i % 256, report[hasSpeaker ? 10 : 7]);
+            Assert.Equal(i % 256, report[counterOffset]);
             Assert.True(Crc32.Verify(Crc32.OutputSeed, report));
         }
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { send, subscribe, type AudioApp, type HapticsConfig } from "../host";
+import { send, subscribe, type AudioApp, type HapticsConfig, type SpeakerPacket } from "../host";
 import { useApp } from "../state";
 import { DraftBar, PageHead, Section, Segmented, Slider, Toggle, pct } from "../ui";
 
@@ -10,7 +10,7 @@ const modes: { id: HapticsConfig["mode"]; label: string; hint: string }[] = [
 ];
 
 export function Haptics() {
-  const { draft, edit, haptics, status } = useApp();
+  const { draft, edit, haptics, settings, status } = useApp();
   const [picking, setPicking] = useState<"audio" | "speaker" | null>(null);
   const [apps, setApps] = useState<AudioApp[] | null>(null);
   useEffect(() => subscribe((m) => {
@@ -138,6 +138,24 @@ export function Haptics() {
                 (speaker) => set({ speaker }), (speakerApp) => set({ speakerApp }))}
               <Slider label="Hoparlör ses düzeyi" min={0} max={1} step={0.01} value={config.speakerVolume} format={pct}
                 onChange={(speakerVolume) => set({ speakerVolume })} />
+              {settings && (
+                <>
+                  <div className="row-field">
+                    <Segmented<SpeakerPacket>
+                      label="Paket"
+                      value={settings.emulation.speakerPacket}
+                      onChange={(speakerPacket) => send({ type: "settings.save", settings: {
+                        ...settings, emulation: { ...settings.emulation, speakerPacket },
+                      } })}
+                      options={[
+                        { id: "single36", label: "Tek kare (önerilen)" },
+                        { id: "double39", label: "Çift kare (deneysel)" },
+                      ]}
+                    />
+                  </div>
+                  <p className="hint">Çift kare bazı kontrolcülerde hiç ses vermiyor; ses gelmezse tek kareye dön.</p>
+                </>
+              )}
               <p className="hint">Sistem sesi, bildirimler dâhil tüm sesleri kontrolcü hoparlörüne gönderir.</p>
             </Section>
             <Section title="Rumble">

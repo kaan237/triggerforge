@@ -339,6 +339,14 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 
 **Geri alma:** ses fonksiyonunu kapatan anahtar; sanal cihaz HID-only moda döner.
 
+**Faz 5b sonucu (2026-11-19, kod tamam, oyunsuz donanım testi geçti)**
+- Sözleşme `docs/contract-phase5b.md` (4 iş, sırayla, her biri kontrol edilerek), protokol bilgisi `docs/protocol-emulation.md` §10 ve `docs/protocol.md` (`0x39`), kendi cümlelerimizle.
+- `Tactile.Emulation`: USB/IP izokron aktarım (uç nokta başına ms'de bir paket, catch-up, UNLINK), sanal DualSense'in ses sürümü (full speed, gerçek pad'in 227 baytlık yapılandırması, mikrofon paketi 192, HID arayüz 3, UAC1 ses/sessiz denetimleri, sessiz mikrofon). Ayar kapalıysa Faz 4'ün HID-only pad'i.
+- Çekirdek: oyun sesi kanal 3-4 → Bluetooth haptik (16'lık ortalama, /256 × güç), kanal 1-2 → hoparlör (5a Opus hattı). Oyun haptiği gelirken sesten haptik geri planda. Windows'un cihaz ses düzeyi/sessiz ayarı uygulanıyor. Akış yalnız son 3 sn'de gerçek ses geldiyse açık. Ayarlar: ses arayüzü, haptik tamponu, varsayılan ses cihazlarını koru; profil: oyun haptiği kipi, şiddet, yumuşatma; hoparlör paketi (tek kare `0x36` varsayılan, çift kare `0x39` deneysel).
+- Donanım testi (KH, Bluetooth, test programıyla 4 kanallı ses): Windows "Hoparlör (DualSense Wireless Controller)" ve mikrofonu gösteriyor; 4 kanal 48 kHz açılıyor. Kanal 3-4 → titreşim iki tarafta, ses yok; kanal 1-2 → hoparlörden melodi, titreşim yok. Bulunanlar: Windows sanal pad'i varsayılan hoparlör ve mikrofon yapıyordu → takmadan önceki varsayılanlar 15 sn içinde geri alınıyor (doğrulandı, Realtek kaldı). Hoparlör cızırtısı → 2 bloklu titreşim tamponu (SpeakerFeed, AudioHaptics, GameAudio), çok azaldı; 12 sn'de yaklaşık 1 kopma kalıyor (Bluetooth takılması). `0x39` çift kare paketi bu controller'da hiç ses vermedi (neden açık: Windows'un BT rapor boyu ya da firmware), deneysel bırakıldı.
+- Testler 421/421. Code-review high: 4 bulgu, 3'ü düzeltildi (Windows ses düzeyi, izokron kuyruk sınırı, akışın gereksiz açık kalması), 1'i (sessiz mikrofonun varsayılan olması) varsayılanları koruma özelliğiyle çözüldü.
+- Kalan: haptik destekli gerçek oyunda deneme ve kablolu ile karşılaştırma notu, 30 dk koşu, oyun içi gecikme ölçümü, kalan seyrek hoparlör kopması (`0x39` neden çalışmıyor; BT kuyruk yönetimi), Bluetooth'tan mikrofon (ertelendi).
+
 ---
 
 ### Faz 6 — Oyun entegrasyonu (2-3 hafta)

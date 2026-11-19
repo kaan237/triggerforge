@@ -128,7 +128,7 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     idleSleepMinutes: 15,
     lowBatteryWarnings: [20, 10],
     runAsAdminHint: false,
-    emulation: { enabled: true, hideController: true, audio: true, keepAudioDefaults: true, hapticBuffer: 64 },
+    emulation: { enabled: true, hideController: true, audio: true, keepAudioDefaults: true, hapticBuffer: 64, speakerPacket: "single36" },
   };
 }
 
@@ -224,7 +224,9 @@ export function normalizeMacro(m: Partial<Macro>): Macro {
 
 export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
   const d = defaultSettings();
-  return { ...d, ...s, controllerDefaults: { ...(s.controllerDefaults ?? {}) }, emulation: { ...d.emulation, ...s.emulation } };
+  const emulation = { ...d.emulation, ...s.emulation };
+  if (emulation.speakerPacket !== "single36") emulation.speakerPacket = d.emulation.speakerPacket;
+  return { ...d, ...s, controllerDefaults: { ...(s.controllerDefaults ?? {}) }, emulation };
 }
 
 export function clone<T>(v: T): T {

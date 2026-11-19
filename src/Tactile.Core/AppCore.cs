@@ -96,7 +96,11 @@ public sealed class AppCore : IDisposable
         Controllers = controllers;
         Settings = new SettingsStore(dataDir);
         _haptics = new HapticEngine(audio ?? AudioSystemFactory.Create(),
-            source => Controllers.SetHapticSource(source, (byte)Settings.Current.Emulation.HapticBuffer),
+            source =>
+            {
+                EmulationSettings settings = Settings.Current.Emulation;
+                return Controllers.SetHapticSource(source, (byte)settings.HapticBuffer, settings.SpeakerPacket);
+            },
             () => Controllers.Output, _outbox.Enqueue, time);
         Controllers.SpeakerSource = _haptics.ReadSpeakerFrame;
         Profiles = new ProfileStore(dataDir);

@@ -183,3 +183,27 @@ until `SpeakerFeed` got a 2-block jitter buffer; the haptic paths have the same 
 
 As for jobs 1-2. Tests must not call the real policy-config object or change any Windows
 default device.
+
+## Job 4: `0x39` double-frame speaker reports
+
+Hardware check: speaker over `0x36` still clicks about every 2-3 s (Bluetooth stalls). Layout:
+`docs/protocol.md` "Two frames per report — `0x39`".
+
+- `HapticReport.BuildSpeakerDouble(ReadOnlySpan<sbyte> haptics1, ReadOnlySpan<sbyte> haptics2,
+  ReadOnlySpan<byte> opus1, ReadOnlySpan<byte> opus2)` → 547-byte `0x39`, sharing `_sequence` and
+  `_counter` with the other builders, CRC with `Crc32.OutputSeed`. Constants for length 547.
+- `DualSenseController` write buffer must hold 547 bytes.
+- `HapticStreamer`: new mode `SpeakerPacket { Single36, Double39 }` (settable while running).
+  While a speaker frame is present and the mode is `Double39`: collect tick N (haptics + Opus),
+  and on tick N+1 send one `0x39` with both, so one report goes out every 2 ticks (21.333 ms).
+  When the speaker stops mid-pair, send the collected tick as a `0x32` (haptics only) on the
+  next tick so no haptic block is lost. Without a speaker frame: `0x32` every tick, as today.
+  `Single36`: today's behaviour unchanged.
+- Setting `AppSettings.Emulation.SpeakerPacket` (`double39` default | `single36`), validated,
+  applied through `ControllerService` to the running streamer. It applies to 5a and 5b speaker
+  use alike. UI: on the **Haptik** page under **Kontrolcü hoparlörü**, segmented
+  "Paket: Çift kare (önerilen) / Tek kare" with hint "Çift kare Bluetooth takılmalarında daha az
+  kopar, yaklaşık 10 ms daha geç çalar."
+- Tests: `0x39` layout (ids, lengths, offsets 10-11 = `D5 C8`, 412-413 = `D2 40`, CRC checks),
+  sequence shared with `0x32`/`0x36`, streamer pairing with a fake write sink (two ticks → one
+  `0x39`; speaker stopping mid-pair → leftover sent as `0x32`; `Single36` unchanged).
