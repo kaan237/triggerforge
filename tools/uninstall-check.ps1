@@ -2,6 +2,7 @@
 param([switch] $ExpectNoData)
 
 $ErrorActionPreference = 'Stop'
+# Regex checks use CultureInvariant: -match folds case with the current culture (Turkish 'I').
 $problems = [Collections.Generic.List[string]]::new()
 $uninstall = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
 $setupKey = "$uninstall\{D11C945E-623E-42EB-B0DD-3D38E2711163}_is1"
@@ -128,12 +129,12 @@ namespace TriggerForgeDiagnostics
         }
         $lists = [TriggerForgeDiagnostics.HidHideLists]::Read()
         foreach ($device in $lists[0]) {
-            if ($device -match 'VID(?:_|&(?:0002)?)054C[&_]PID(?:_|&)(?:0CE6|0DF2)(?=[&\\]|$)') {
+            if ([regex]::IsMatch($device, 'VID(?:_|&(?:0002)?)054C[&_]PID(?:_|&)(?:0CE6|0DF2)(?=[&\\]|$)', 'IgnoreCase, CultureInvariant')) {
                 $problems.Add("HidHide hidden DualSense entry: $device")
             }
         }
         foreach ($application in $lists[1]) {
-            if ($application -match '(?:^|\\)(?:TriggerForge|Tactile)\.exe$') {
+            if ([regex]::IsMatch($application, '(?:^|\\)(?:TriggerForge|Tactile)\.exe$', 'IgnoreCase, CultureInvariant')) {
                 $problems.Add("HidHide application entry: $application")
             }
         }

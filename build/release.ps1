@@ -14,8 +14,12 @@ $properties = [xml](Get-Content -Raw -LiteralPath (Join-Path $root 'Directory.Bu
 $version = $properties.Project.PropertyGroup.Version
 $tag = "v$version"
 
+# Windows PowerShell turns a native command's stderr into an error under 'Stop'.
+$ErrorActionPreference = 'Continue'
 & gh release view $tag --repo $Repository *> $null
-if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists on $Repository." }
+$exists = $LASTEXITCODE -eq 0
+$ErrorActionPreference = 'Stop'
+if ($exists) { throw "Release $tag already exists on $Repository." }
 
 & (Join-Path $PSScriptRoot 'publish.ps1')
 $installer = Join-Path $artifacts "TriggerForge-$version-setup.exe"
@@ -34,7 +38,8 @@ if ($LASTEXITCODE -ne 0) { throw "Manifest signing failed ($LASTEXITCODE)." }
 
 # The key the app trusts is the one in UpdateKey.cs, not whatever the tool holds.
 $keyFile = Get-Content -Raw -LiteralPath (Join-Path $root 'src\Tactile.Core\Updates\UpdateKey.cs')
-if ($keyFile -notmatch 'ManifestPublicKey\s*=\s*"\s*([A-Za-z0-9+/=]+)"') { throw 'ManifestPublicKey not found in UpdateKey.cs.' }
+# Case-sensitive: under a Turkish culture -notmatch folds 'I' to a dotless i outside [A-Z].
+if ($keyFile -cnotmatch 'ManifestPublicKey\s*=\s*"\s*([A-Za-z0-9+/=]+)"') { throw 'ManifestPublicKey not found in UpdateKey.cs.' }
 & $exe verify $artifacts $Matches[1]
 if ($LASTEXITCODE -ne 0) { throw 'The signed manifest does not verify with the key the app trusts.' }
 
