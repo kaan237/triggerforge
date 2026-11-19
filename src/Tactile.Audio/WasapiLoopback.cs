@@ -223,7 +223,12 @@ internal sealed class WasapiLoopback : IAudioCapture
         Process[] matches = Process.GetProcessesByName(name);
         try
         {
-            foreach (var process in matches.OrderBy(process => process.Id))
+            // Multi-process apps (Spotify, browsers) share one exe name; audio often comes from a child.
+            // Capture the root of the tree so the include-tree mode covers every process of the app.
+            var ids = matches.Select(process => process.Id).ToHashSet();
+            foreach (var process in matches
+                .OrderBy(process => ParentProcessId(process.Id) is int parent && ids.Contains(parent) ? 1 : 0)
+                .ThenBy(process => process.Id))
             {
                 const uint synchronize = 0x00100000;
                 SafeWaitHandle handle = OpenProcess(synchronize, 0, (uint)process.Id);

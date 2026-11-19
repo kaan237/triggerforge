@@ -77,6 +77,36 @@ internal static partial class CoreAudioInterop
     internal static partial SafeWaitHandle OpenProcess(uint access, int inheritHandle, uint processId);
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct ProcessBasicInformation
+    {
+        public nint ExitStatus;
+        public nint PebBaseAddress;
+        public nint AffinityMask;
+        public nint BasePriority;
+        public nint UniqueProcessId;
+        public nint InheritedFromUniqueProcessId;
+    }
+
+    [LibraryImport("ntdll.dll")]
+    internal static partial int NtQueryInformationProcess(SafeWaitHandle process, int informationClass,
+        out ProcessBasicInformation information, int length, out int returnLength);
+
+    /// <summary>Parent process id, or null when the process cannot be queried.</summary>
+    internal static unsafe int? ParentProcessId(int processId)
+    {
+        const uint queryLimitedInformation = 0x1000;
+        using SafeWaitHandle handle = OpenProcess(queryLimitedInformation, 0, (uint)processId);
+        if (handle.IsInvalid)
+        {
+            return null;
+        }
+
+        return NtQueryInformationProcess(handle, 0, out ProcessBasicInformation info, sizeof(ProcessBasicInformation), out _) == 0
+            ? (int)info.InheritedFromUniqueProcessId
+            : null;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct ProcessActivation
     {
         internal int Type;
