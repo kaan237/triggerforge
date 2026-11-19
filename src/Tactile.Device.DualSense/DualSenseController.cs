@@ -197,7 +197,9 @@ public sealed class DualSenseController : IDisposable
             Interlocked.Increment(ref Stats.Writes);
             return true;
         }
-        catch (IOException)
+        // A Bluetooth disconnect cancels pending writes; a closed handle throws ObjectDisposedException.
+        // Both mean "write failed" here, never a crash of the writing thread.
+        catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException)
         {
             Interlocked.Increment(ref Stats.WriteErrors);
             return false;
