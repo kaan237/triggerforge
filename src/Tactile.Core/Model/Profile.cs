@@ -57,6 +57,21 @@ public sealed record EmulationConfig
     public bool SwapSticks { get; init; }
     /// <summary>Buttons bound in <see cref="Profile.Mapping"/> are released on the virtual pad.</summary>
     public bool HideMappedButtons { get; init; } = true;
+    public GyroStickConfig GyroStick { get; init; } = new();
+}
+
+public sealed record GyroStickConfig
+{
+    public GyroMouseMode Mode { get; init; }
+    public string Button { get; init; } = "l2";
+    public GyroAxis Axis { get; init; }
+    public double SensitivityX { get; init; } = 1;
+    public double SensitivityY { get; init; } = 1;
+    public double Deadzone { get; init; } = 0.5;
+    public double AntiDeadzone { get; init; }
+    public double Smoothing { get; init; } = 0.2;
+    public bool InvertX { get; init; }
+    public bool InvertY { get; init; }
 }
 
 public sealed record LightbarConfig
@@ -165,6 +180,7 @@ public sealed record HapticsConfig
     public double Strength { get; init; } = 1;
     public bool RumbleToHaptics { get; init; }
     public bool Clicks { get; init; }
+    public bool ConfirmPulses { get; init; }
     public double ClickStrength { get; init; } = 0.6;
     public AudioHapticSource Speaker { get; init; }
     public string SpeakerApp { get; init; } = "";

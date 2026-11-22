@@ -1,4 +1,5 @@
 import { L } from "./i18n";
+import { isKey } from "./keys";
 import type {
   Action,
   AppSettings,
@@ -49,6 +50,8 @@ export const defaultBinding = (): Binding => ({
   press: defaultAction(),
   hold: null,
   double: null,
+  triple: null,
+  cycle: null,
   holdMs: 400,
   doubleMs: 250,
   turbo: false,
@@ -110,7 +113,7 @@ export function defaultProfile(name = L("Default", "Varsayılan"), id = newId())
     haptics: {
       gameAudio: "both", gameStrength: 1, gameLowPass: false,
       audio: "off", app: "", mode: "game", strength: 1, rumbleToHaptics: false, clicks: false, clickStrength: 0.6,
-      speaker: "off", speakerApp: "", speakerVolume: 0.8,
+      speaker: "off", speakerApp: "", speakerVolume: 0.8, confirmPulses: false,
     },
     mapping: defaultMapping(),
     macros: [],
@@ -120,7 +123,10 @@ export function defaultProfile(name = L("Default", "Varsayılan"), id = newId())
 }
 
 export function defaultEmulation(): EmulationConfig {
-  return { mode: "off", remap: {}, swapSticks: false, hideMappedButtons: true };
+  return {
+    mode: "off", remap: {}, swapSticks: false, hideMappedButtons: true,
+    gyroStick: { ...defaultGyroMouse(), button: "l2", antiDeadzone: 0 },
+  };
 }
 
 export function defaultSettings(defaultProfileId = ""): AppSettings {
@@ -136,6 +142,10 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     primaryController: null,
     autoPlayerLeds: true,
     edgeShortcuts: true,
+    pauseCombo: [],
+    pauseHotkey: [],
+    pauseOnFullscreen: false,
+    backupCount: 7,
     maxControllers: 4,
     idleSleepMinutes: 15,
     lowBatteryWarnings: [20, 10],
@@ -185,6 +195,7 @@ export function normalizeProfile(p: Partial<Profile> & { id: string }): Profile 
       strength: typeof h?.strength === "number" && Number.isFinite(h.strength) ? Math.min(2, Math.max(0, h.strength)) : d.haptics.strength,
       rumbleToHaptics: h?.rumbleToHaptics === true,
       clicks: h?.clicks === true,
+      confirmPulses: h?.confirmPulses === true,
       clickStrength: typeof h?.clickStrength === "number" && Number.isFinite(h.clickStrength) ? Math.min(1, Math.max(0, h.clickStrength)) : d.haptics.clickStrength,
       speaker: h?.speaker === "system" || h?.speaker === "app" ? h.speaker : d.haptics.speaker,
       speakerApp: typeof h?.speakerApp === "string" ? h.speakerApp.trim().slice(0, 260) : d.haptics.speakerApp,
@@ -192,7 +203,15 @@ export function normalizeProfile(p: Partial<Profile> & { id: string }): Profile 
     },
     mapping: normalizeMapping(p.mapping),
     macros: (p.macros ?? []).map(normalizeMacro),
-    emulation: { ...defaultEmulation(), ...p.emulation, remap: { ...(p.emulation?.remap ?? {}) } },
+    emulation: {
+      ...d.emulation,
+      ...p.emulation,
+      remap: { ...(p.emulation?.remap ?? {}) },
+      gyroStick: {
+        ...normalizeGyro(p.emulation?.gyroStick, d.emulation.gyroStick),
+        antiDeadzone: bounded(p.emulation?.gyroStick?.antiDeadzone, 0, 0.5, d.emulation.gyroStick.antiDeadzone),
+      },
+    },
     telemetry: {
       rules: (p.telemetry?.rules ?? []).slice(0, 32).map((rule) => {
         const defaults = defaultTelemetryRule();
@@ -210,10 +229,72 @@ export function normalizeProfile(p: Partial<Profile> & { id: string }): Profile 
 
 const normAction = (a?: Partial<Action> | null): Action => (a && a.kind ? { ...a, kind: a.kind } : defaultAction());
 
+function optionalAction(a?: Action | null): Action | null {
+  switch (a?.kind) {
+    case "key":
+      return Array.isArray(a.keys) && a.keys.some((key) => isKey(key)) ? a : null;
+    case "macro":
+      return typeof a.macroId === "string" && a.macroId.trim() ? a : null;
+    case "profile":
+      return typeof a.profileId === "string" && a.profileId.trim() ? a : null;
+    case "run":
+      return typeof a.path === "string" && a.path.trim() ? a : null;
+    case "mouseButton":
+    case "wheel":
+    case "micMute":
+    case "special":
+      return a;
+    default:
+      return null;
+  }
+}
+
 export function normalizeBinding(b?: Partial<Binding> | null): Binding {
   const d = defaultBinding();
   if (!b) return d;
-  return { ...d, ...b, press: normAction(b.press), hold: b.hold ? normAction(b.hold) : null, double: b.double ? normAction(b.double) : null };
+  const cycle = Array.isArray(b.cycle)
+    ? b.cycle.map(optionalAction).filter((action) => action !== null).slice(0, 8)
+    : [];
+  return {
+    ...d, ...b,
+    press: normAction(b.press),
+    hold: b.hold ? normAction(b.hold) : null,
+    double: b.double ? normAction(b.double) : null,
+    triple: optionalAction(b.triple),
+    cycle: cycle.length ? cycle : null,
+    holdMs: Math.trunc(bounded(b.holdMs, 150, 2000, d.holdMs)),
+    doubleMs: Math.trunc(bounded(b.doubleMs, 100, 600, d.doubleMs)),
+  };
+}
+
+const bounded = (value: unknown, min: number, max: number, fallback: number) =>
+  typeof value === "number" && Number.isFinite(value) ? clamp(value, min, max) : fallback;
+
+const buttonNames: ButtonName[] = [
+  "square", "cross", "circle", "triangle", "l1", "r1", "l2", "r2",
+  "create", "options", "l3", "r3", "ps", "touchpad", "mic",
+  "up", "right", "down", "left", "fn1", "fn2", "paddleLeft", "paddleRight",
+];
+
+function normalizeButton(value: unknown): ButtonName | undefined {
+  if (typeof value !== "string") return undefined;
+  const name = value.toLowerCase();
+  return buttonNames.find((button) => button.toLowerCase() === name);
+}
+
+function normalizeGyro(g: Partial<GyroMouse> | undefined, d: GyroMouse): GyroMouse {
+  const mode = g?.mode;
+  return {
+    mode: mode === "always" || mode === "whileHeld" || mode === "whileReleased" || mode === "toggle" || mode === "whileTouchpad" ? mode : d.mode,
+    button: normalizeButton(g?.button) ?? d.button,
+    axis: g?.axis === "roll" ? "roll" : d.axis,
+    sensitivityX: bounded(g?.sensitivityX, 0.1, 10, d.sensitivityX),
+    sensitivityY: bounded(g?.sensitivityY, 0.1, 10, d.sensitivityY),
+    smoothing: bounded(g?.smoothing, 0, 0.9, d.smoothing),
+    deadzone: bounded(g?.deadzone, 0, 5, d.deadzone),
+    invertX: g?.invertX === true,
+    invertY: g?.invertY === true,
+  };
 }
 
 function normalizeBindings(m?: Partial<Record<ButtonName, Binding>>): Partial<Record<ButtonName, Binding>> {
@@ -243,7 +324,7 @@ export function normalizeMapping(m?: Partial<Mapping>): Mapping {
       zones,
       swipes: { up: normAction(sw.up), down: normAction(sw.down), left: normAction(sw.left), right: normAction(sw.right) },
     },
-    gyroMouse: { ...d.gyroMouse, ...m.gyroMouse },
+    gyroMouse: normalizeGyro(m.gyroMouse, d.gyroMouse),
     sticks: { left: stick(m.sticks?.left), right: stick(m.sticks?.right) },
   };
 }
@@ -257,6 +338,12 @@ export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
   const emulation = { ...d.emulation, ...s.emulation };
   if (emulation.speakerPacket !== "single36") emulation.speakerPacket = d.emulation.speakerPacket;
   const primaryController = s.primaryController?.trim().replaceAll("-", ":").toUpperCase();
+  const combo = Array.isArray(s.pauseCombo)
+    ? [...new Set(s.pauseCombo.map(normalizeButton).filter((button) => button !== undefined))].slice(0, 3)
+    : [];
+  const hotkey = Array.isArray(s.pauseHotkey)
+    ? [...new Set(s.pauseHotkey.filter((key) => isKey(key)))].slice(0, 4)
+    : [];
   return {
     ...d, ...s,
     language: s.language === "tr" ? "tr" : "en",
@@ -264,6 +351,10 @@ export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
     primaryController: primaryController || null,
     autoPlayerLeds: s.autoPlayerLeds !== false,
     edgeShortcuts: s.edgeShortcuts !== false,
+    pauseCombo: combo.length >= 2 ? combo : [],
+    pauseHotkey: hotkey,
+    pauseOnFullscreen: s.pauseOnFullscreen === true,
+    backupCount: Math.trunc(bounded(s.backupCount, 0, 30, d.backupCount)),
     maxControllers: typeof s.maxControllers === "number" && Number.isFinite(s.maxControllers)
       ? Math.min(4, Math.max(1, Math.trunc(s.maxControllers)))
       : d.maxControllers,

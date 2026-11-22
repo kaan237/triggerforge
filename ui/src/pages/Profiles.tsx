@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { send, type Profile } from "../host";
 import { defaultProfile, effectLabel, reasonLabel, triggerSummary } from "../model";
 import { useApp } from "../state";
-import { PageHead } from "../ui";
+import { PageHead, Section } from "../ui";
 
 function ImportBox({ onDone }: { onDone: () => void }) {
   const [text, setText] = useState("");
@@ -119,6 +119,40 @@ function Games({ profile, onChange }: { profile: Profile; onChange: (games: stri
         </div>
       )}
     </div>
+  );
+}
+
+function DailyBackups() {
+  const { backups, dirty, restoreBackup } = useApp();
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  useEffect(() => send({ type: "backups.list" }), []);
+
+  return (
+    <Section title={L("Daily backups", "Günlük yedekler")}>
+      {backups === null && <p className="hint">{L("Loading backups…", "Yedekler yükleniyor…")}</p>}
+      {backups?.length === 0 && <p className="hint">{L("No backups yet.", "Henüz yedek yok.")}</p>}
+      {backups?.map(({ id, date, profileCount }) => (
+        <div className="row-field" key={id}>
+          <span>
+            {id.startsWith("pre-restore-") && <span className="tag">{L("Before restore", "Geri yükleme öncesi")}</span>}
+            {" "}{L(`${date} · ${profileCount} profiles`, `${date} · ${profileCount} profil`)}
+          </span>
+          {confirmId === id ? (
+            <span className="confirm-inline">
+              <span className="small warn">{L("Replace the saved profiles with this backup? A copy of your current profiles is kept.", "Kayıtlı profiller bu yedekle değiştirilsin mi? Mevcut profillerin bir kopyası saklanır.")}</span>
+              {dirty && <span className="small warn">{L("The backup copy contains saved profiles only.", "Yedek kopyası yalnızca kayıtlı profilleri içerir.")}</span>}
+              <button className="button ghost" onClick={() => setConfirmId(null)}>{L("Cancel", "Vazgeç")}</button>
+              <button className="button danger" onClick={() => {
+                setConfirmId(null);
+                restoreBackup(id);
+              }}>{L("Restore", "Geri yükle")}</button>
+            </span>
+          ) : (
+            <button className="button" onClick={() => setConfirmId(id)}>{L("Restore", "Geri yükle")}</button>
+          )}
+        </div>
+      ))}
+    </Section>
   );
 }
 
@@ -271,6 +305,7 @@ export function Profiles() {
           </div>
         )}
       </div>
+      <DailyBackups />
     </div>
   );
 }

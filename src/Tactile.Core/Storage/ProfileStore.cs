@@ -9,15 +9,27 @@ public sealed class ProfileStore
 
     private readonly Lock _lock = new();
     private readonly string _dir;
+    private readonly string _dataDir;
+    private readonly Func<int> _backupCount;
+    private readonly Func<DateOnly> _today;
+    private readonly Action<Notice>? _notice;
+    private (DateOnly Date, int Count)? _lastBackup;
     private readonly Dictionary<string, Profile> _profiles = new(StringComparer.Ordinal);
     private readonly List<string> _broken = [];
     private IReadOnlyList<Profile> _sorted = [];
 
-    public ProfileStore(string? dataDir = null)
+    public ProfileStore(string? dataDir = null) : this(dataDir, () => 7) { }
+
+    internal ProfileStore(string? dataDir, Func<int> backupCount, Func<DateOnly>? today = null, Action<Notice>? notice = null)
     {
-        _dir = Path.Combine(JsonFile.ResolveDataDir(dataDir), "profiles");
+        _dataDir = JsonFile.ResolveDataDir(dataDir);
+        _dir = Path.Combine(_dataDir, "profiles");
+        _backupCount = backupCount;
+        _today = today ?? (() => DateOnly.FromDateTime(DateTime.Now));
+        _notice = notice;
         Directory.CreateDirectory(_dir);
         Load();
+        EnsureDailyBackup();
     }
 
     public string ProfilesDirectory => _dir;
@@ -67,6 +79,7 @@ public sealed class ProfileStore
         issues = list;
         lock (_lock)
         {
+            EnsureDailyBackup();
             JsonFile.WriteAtomic(PathOf(stored.Id), stored);
             _profiles[stored.Id] = stored;
             Resort();
@@ -81,17 +94,101 @@ public sealed class ProfileStore
     {
         lock (_lock)
         {
-            if (_profiles.Count <= 1 || !_profiles.Remove(id))
+            if (_profiles.Count <= 1 || !_profiles.ContainsKey(id))
             {
                 return false;
             }
 
+            EnsureDailyBackup(required: true);
             File.Delete(PathOf(id));
+            _profiles.Remove(id);
             Resort();
         }
 
         Changed?.Invoke();
         return true;
+    }
+
+    public IReadOnlyList<ProfileBackupEntry> ListBackups()
+    {
+        lock (_lock)
+        {
+            return ProfileBackup.ListBackups(_dataDir);
+        }
+    }
+
+    public int RestoreBackup(string id)
+    {
+        int restored;
+        lock (_lock)
+        {
+            restored = ProfileBackup.RestoreBackup(_dataDir, _dir, id, ReloadRestored);
+        }
+
+        Changed?.Invoke();
+        return restored;
+    }
+
+    private void ReloadRestored()
+    {
+        var restored = new Dictionary<string, Profile>(StringComparer.Ordinal);
+        foreach (string path in Directory.GetFiles(_dir, "*.json"))
+        {
+            string id = Path.GetFileNameWithoutExtension(path);
+            Profile? raw;
+            try
+            {
+                raw = JsonSerializer.Deserialize<Profile>(File.ReadAllText(path), TactileJson.Options);
+            }
+            catch (JsonException e)
+            {
+                string name = Path.GetFileName(path);
+                throw new LocalizedMessage($"Corrupt backup file: {name}", $"Bozuk yedek dosyası: {name}")
+                    .CreateException(message => new JsonException(message, e));
+            }
+            if (!Validation.IsId(id) || raw is null)
+            {
+                throw new LocalizedMessage($"Invalid profile in backup: {Path.GetFileName(path)}",
+                    $"Yedekteki profil geçersiz: {Path.GetFileName(path)}")
+                    .CreateException(message => new InvalidDataException(message));
+            }
+
+            restored.Add(id, Validation.Normalize(raw with { Id = id }));
+        }
+
+        if (restored.Count == 0)
+        {
+            Profile fallback = CreateDefault();
+            restored.Add(fallback.Id, fallback);
+        }
+
+        _profiles.Clear();
+        foreach ((string id, Profile profile) in restored)
+        {
+            _profiles.Add(id, profile);
+        }
+
+        _broken.Clear();
+        Resort();
+    }
+
+    private void EnsureDailyBackup(bool required = false)
+    {
+        var requested = (_today(), _backupCount());
+        if (_lastBackup == requested)
+        {
+            return;
+        }
+
+        try
+        {
+            ProfileBackup.EnsureDailyBackup(_dataDir, _dir, requested.Item2, requested.Item1);
+            _lastBackup = requested;
+        }
+        catch (Exception error) when (!required && _notice is not null && error is (IOException or UnauthorizedAccessException))
+        {
+            _notice(new Notice(NoticeKinds.Info, $"Profile backup failed: {Text.English(error)}", $"Profil yedeği alınamadı: {error.Message}"));
+        }
     }
 
     public Profile Duplicate(string id, string newName)
@@ -174,12 +271,18 @@ public sealed class ProfileStore
 
         if (_profiles.Count == 0)
         {
-            Profile p = Validation.Normalize(new Profile { Id = Validation.NewId(), Name = DefaultName });
-            JsonFile.WriteAtomic(PathOf(p.Id), p);
+            Profile p = CreateDefault();
             _profiles[p.Id] = p;
         }
 
         Resort();
+    }
+
+    private Profile CreateDefault()
+    {
+        Profile profile = Validation.Normalize(new Profile { Id = Validation.NewId(), Name = DefaultName });
+        JsonFile.WriteAtomic(PathOf(profile.Id), profile);
+        return profile;
     }
 
     private void Resort() =>

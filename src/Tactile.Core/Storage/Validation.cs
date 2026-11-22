@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Tactile.Audio;
 using Tactile.Core.Integration;
 using Tactile.Device.DualSense;
+using Tactile.Input;
 
 namespace Tactile.Core;
 
@@ -95,6 +96,7 @@ public static partial class Validation
                 App = audioApp[..Math.Min(audioApp.Length, 260)],
                 Mode = Defined(haptics.Mode, HapticMode.Game),
                 Strength = Clamp(haptics.Strength, 0, 2, 1),
+                ConfirmPulses = haptics.ConfirmPulses,
                 ClickStrength = Clamp(haptics.ClickStrength, 0, 1, 0.6),
                 Speaker = Defined(haptics.Speaker, AudioHapticSource.Off),
                 SpeakerApp = speakerApp[..Math.Min(speakerApp.Length, 260)],
@@ -205,6 +207,8 @@ public static partial class Validation
             }
         }
 
+        string[] combo = (s.PauseCombo ?? []).Select(name => ButtonNames.TryParse(name, out Buttons button)
+            ? ButtonNames.Name(button) : ButtonNames.None).Where(name => name != ButtonNames.None).Distinct().Take(3).ToArray();
         return new AppSettings
         {
             Version = AppSettings.CurrentVersion,
@@ -229,6 +233,10 @@ public static partial class Validation
             RunAsAdminHint = s.RunAsAdminHint,
             Updates = s.Updates ?? new(),
             FirstRunDone = s.FirstRunDone,
+            PauseCombo = combo.Length < 2 ? [] : combo,
+            PauseHotkey = (s.PauseHotkey ?? []).Where(k => k != Key.None && Enum.IsDefined(k)).Distinct().Take(4).ToArray(),
+            PauseOnFullscreen = s.PauseOnFullscreen,
+            BackupCount = Math.Clamp(s.BackupCount, 0, 30),
             Integration = integration with
             {
                 UdpPort = Math.Clamp(integration.UdpPort, 1024, 65535),
@@ -254,6 +262,7 @@ public static partial class Validation
     private static EmulationConfig NormalizeEmulation(EmulationConfig? e, List<string> issues)
     {
         e ??= new();
+        GyroStickConfig gyro = e.GyroStick ?? new();
         var remap = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach ((string key, string target) in e.Remap ?? new Dictionary<string, string>())
         {
@@ -292,6 +301,17 @@ public static partial class Validation
             Remap = remap,
             SwapSticks = e.SwapSticks,
             HideMappedButtons = e.HideMappedButtons,
+            GyroStick = gyro with
+            {
+                Mode = Defined(gyro.Mode, GyroMouseMode.Off),
+                Button = ButtonNames.TryParse(gyro.Button, out Buttons button) ? ButtonNames.Name(button) : "l2",
+                Axis = Defined(gyro.Axis, GyroAxis.Yaw),
+                SensitivityX = Clamp(gyro.SensitivityX, 0.1, 10, 1),
+                SensitivityY = Clamp(gyro.SensitivityY, 0.1, 10, 1),
+                Deadzone = Clamp(gyro.Deadzone, 0, 5, 0.5),
+                AntiDeadzone = Clamp(gyro.AntiDeadzone, 0, 0.5, 0),
+                Smoothing = Clamp(gyro.Smoothing, 0, 0.9, 0.2),
+            },
         };
     }
 

@@ -1,7 +1,10 @@
 import { L } from "../i18n";
 import { useEffect, useState } from "react";
 import { inHost, send, subscribe, type AppSettings } from "../host";
+import { isKey, modifierKeys } from "../keys";
 import { Live } from "../Live";
+import { buttonDefs } from "../mapping";
+import { KeyField } from "../MappingEditors";
 import { deepEqual } from "../model";
 import { Outputs } from "../Outputs";
 import { useApp, useInput } from "../state";
@@ -74,6 +77,15 @@ export function Settings() {
   if (!draft || !settings) return <div className="page"><PageHead title={L("Settings", "Ayarlar")} /></div>;
 
   const dirty = touched && !deepEqual(draft, settings);
+  const combo = draft.pauseCombo;
+  const validCombo = combo.length === 0 ||
+    (combo.length >= 2 && combo.length <= 3 && new Set(combo).size === combo.length);
+  const hotkey = draft.pauseHotkey;
+  const modifiers = hotkey.filter((key) => modifierKeys.has(key));
+  const modifierFamilies = new Set(modifiers.map((key) => key.replace(/^(left|right)/, "")));
+  const validHotkey = hotkey.length === 0 ||
+    (hotkey.length <= 4 && hotkey.every(isKey) && hotkey.length - modifiers.length === 1 &&
+      modifierFamilies.size === modifiers.length);
   const set = (patch: Partial<AppSettings>) => {
     setTouched(true);
     setDraft({ ...draft, ...patch });
@@ -105,7 +117,7 @@ export function Settings() {
               >
                 {L("Revert", "Geri al")}
               </button>
-              <button className="button primary" onClick={save}>
+              <button className="button primary" disabled={!validCombo || !validHotkey} onClick={save}>
                 {L("Save", "Kaydet")}
               </button>
             </>
@@ -162,6 +174,34 @@ export function Settings() {
               ))}
             </select>
           </label>
+          <NumberField label={L("Daily backups to keep", "Saklanacak günlük yedek sayısı")} hint={L("0 turns off automatic backups.", "0, otomatik yedeklemeyi kapatır.")} value={draft.backupCount} min={0} max={30} onChange={(backupCount) => set({ backupCount: Math.trunc(backupCount) })} />
+        </section>
+
+        <section className="settings-group">
+          <h2>{L("Pause shortcut", "Duraklatma kısayolu")}</h2>
+          <p className="hint">{L("Choose 2–3 controller buttons. A combination including PS or Edge fnL/fnR is recommended.", "Kontrolcüden 2–3 tuş seç. PS veya Edge fnL/fnR tuşlarından birini içeren bir kombinasyon önerilir.")}</p>
+          <div className="row-field">
+            {[0, 1, 2].map((index) => (
+              <select key={index} aria-label={L(`Pause button ${index + 1}`, `Duraklatma tuşu ${index + 1}`)} value={combo[index] ?? ""} disabled={index > combo.length} onChange={(e) => {
+                const button = buttonDefs.find(({ id }) => id === e.target.value);
+                const pauseCombo = [...combo];
+                if (button) pauseCombo[index] = button.id;
+                else pauseCombo.splice(index, 1);
+                set({ pauseCombo });
+              }}>
+                <option value="">{L("None", "Yok")}</option>
+                {buttonDefs.filter(({ id }) => combo[index] === id || !combo.includes(id)).map(({ id, label }) => (
+                  <option key={id} value={id}>{id === "fn1" ? L("Fn1 (fnL)", "Fn1 (fnL)") : id === "fn2" ? L("Fn2 (fnR)", "Fn2 (fnR)") : label}</option>
+                ))}
+              </select>
+            ))}
+            {combo.length > 0 && <button className="button ghost" onClick={() => set({ pauseCombo: [] })}>{L("Clear", "Temizle")}</button>}
+          </div>
+          {!validCombo && <p className="hint warn">{L("Choose 2–3 distinct buttons or clear the combination.", "2–3 farklı tuş seç veya kombinasyonu temizle.")}</p>}
+          <p className="label">{L("Global keyboard shortcut", "Genel klavye kısayolu")}</p>
+          <KeyField value={hotkey} onChange={(pauseHotkey) => set({ pauseHotkey })} />
+          {!validHotkey && <p className="hint warn">{L("Choose one trigger key and up to three modifiers. Use at most one Ctrl, Shift, Alt or Win key from each family.", "Bir tetik tuşu ve en fazla üç değiştirici seç. Ctrl, Shift, Alt ve Win ailelerinin her birinden en fazla bir tuş kullan.")}</p>}
+          <Toggle label={L("Pause in fullscreen apps", "Tam ekran uygulamalarda duraklat")} hint={L("Applies when no game-specific profile was selected.", "Oyuna özel bir profil seçilmediğinde uygulanır.")} checked={draft.pauseOnFullscreen} onChange={(pauseOnFullscreen) => set({ pauseOnFullscreen })} />
         </section>
 
         <section className="settings-group">

@@ -142,6 +142,7 @@ internal sealed class MapperRig : IMappingHost, IDisposable
     public List<bool> MicStates { get; } = [];
 
     public int ShowAppCount { get; private set; }
+    public int ConfirmPulses { get; private set; }
 
     public string[] Take() => Fake.Injector.Take();
 
@@ -210,6 +211,7 @@ internal sealed class MapperRig : IMappingHost, IDisposable
     public void MicMuteChanged(bool muted) => MicStates.Add(muted);
 
     public void ShowApp() => ShowAppCount++;
+    public void PulseConfirm() => ConfirmPulses++;
 
     public void Report(Notice notice) => Reports.Add(notice.Message);
 

@@ -1,9 +1,9 @@
 import { L } from "../i18n";
 import { Fragment, useEffect } from "react";
-import { send, type ButtonName, type DriverKind, type DriverState, type DriverStatus, type EmulationConfig, type EmulationMode, type EmulationStatus } from "../host";
-import { buttonDefs, buttonLabel } from "../mapping";
+import { send, type ButtonName, type DriverKind, type DriverState, type DriverStatus, type EmulationConfig, type EmulationMode, type EmulationStatus, type GyroStickConfig } from "../host";
+import { buttonDefs, buttonLabel, gyroModes } from "../mapping";
 import { useApp } from "../state";
-import { DraftBar, PageHead, Section, Segmented, Slider, Toggle } from "../ui";
+import { Check, DraftBar, PageHead, Section, Segmented, Slider, Toggle, fixed, pct } from "../ui";
 
 const driverNames: Record<DriverKind, { name: string; role: string }> = {
   usbIp: { name: "usbip-win2", get role() { return L("Connects the virtual controller to Windows", "Sanal kontrolcüyü Windows'a takar"); } },
@@ -232,6 +232,10 @@ function ProfilePanel() {
   if (!draft) return null;
   const c = draft.emulation;
   const set = (patch: Partial<EmulationConfig>) => edit((p) => ({ ...p, emulation: { ...p.emulation, ...patch } }));
+  const g = c.gyroStick;
+  const setGyro = (patch: Partial<GyroStickConfig>) => set({ gyroStick: { ...g, ...patch } });
+  const needsButton = g.mode === "whileHeld" || g.mode === "whileReleased" || g.mode === "toggle";
+  const times = (v: number) => `${fixed(1)(v)}×`;
   const usb = status?.connected && status.link === "Usb";
 
   return (
@@ -270,6 +274,52 @@ function ProfilePanel() {
 
       <Section title={L("Button remapping", "Tuş yönlendirme")}>
         <RemapEditor config={c} onChange={(remap) => set({ remap })} />
+      </Section>
+      <Section title={L("Gyro → Right Stick", "Gyro → Sağ analog")}>
+        {c.mode === "off" && <p className="hint">{L("Enable a virtual controller in this profile to use gyro on the right stick.", "Sağ analogda gyro kullanmak için bu profilde sanal kontrolcüyü aç.")}</p>}
+        <label className="row-field">
+          <span className="label">{L("Activation", "Çalışma")}</span>
+          <select value={g.mode} onChange={(e) => {
+            const mode = gyroModes.find(({ id }) => id === e.target.value);
+            if (mode) setGyro({ mode: mode.id });
+          }}>
+            {gyroModes.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </label>
+        {needsButton && (
+          <label className="row-field">
+            <span className="label">{L("Button", "Tuş")}</span>
+            <select value={g.button} onChange={(e) => {
+              const button = buttonDefs.find(({ id }) => id === e.target.value);
+              if (button) setGyro({ button: button.id });
+            }}>
+              {buttonDefs.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </label>
+        )}
+        <div className="row-field">
+          <span className="label">{L("Horizontal axis", "Yatay eksen")}</span>
+          <Segmented
+            label={L("Horizontal axis", "Yatay eksen")}
+            value={g.axis}
+            onChange={(axis) => setGyro({ axis })}
+            options={[
+              { id: "yaw", label: L("Turn left or right", "Sağa-sola çevir") },
+              { id: "roll", label: L("Tilt sideways", "Yana yatır") },
+            ]}
+          />
+        </div>
+        <div className="tab-controls">
+          <Slider label={L("Horizontal sensitivity", "Yatay hassasiyet")} min={0.1} max={10} step={0.1} value={g.sensitivityX} format={times} onChange={(sensitivityX) => setGyro({ sensitivityX })} />
+          <Slider label={L("Vertical sensitivity", "Dikey hassasiyet")} min={0.1} max={10} step={0.1} value={g.sensitivityY} format={times} onChange={(sensitivityY) => setGyro({ sensitivityY })} />
+          <Slider label={L("Deadzone", "Ölü bölge")} min={0} max={5} step={0.1} value={g.deadzone} format={(v) => `${fixed(1)(v)}°/s`} onChange={(deadzone) => setGyro({ deadzone })} />
+          <Slider label={L("Anti-deadzone", "Ölü bölge telafisi")} min={0} max={0.5} step={0.01} value={g.antiDeadzone} format={pct} onChange={(antiDeadzone) => setGyro({ antiDeadzone })} />
+          <Slider label={L("Smoothing", "Yumuşatma")} min={0} max={0.9} step={0.01} value={g.smoothing} format={pct} onChange={(smoothing) => setGyro({ smoothing })} />
+          <div className="row-field">
+            <Check label={L("Invert X", "X eksenini ters çevir")} checked={g.invertX} onChange={(invertX) => setGyro({ invertX })} />
+            <Check label={L("Invert Y", "Y eksenini ters çevir")} checked={g.invertY} onChange={(invertY) => setGyro({ invertY })} />
+          </div>
+        </div>
       </Section>
     </div>
   );

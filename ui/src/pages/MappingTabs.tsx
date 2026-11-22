@@ -2,7 +2,7 @@ import { L } from "../i18n";
 import { useState } from "react";
 import type { Binding, ButtonName, Direction, GyroMouse, Profile, StickMapping, TouchpadMapping } from "../host";
 import { ActionEditor, BindingEditor, KeyField } from "../MappingEditors";
-import { bindingSummary, buttonDefs, directions } from "../mapping";
+import { bindingSummary, buttonDefs, directions, gyroModes } from "../mapping";
 import { clamp, defaultBinding, processStick, rawAxis } from "../model";
 import { useApp, useInput } from "../state";
 import { Check, Section, Segmented, Slider, Toggle, fixed, pct } from "../ui";
@@ -140,27 +140,22 @@ export function GyroMouseTab({ draft, editMapping }: TabProps) {
   const g = draft.mapping.gyroMouse;
   const input = useInput();
   const set = (patch: Partial<GyroMouse>) => editMapping((m) => ({ ...m, gyroMouse: { ...m.gyroMouse, ...patch } }));
-  const needsButton = g.mode === "whileHeld" || g.mode === "toggle";
+  const needsButton = g.mode === "whileHeld" || g.mode === "whileReleased" || g.mode === "toggle";
   const f = (n: number) => (n >= 0 ? "+" : "−") + Math.abs(n).toFixed(1).replace(".", L(".", ","));
 
   return (
     <div className="tab-grid">
       <Section title={L("Gyro mouse", "Gyro fare")} className="tab-main">
-        <div className="row-field">
+        <label className="row-field">
           <span className="label">{L("Activation", "Çalışma")}</span>
-          <Segmented
-            label={L("Gyro mouse", "Gyro fare")}
-            value={g.mode}
-            onChange={(mode) => set({ mode })}
-            options={[
-              { id: "off", label: L("Off", "Kapalı") },
-              { id: "always", label: L("Always on", "Hep açık") },
-              { id: "whileHeld", label: L("While held", "Basılıyken") },
-              { id: "toggle", label: L("Toggle", "Aç/kapa") },
-            ]}
-          />
-        </div>
-        <div className="row-field">
+          <select value={g.mode} onChange={(e) => {
+            const mode = gyroModes.find(({ id }) => id === e.target.value);
+            if (mode) set({ mode: mode.id });
+          }}>
+            {gyroModes.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </label>
+        {g.mode !== "whileTouchpad" && <label className="row-field">
           <span className="label">{L("Key", "Tuş")}</span>
           <select value={g.button} disabled={!needsButton} onChange={(e) => set({ button: e.target.value as ButtonName })}>
             {buttonDefs.map((b) => (
@@ -169,8 +164,8 @@ export function GyroMouseTab({ draft, editMapping }: TabProps) {
               </option>
             ))}
           </select>
-          <span className="hint">{needsButton ? L("The button also runs its own mapping.", "Tuş kendi atamasını da çalıştırır.") : L("Used for hold and toggle modes.", "Basılıyken ya da aç/kapa için.")}</span>
-        </div>
+          {needsButton && <span className="hint">{L("The button also runs its own mapping.", "Tuş kendi atamasını da çalıştırır.")}</span>}
+        </label>}
         <div className="row-field">
           <span className="label">{L("Horizontal axis", "Yatay eksen")}</span>
           <Segmented

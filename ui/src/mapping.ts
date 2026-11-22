@@ -2,7 +2,7 @@ import { L } from "./i18n";
 // Labels, summaries and small helpers for the Tuşlar page.
 
 import { useEffect } from "react";
-import { send, subscribe, type Action, type ActionKind, type Binding, type ButtonName, type Direction, type Macro, type Mapping, type MouseButtonName, type Profile, type Special } from "./host";
+import { send, subscribe, type Action, type ActionKind, type Binding, type ButtonName, type Direction, type GyroMouse, type Macro, type Mapping, type MouseButtonName, type Profile, type Special } from "./host";
 import { chordLabel } from "./keys";
 import { defaultBinding, defaultMapping } from "./model";
 
@@ -37,6 +37,15 @@ export const buttonLabel = (id: ButtonName | "none") => (id === "none" ? L("None
 // The input message sends PascalCase ("Cross", "PS"); profile keys are camelCase.
 export const fromInput = (name: string): ButtonName | undefined => buttonDefs.find((b) => b.id.toLowerCase() === name.toLowerCase())?.id;
 export const toInput = (id: ButtonName): string => (id === "ps" ? "PS" : id[0].toUpperCase() + id.slice(1));
+
+export const gyroModes: { id: GyroMouse["mode"]; label: string }[] = [
+  { id: "off", get label() { return L("Off", "Kapalı"); } },
+  { id: "always", get label() { return L("Always on", "Hep açık"); } },
+  { id: "whileHeld", get label() { return L("While held", "Basılıyken"); } },
+  { id: "whileReleased", get label() { return L("While button not held", "Tuş basılı değilken"); } },
+  { id: "toggle", get label() { return L("Toggle", "Aç/kapa"); } },
+  { id: "whileTouchpad", get label() { return L("While touching touchpad", "Touchpad'e dokunulurken"); } },
+];
 
 export const actionKinds: { id: ActionKind; label: string }[] = [
   { id: "none", get label() { return L("None", "Yok"); } },
@@ -126,17 +135,20 @@ export function actionSummary(a: Action | null | undefined, profiles: Profile[],
 
 export function bindingSummary(b: Binding | undefined, profiles: Profile[], macros: Macro[]): string {
   if (!b) return "—";
+  if (b.cycle?.length) return b.cycle.map((action) => actionSummary(action, profiles, macros)).join(" → ");
   const parts = [actionSummary(b.press, profiles, macros)];
   if (b.hold) parts.push(L(`hold: ${actionSummary(b.hold, profiles, macros)}`, `tut: ${actionSummary(b.hold, profiles, macros)}`));
   if (b.double) parts.push(L(`double: ${actionSummary(b.double, profiles, macros)}`, `çift: ${actionSummary(b.double, profiles, macros)}`));
-  if (!b.hold && !b.double && b.turbo) parts.push("turbo");
-  else if (!b.hold && !b.double && b.toggle) parts.push("kilit");
+  if (b.triple) parts.push(L(`triple: ${actionSummary(b.triple, profiles, macros)}`, `üçlü: ${actionSummary(b.triple, profiles, macros)}`));
+  if (!b.hold && !b.double && !b.triple && b.turbo) parts.push(L("turbo", "turbo"));
+  else if (!b.hold && !b.double && !b.triple && b.toggle) parts.push(L("latch", "kilit"));
   return parts.join(" · ");
 }
 
 export const isEmptyBinding = (b: Binding) => {
   const d = defaultBinding();
-  return b.press.kind === "none" && !b.hold && !b.double && !b.turbo && !b.toggle && b.holdMs === d.holdMs && b.doubleMs === d.doubleMs && b.turboHz === d.turboHz;
+  return b.press.kind === "none" && !b.hold && !b.double && !b.triple && !b.cycle?.length
+    && !b.turbo && !b.toggle && b.holdMs === d.holdMs && b.doubleMs === d.doubleMs && b.turboHz === d.turboHz;
 };
 
 // ---- mapping.pause while any capture field or the recorder has focus ----

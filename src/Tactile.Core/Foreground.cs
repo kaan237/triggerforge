@@ -10,6 +10,9 @@ public interface IForegroundSource
     event Action<string>? Changed;
 
     string? Current { get; }
+    bool IsFullscreen => false;
+
+    (bool Fullscreen, string? Exe) GetFullscreenWindow() => IsFullscreen ? (true, Current) : default;
 }
 
 /// <summary>Most recent first, case-insensitive, no duplicates.</summary>
@@ -68,13 +71,16 @@ public sealed class RecentNames
 public sealed partial class WindowsForegroundSource : IForegroundSource, IDisposable
 {
     private const uint ProcessQueryLimitedInformation = 0x1000;
+    private const int WindowStyle = -16;
+    private const int Caption = 0x00C00000;
+    private const int ThickFrame = 0x00040000;
     private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(250);
 
     private readonly Timer _timer;
     private readonly int _ownPid = Environment.ProcessId;
     private readonly RecentNames _recent = new();
-    private uint _lastPid;
-    private volatile string? _current;
+    private sealed record ForegroundProcess(uint Pid, string Exe);
+    private volatile ForegroundProcess? _current;
     private int _polling;
 
     public WindowsForegroundSource()
@@ -84,7 +90,43 @@ public sealed partial class WindowsForegroundSource : IForegroundSource, IDispos
 
     public event Action<string>? Changed;
 
-    public string? Current => _current;
+    public string? Current => _current?.Exe;
+
+    public bool IsFullscreen => GetFullscreenWindow().Fullscreen;
+
+    public unsafe (bool Fullscreen, string? Exe) GetFullscreenWindow()
+    {
+        nint window = GetForegroundWindow();
+        if (window == 0 || !IsWindowVisible(window) || IsIconic(window))
+        {
+            return default;
+        }
+
+        _ = GetWindowThreadProcessId(window, out uint pid);
+        if (pid == 0 || pid == _ownPid)
+        {
+            return default;
+        }
+
+        char* name = stackalloc char[64];
+        int length = GetClassName(window, name, 64);
+        nint monitor = MonitorFromWindow(window, 0);
+        var info = new MonitorInfo { Size = (uint)sizeof(MonitorInfo) };
+        if (monitor == 0 || !GetMonitorInfo(monitor, ref info) || !GetWindowRect(window, out Rect rect) ||
+            !CoversMonitor(new ReadOnlySpan<char>(name, length), IsZoomed(window), GetWindowLong(window, WindowStyle), rect, info.Monitor))
+        {
+            return default;
+        }
+
+        ForegroundProcess? current = _current;
+        return (true, current?.Pid == pid ? current.Exe : ExeName(pid));
+    }
+
+    internal static bool CoversMonitor(ReadOnlySpan<char> windowClass, bool maximized, int style, Rect bounds, Rect monitor) =>
+        !maximized && (style & Caption) != Caption && (style & ThickFrame) == 0 &&
+        windowClass is not ("" or "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd"
+            or "XamlExplorerHostIslandWindow" or "MultitaskingViewFrame" or "Windows.UI.Core.CoreWindow") &&
+        bounds.Left == monitor.Left && bounds.Top == monitor.Top && bounds.Right == monitor.Right && bounds.Bottom == monitor.Bottom;
 
     /// <summary>Last 10 distinct exe names seen in front, most recent first.</summary>
     public IReadOnlyList<string> Recent => _recent.Items;
@@ -107,7 +149,8 @@ public sealed partial class WindowsForegroundSource : IForegroundSource, IDispos
             }
 
             _ = GetWindowThreadProcessId(hwnd, out uint pid);
-            if (pid == 0 || pid == _ownPid || pid == _lastPid)
+            ForegroundProcess? previous = _current;
+            if (pid == 0 || pid == _ownPid || pid == previous?.Pid)
             {
                 return;
             }
@@ -118,13 +161,12 @@ public sealed partial class WindowsForegroundSource : IForegroundSource, IDispos
                 return;
             }
 
-            _lastPid = pid;
-            if (string.Equals(exe, _current, StringComparison.OrdinalIgnoreCase))
+            _current = new ForegroundProcess(pid, exe);
+            if (string.Equals(exe, previous?.Exe, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
 
-            _current = exe;
             _recent.Add(exe);
             Changed?.Invoke(exe);
         }
@@ -174,6 +216,49 @@ public sealed partial class WindowsForegroundSource : IForegroundSource, IDispos
             return null;
         }
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Rect
+    {
+        public int Left, Top, Right, Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public uint Size;
+        public Rect Monitor, Work;
+        public uint Flags;
+    }
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindowVisible(nint window);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsIconic(nint window);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsZoomed(nint window);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowLongW")]
+    private static partial int GetWindowLong(nint window, int index);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetClassNameW")]
+    private static unsafe partial int GetClassName(nint window, char* name, int capacity);
+
+    [LibraryImport("user32.dll")]
+    private static partial nint MonitorFromWindow(nint window, uint flags);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetMonitorInfoW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetWindowRect(nint window, out Rect rect);
 
     [LibraryImport("user32.dll")]
     private static partial nint GetForegroundWindow();

@@ -166,6 +166,7 @@ export function Haptics() {
             </Section>
             <Section title={L("Click feedback", "Tık hissi")}>
               <Toggle label={L("Button and trigger click feedback", "Tuş ve tetik tık hissi")} checked={config.clicks} onChange={(clicks) => set({ clicks })} />
+              <Toggle label={L("Confirmation pulses (profile, layer, macro)", "Onay darbeleri (profil, katman, makro)")} checked={config.confirmPulses} onChange={(confirmPulses) => set({ confirmPulses })} />
               <Slider label={L("Click intensity", "Tık şiddeti")} min={0} max={1} step={0.01} value={config.clickStrength} format={pct}
                 onChange={(clickStrength) => set({ clickStrength })} />
             </Section>

@@ -48,6 +48,38 @@ public class EmulationServiceTests
         Assert.Contains(e.Status.Drivers, d => d is { Kind: DriverKind.UsbIp, State: DriverState.Unsupported, Version: "0.9.8.1" });
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Gyro_stick_preserves_physical_axes_and_only_adds_its_active_offset(bool swap)
+    {
+        var rig = new EmulationRig();
+        using EmulationService service = rig.Create();
+        var shaping = new StickConfig { InvertX = true, InvertY = true, InnerDeadzone = 0.4 };
+        Profile profile = Xbox with
+        {
+            Sticks = new StickPair { Left = shaping, Right = shaping },
+            Emulation = Xbox.Emulation with { SwapSticks = swap },
+        };
+        AppSettings settings = EmulationRig.Settings();
+        var input = Inputs.Make(left: new Stick(70, 90), right: new Stick(140, 180));
+        Stick physical = swap ? input.Left : input.Right;
+        service.Update(profile, settings, EmulationRig.Bluetooth);
+        service.OnInput(input);
+        var pad = rig.Server.Last!;
+        Assert.Equal(physical, Assert.Single(pad.Submitted).Right);
+
+        service.Update(profile with
+        {
+            Emulation = profile.Emulation with { GyroStick = new GyroStickConfig { Mode = GyroMouseMode.WhileHeld, Smoothing = 0 } },
+        }, settings, EmulationRig.Bluetooth);
+        var rate = new Vector3(0, -24, 0);
+        service.OnInput(input, gyroDegPerSec: rate);
+        Assert.Equal(physical, pad.Submitted[^1].Right);
+        service.OnInput(input with { Buttons = Buttons.L2 }, gyroDegPerSec: rate);
+        Assert.Equal(new Stick((byte)(physical.X + 26), physical.Y), pad.Submitted[^1].Right);
+    }
+
     [Fact]
     public void Hide_switch_off_attaches_without_hiding_and_without_needing_hidhide()
     {

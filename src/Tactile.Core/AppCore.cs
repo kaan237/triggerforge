@@ -71,7 +71,11 @@ public sealed class AppCore : IDisposable
     private string? _blockedBy;
     // Foreground exe the probe last answered for while mapping was active; null = not checked / inactive.
     private string? _elevationCheckedFor;
-    private volatile bool _mappingPaused;
+    private volatile bool _uiPaused;
+    private int _userPaused;
+    private volatile bool _fullscreenPaused;
+    private readonly PauseShortcut _pauseShortcut = new();
+    private TimeSpan? _confirmUntil;
 
     private readonly EmulationService? _emulation;
     private readonly UdpApiServer _udpApi;
@@ -113,7 +117,8 @@ public sealed class AppCore : IDisposable
             },
             () => Controllers.Output, _outbox.Enqueue, time);
         Controllers.SpeakerSource = _haptics.ReadSpeakerFrame;
-        Profiles = new ProfileStore(dataDir);
+        Profiles = new ProfileStore(dataDir, () => Settings.Current.BackupCount,
+            () => DateOnly.FromDateTime(_time.GetLocalNow().DateTime), _outbox.Enqueue);
 
         foreach (string broken in Profiles.BrokenFiles.Concat(Settings.BrokenFiles))
         {
@@ -313,16 +318,44 @@ public sealed class AppCore : IDisposable
     }
 
     public event Action? ActiveProfileChanged;
+    public event Action? UiMappingPausedChanged;
 
     /// <summary>While true the mapper releases everything and ignores input (UI key capture, macro recording).</summary>
-    public bool MappingPaused
+    public bool UiMappingPaused
     {
-        get => _mappingPaused;
+        get => _uiPaused;
         set
         {
-            _mappingPaused = value;
+            if (_uiPaused == value)
+            {
+                return;
+            }
+
+            _uiPaused = value;
+            UiMappingPausedChanged?.Invoke();
             UpdateMapping();
         }
+    }
+
+    public bool MappingPaused
+    {
+        get => UiMappingPaused;
+        set => UiMappingPaused = value;
+    }
+
+    public bool UserMappingPaused => Volatile.Read(ref _userPaused) != 0;
+    public bool FullscreenPaused => _fullscreenPaused;
+
+    public void ToggleUserPause()
+    {
+        int previous;
+        do
+        {
+            previous = Volatile.Read(ref _userPaused);
+        } while (Interlocked.CompareExchange(ref _userPaused, 1 - previous, previous) != previous);
+
+        UpdateMapping(notify: true);
+        PulseConfirm(Now());
     }
 
     public MappingStatus Mapping
@@ -368,6 +401,8 @@ public sealed class AppCore : IDisposable
             }
         }
     }
+
+    public int RestoreProfileBackup(string id) => Profiles.RestoreBackup(id);
 
     /// <summary>Manual choice; stays until the foreground game changes.</summary>
     /// <exception cref="KeyNotFoundException">Unknown id.</exception>
@@ -502,6 +537,7 @@ public sealed class AppCore : IDisposable
         OutputState? toSend = null;
         long version = 0;
         Profile activeProfile;
+        bool profileChanged = false;
         AppSettings activeSettings;
         ControllerSlot? activeSlot;
         lock (_lock)
@@ -517,11 +553,13 @@ public sealed class AppCore : IDisposable
             string? mac = controller?.Details.MacAddress;
             activeSettings = settings;
 
-            ProfileSelection selection = _selector.Select(_foreground.Current, Profiles.All, settings, mac, now);
+            IReadOnlyList<Profile> profiles = Profiles.All;
+            ProfileSelection selection = _selector.Select(_foreground.Current, profiles, settings, mac, now);
             if (!ReferenceEquals(selection.Profile, _active.Profile) || selection.Reason != _active.Reason)
             {
                 if (!ReferenceEquals(selection.Profile, _active.Profile))
                 {
+                    profileChanged = selection.Profile.Id != _active.Profile.Id;
                     _leftStick = new StickProcessor(selection.Profile.Sticks.Left);
                     _rightStick = new StickProcessor(selection.Profile.Sticks.Right);
                     ApplyTriggers(selection.Profile);
@@ -529,6 +567,16 @@ public sealed class AppCore : IDisposable
 
                 _active = selection;
                 _activeChanged = true;
+            }
+
+            _fullscreenPaused = settings.PauseOnFullscreen &&
+                _foreground.GetFullscreenWindow() is (true, var exe) &&
+                (!settings.AutoProfile || ProfileSelector.MatchGame(exe, profiles) is null);
+
+            if (_confirmUntil <= now)
+            {
+                _confirmUntil = null;
+                SetLayerLocked("confirm", null);
             }
 
             if (_calibrator is not null && now - _calibrationStarted > GyroCalibrator.DefaultDuration + TimeSpan.FromSeconds(1.5))
@@ -567,6 +615,7 @@ public sealed class AppCore : IDisposable
             }
         }
 
+        UpdateMapping();
         Send(toSend, version, activeSlot);
         _secondary?.Update(now, activeProfile, activeSettings);
         lock (_hapticsLock)
@@ -576,6 +625,11 @@ public sealed class AppCore : IDisposable
                 Link? link = Controllers.Controller is { Connected: true } connected ? connected.Details.Link : null;
                 _haptics.Configure(ActiveProfile.Haptics, link, _emulation?.VirtualAudio);
             }
+        }
+
+        if (profileChanged)
+        {
+            PulseConfirm(now);
         }
 
         if (ReferenceEquals(activeSlot, Controllers.PrimarySlot))
@@ -588,7 +642,6 @@ public sealed class AppCore : IDisposable
             _ = Task.Run(() => BluetoothLink.Disconnect(sleepMac));
         }
 
-        UpdateMapping();
         _mapper.Tick(now);
         Flush();
     }
@@ -744,7 +797,7 @@ public sealed class AppCore : IDisposable
         }
 
         _haptics.Observe(s);
-        _emulation?.OnInput(s);
+        _emulation?.OnInput(s, gyroDegPerSec: gyro, now: now);
 
         if (firstInput)
         {
@@ -757,7 +810,19 @@ public sealed class AppCore : IDisposable
             return false;
         }
 
-        _mapper.OnInput(s, gyro, now);
+        bool togglePause = _pauseShortcut.Observe(s.Buttons, Settings.Current.PauseCombo);
+        bool resuming = togglePause && UserMappingPaused;
+        if (resuming)
+        {
+            ToggleUserPause();
+        }
+
+        _mapper.OnInput(s, gyro, now, suppressLayerPulse: togglePause);
+        if (togglePause && !resuming)
+        {
+            ToggleUserPause();
+        }
+
         if (shortcut is { } action && EdgeShortcuts.Resolve(action, Profiles.All, ActiveProfile.Id) is { } profile)
         {
             lock (_lock)
@@ -895,6 +960,11 @@ public sealed class AppCore : IDisposable
         bool first;
         lock (_mappingLock)
         {
+            if (!string.Equals(key, _elevationCheckedFor, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             _blockedBy = blocks ? exe : null;
             first = blocks && _elevatedNoticed.Add(exe!);
         }
@@ -907,7 +977,7 @@ public sealed class AppCore : IDisposable
     }
 
     /// <summary>Pushes the active profile and state to the mapper; raises <see cref="MappingChanged"/> when the status moves.</summary>
-    private void UpdateMapping()
+    private void UpdateMapping(bool notify = false)
     {
         if (_disposed)
         {
@@ -915,7 +985,6 @@ public sealed class AppCore : IDisposable
         }
 
         bool active;
-        bool paused;
         lock (_mappingLock)
         {
             Profile profile;
@@ -926,8 +995,7 @@ public sealed class AppCore : IDisposable
                 connected = Controllers.Controller is not null || _latestInput is not null;
             }
 
-            paused = _mappingPaused;
-            active = profile.Mapping.Enabled && !paused && connected;
+            active = profile.Mapping.Enabled && GetPauseReason() is null && connected;
             _mapper.Configure(profile);
             _mapper.SetActive(active);
         }
@@ -938,15 +1006,52 @@ public sealed class AppCore : IDisposable
         bool changed;
         lock (_mappingLock)
         {
-            var status = new MappingStatus(active, paused, active ? _blockedBy : null);
+            string? reason = GetPauseReason();
+            active = _mapper.Active && reason is null;
+            var status = new MappingStatus(active, reason is not null, active ? _blockedBy : null, reason);
             changed = status != _mappingStatus;
             _mappingStatus = status;
         }
 
-        if (changed)
+        if (changed || notify)
         {
             MappingChanged?.Invoke();
         }
+    }
+
+    private string? GetPauseReason() => UiMappingPaused ? "ui" :
+        UserMappingPaused ? "shortcut" : FullscreenPaused ? "fullscreen" : null;
+
+    private void PulseConfirm(TimeSpan now)
+    {
+        OutputState? output = null;
+        long version = 0;
+        ControllerSlot? slot;
+        lock (_hapticsLock)
+        {
+            lock (_lock)
+            {
+                slot = Controllers.PrimarySlot;
+                if (_disposed || !_active.Profile.Haptics.ConfirmPulses ||
+                    (slot is null && _latestInput is null))
+                {
+                    return;
+                }
+
+                if (slot?.Controller.Details.Link == Link.Bluetooth && _haptics.PulseConfirm())
+                {
+                    return;
+                }
+
+                _confirmUntil = Now() + TimeSpan.FromMilliseconds(60);
+                SetLayerLocked("confirm", static state => state with { RumbleLeft = 64, RumbleRight = 160 });
+                output = Build(now);
+                _lastOutput = output;
+                version = ++_outputVersion;
+            }
+        }
+
+        Send(output, version, slot);
     }
 
     private void SwitchProfile(string target)
@@ -987,6 +1092,8 @@ public sealed class AppCore : IDisposable
 
         public void ShowApp() => core.ShowAppRequested?.Invoke();
 
+        public void PulseConfirm() => core.PulseConfirm(core.Now());
+
         public void Report(Notice notice) => core.Queue(notice);
     }
 
@@ -1020,6 +1127,8 @@ public sealed class AppCore : IDisposable
             _battery.Reset();
             _latestInput = null;
             _lastOutput = null;
+            _confirmUntil = null;
+            SetLayerLocked("confirm", null);
             if (_calibrator is not null)
             {
                 Finish(_calibrator.Fail(Text.Pick("Gyro calibration cancelled because the primary controller changed.", "Birincil kontrolcü değiştiği için gyro kalibrasyonu iptal edildi.")));
@@ -1036,6 +1145,7 @@ public sealed class AppCore : IDisposable
             }
         }
 
+        _pauseShortcut.Reset();
         _mapper.ResetController();
     }
 

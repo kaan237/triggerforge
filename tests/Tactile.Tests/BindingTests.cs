@@ -207,6 +207,126 @@ public class BindingTests
     }
 
     [Fact]
+    public void Triple_fires_and_holds_only_on_the_third_press()
+    {
+        using MapperRig rig = Rig(Bind.Key(Key.A) with
+        {
+            Double = Bind.Keys(Key.B), Triple = Bind.Keys(Key.C), Turbo = true, Toggle = true,
+        });
+
+        rig.Press(Buttons.Cross).Release(Buttons.Cross).Advance(250)
+            .Press(Buttons.Cross).Release(Buttons.Cross).Advance(250);
+        Assert.Empty(rig.Take());
+        rig.Press(Buttons.Cross);
+        Assert.Equal(["C down"], rig.Take());
+        rig.Release(Buttons.Cross).Advance(500);
+        Assert.Equal(["C up"], rig.Take());
+    }
+
+    [Theory]
+    [InlineData(true, "B")]
+    [InlineData(false, "A")]
+    public void Second_release_waits_and_taps_double_or_press_on_timeout(bool hasDouble, string key)
+    {
+        using MapperRig rig = Rig(Bind.Key(Key.A) with
+        {
+            Double = hasDouble ? Bind.Keys(Key.B) : null, Triple = Bind.Keys(Key.C),
+        });
+
+        rig.Press(Buttons.Cross).Release(Buttons.Cross).Press(Buttons.Cross).Release(Buttons.Cross).Advance(250);
+        Assert.Empty(rig.Take());
+        rig.Advance(1);
+        Assert.Equal([$"{key} down"], rig.Take());
+        rig.Advance(30);
+        Assert.Equal([$"{key} up"], rig.Take());
+    }
+
+    [Fact]
+    public void Second_press_can_fire_hold_and_cancel_the_triple_window()
+    {
+        using MapperRig rig = Rig(Bind.Key(Key.A) with
+        {
+            Hold = Bind.Keys(Key.H), Double = Bind.Keys(Key.B), Triple = Bind.Keys(Key.C),
+        });
+
+        rig.Press(Buttons.Cross).Release(Buttons.Cross).Press(Buttons.Cross).Advance(399);
+        Assert.Empty(rig.Take());
+        rig.Advance(1);
+        Assert.Equal(["H down"], rig.Take());
+        rig.Release(Buttons.Cross).Advance(500);
+        Assert.Equal(["H up"], rig.Take());
+    }
+
+    [Fact]
+    public void Cycle_wraps_releases_and_resets_ignoring_other_press_modes()
+    {
+        using MapperRig rig = Rig(Bind.Key(Key.P) with
+        {
+            Cycle = [Bind.Keys(Key.A), Bind.Keys(Key.B), Bind.Keys(Key.C)],
+            Hold = Bind.Keys(Key.H), Double = Bind.Keys(Key.D), Triple = Bind.Keys(Key.T),
+            Turbo = true, Toggle = true,
+        });
+
+        foreach (string key in new[] { "A", "B", "C", "A" })
+        {
+            rig.Press(Buttons.Cross).Advance(500);
+            Assert.Equal([$"{key} down"], rig.Take());
+            rig.Release(Buttons.Cross);
+            Assert.Equal([$"{key} up"], rig.Take());
+        }
+
+        rig.Press(Buttons.Cross);
+        rig.Mapper.ReleaseAll();
+        Assert.Equal(["B down", "B up"], rig.Take());
+        rig.Release(Buttons.Cross).Press(Buttons.Cross);
+        Assert.Equal(["A down"], rig.Take());
+    }
+
+    [Fact]
+    public void Cycle_positions_are_independent_across_layers_and_reset_together()
+    {
+        using var rig = new MapperRig(new MappingConfig
+        {
+            LayerButton = "ps",
+            Buttons = Bind.Map(("cross", new Binding { Cycle = [Bind.Keys(Key.A), Bind.Keys(Key.B)] }),
+                ("circle", new Binding { Cycle = [Bind.Keys(Key.C), Bind.Keys(Key.D)] })),
+            Layer = Bind.Map(("cross", new Binding { Cycle = [Bind.Keys(Key.X), Bind.Keys(Key.Y)] })),
+        });
+
+        void Click(Buttons button, string key)
+        {
+            rig.Press(button).Release(button);
+            Assert.Equal([$"{key} down", $"{key} up"], rig.Take());
+        }
+
+        Click(Buttons.Cross, "A");
+        Click(Buttons.Circle, "C");
+        rig.Press(Buttons.PS);
+        Click(Buttons.Cross, "X");
+        Click(Buttons.Circle, "D");
+        rig.Release(Buttons.PS);
+        Click(Buttons.Cross, "B");
+        rig.Press(Buttons.PS);
+        Click(Buttons.Cross, "Y");
+        Click(Buttons.Cross, "X");
+        rig.Mapper.ReleaseAll();
+        Click(Buttons.Cross, "X");
+    }
+
+    [Fact]
+    public void Pause_combo_report_suppresses_only_its_layer_pulse()
+    {
+        using var rig = new MapperRig(Bind.Buttons(("r1", Bind.Key(Key.A))) with { LayerButton = "ps" });
+        rig.Mapper.OnInput(Inputs.Make(Buttons.PS | Buttons.R1), default, rig.Now, suppressLayerPulse: true);
+        Assert.Equal(0, rig.ConfirmPulses);
+        Assert.Equal(["A down"], rig.Take());
+
+        rig.Mapper.OnInput(Inputs.Make(), default, rig.Now);
+        Assert.Equal(1, rig.ConfirmPulses);
+        Assert.Equal(["A up"], rig.Take());
+    }
+
+    [Fact]
     public void Unbound_buttons_do_nothing()
     {
         using MapperRig rig = Rig(Bind.Key(Key.A));

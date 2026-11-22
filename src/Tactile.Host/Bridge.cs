@@ -55,7 +55,7 @@ internal sealed class Bridge
     {
         _ready = false;
         // A focused key-capture field cannot unpause any more.
-        _core.MappingPaused = false;
+        _core.UiMappingPaused = false;
     }
 
     public void Handle(string json, bool appSource)
@@ -77,12 +77,28 @@ internal sealed class Bridge
                 return;
             }
 
+            if ((type is "mapping.togglePause" or "backups.list" or "backups.restore") && (!appSource || !_ready))
+            {
+                return;
+            }
+
             Dispatch(type, m);
         }
         catch (Exception e)
         {
             Log.Warn("Could not handle a UI message.", e);
             PostError(Describe(e));
+            if (type == "backups.restore")
+            {
+                try
+                {
+                    PostBackups();
+                }
+                catch (Exception listError) when (listError is IOException or UnauthorizedAccessException)
+                {
+                    Log.Warn("Could not list profile backups after a restore error.", listError);
+                }
+            }
         }
 
         if (type is "lightbar" or "brightness" or "playerLeds" or "micLed" or "rumble" or "trigger" or "reset" or "trigger.preview")
@@ -103,6 +119,7 @@ internal sealed class Bridge
                 _lastOutput = null;
                 PostOutputIfChanged();
                 PostProfiles();
+                PostBackups();
                 PostEmulation();
                 PostIntegration();
                 _lastHaptics = null;
@@ -256,8 +273,29 @@ internal sealed class Bridge
                 break;
 
             case "mapping.pause":
-                _core.MappingPaused = Bool(m, "paused");
+                _core.UiMappingPaused = Bool(m, "paused");
                 break;
+
+            case "mapping.togglePause":
+                _core.ToggleUserPause();
+                PostStatus();
+                break;
+
+            case "backups.list":
+                PostBackups();
+                break;
+
+            case "backups.restore":
+            {
+                string id = Str(m, "id");
+                int restored = _core.RestoreProfileBackup(id);
+                PostProfiles();
+                PostStatus();
+                PostBackups();
+                PostNotice(new Notice(NoticeKinds.Info, $"Restored {restored} profiles from {id}.",
+                    $"{id} yedeğinden {restored} profil geri yüklendi."));
+                break;
+            }
 
             // Modal UI must not run inside the WebView2 message event, so these run right after it.
             case "run.pick":
@@ -675,7 +713,7 @@ internal sealed class Bridge
                     profileName = profile.Name,
                 };
             }).ToArray(),
-            mapping = new { active = mapping.Active, paused = mapping.Paused, blockedBy = mapping.BlockedBy },
+            mapping = new { active = mapping.Active, paused = mapping.Paused, pauseReason = mapping.PauseReason, blockedBy = mapping.BlockedBy },
             elevated = WindowsInputPlatform.IsElevated,
             portable = _paths.Portable,
         });
@@ -763,6 +801,8 @@ internal sealed class Bridge
     public void PostProfiles() =>
         Post(new { type = "profiles", list = _core.Profiles.All, activeId = _core.ActiveProfile.Id });
 
+    private void PostBackups() => Post(new { type = "backups", list = _core.Profiles.ListBackups() });
+
     public void PostSettings() => Post(new { type = "settings", settings = _core.Settings.Current });
 
     public void PostNotice(Notice n)
@@ -804,6 +844,7 @@ internal sealed class Bridge
     private static string Describe(Exception e) => e switch
     {
         LocalizedException => e.Message,
+        _ when e.Data[typeof(LocalizedMessage)] is LocalizedMessage localized => localized.Value,
         JsonException j => string.IsNullOrEmpty(j.Path) ? Text.Pick("Could not read the message.", "Mesaj okunamadı.") : Text.Pick($"Invalid field: {j.Path}", $"Geçersiz alan: {j.Path}"),
         // Core validation supplies its own user-facing message.
         ArgumentException or KeyNotFoundException or InvalidOperationException

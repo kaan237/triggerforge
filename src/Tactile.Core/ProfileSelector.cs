@@ -52,18 +52,12 @@ public sealed class ProfileSelector
                 return new(pinned, Manual);
             }
 
-            _pinnedId = null;
+            Unpin();
         }
 
-        if (settings.AutoProfile && _settled is not null)
+        if (settings.AutoProfile && MatchGame(_settled, profiles) is { } game)
         {
-            foreach (Profile p in profiles)
-            {
-                if (p.Games.Contains(_settled, StringComparer.OrdinalIgnoreCase))
-                {
-                    return new(p, GamePrefix + _settled);
-                }
-            }
+            return new(game, GamePrefix + _settled);
         }
 
         if (controllerMac is not null &&
@@ -79,6 +73,22 @@ public sealed class ProfileSelector
         }
 
         return new(profiles[0], Default);
+    }
+
+    internal static Profile? MatchGame(string? exe, IReadOnlyList<Profile> profiles)
+    {
+        if (exe is not null)
+        {
+            foreach (Profile profile in profiles)
+            {
+                if (profile.Games.Contains(exe, StringComparer.OrdinalIgnoreCase))
+                {
+                    return profile;
+                }
+            }
+        }
+
+        return null;
     }
 
     private void Settle(string? foreground, AppSettings settings, TimeSpan now)

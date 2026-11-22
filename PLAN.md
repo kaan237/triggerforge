@@ -451,6 +451,17 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 - README: TriggerForge adı ve logosu GPL kapsamında değil; resmî sürümün değiştirilmemiş kopyaları bu adla paylaşılabilir, değiştirilmiş sürüm kendi adını ve logosunu kullanmalı.
 - Denetim (salt okunur Codex): 4 bulgu (logo dosyaları git'te izlenmiyordu, alışılmadık kapanışta tepsi simgesi erken bırakılıyordu, önizlemede "Sürüm notları" sessizdi, README'de ad/logo cümlesi çelişkiliydi), hepsi düzeltildi. Testler 620/620.
 
+### Faz 10 — Hızlı kazançlar → 1.1.0 (2026-11-22)
+
+Yol haritası `docs/yol-haritasi.md` (Faz 10-15), dayanağı `docs/rakip-analizi.md`. Çalışma düzeni bu fazdan itibaren: Claude kod yazmıyor; Gemini (agy, Argon) araştırma, kod haritası, sözleşme taslağı ve denetim; Codex kod ve bütün düzeltmeler; Claude plan-audit, doğrulama ve karar. `claude-orkestra` bu repoya kuruldu (git dışı).
+
+**Faz 10 sonucu**
+- Sözleşme `docs/contract-phase10.md` (plan-audit: REVİZYON GEREKLİ → 3 düzeltme: tam ekran duraklatma yalnız oyun kuralıyla seçilmemiş profilde; geri yükleme öncesi `pre-restore-*` kopyası, atomik yazım, yol geçişi koruması; hotkey kayıt hatası bildirimi → ONAYLANABİLİR). İş A (`src/`+`tests/`) ve İş B (`ui/`) aynı anda Codex'te.
+- Özellikler: kontrolcü kombinasyonu (2-3 tuş) ve global klavye kısayoluyla eşlemeyi duraklat/sürdür, tepside durum; tam ekran uygulamada otomatik duraklatma (çerçevesiz, monitörle birebir pencere; kabuk pencereleri hariç; öndeki exe bir oyun kuralına uyuyorsa duraklatmaz). Gyro fare `whileReleased` (ratchet) ve `whileTouchpad` kipleri. Gyro → sanal sağ stick (Xbox 360 / DualSense, yalnız birincil; ölü bölge, anti-deadzone, yumuşatma, eksen, kipler; fiziksel stick aynen geçer, gyro üstüne eklenir; yatay yön gyro fareyle aynı). Üçlü basış ve döngü (A→B→C, 8 eyleme kadar; katman başına ayrı indeks). Onay darbeleri (profil, katman, makro, duraklatma; BT akışında haptik, değilse 60 ms rumble). Günlük profil yedeği (varsayılan 7 gün), Profiller sayfasında geri yükleme; yedek alınamazsa silme yapılmıyor. Bluetooth RSSI kapsam dışı: Windows klasik BT HID için kullanıcı katmanında RSSI vermiyor.
+- Denetim: code-review high 2 bulgu, Codex salt okunur 6, Gemini 12; birleşince 16 ayrı madde, hepsi Codex'e düzelttirildi (öne çıkanlar: büyütülmüş pencerelerin tam ekran sayılması, yedek alınamazken silmenin sürmesi, geri yüklemeden sonra eski taslağın kaydı ezmesi, sayısal hotkey değerinin ayar yüklemeyi kesmesi, tuş yakalarken global kısayolun araya girmesi, gyro stick açılınca fiziksel stiğin şekil değiştirmesi). Gemini tekrar denetimi: hepsi tamam, yeni bulgu yok.
+- Testler 710/710, `dotnet build` 0 uyarı, `npm run build` temiz; arayüz tarayıcı önizlemesinde (Profiller → günlük yedekler, Ayarlar → duraklatma kısayolu) denendi.
+- Denenmeyenler (KH donanım listesi `docs/contract-phase10.md` §7): gerçek global hotkey, tam ekran oyunda duraklatma, gyro ratchet ve gyro stick yönleri, BT/USB onay darbeleri, gerçek yedek/geri yükleme.
+
 ### Faz 9 — Yedek yol: Pico 2 W köprü (isteğe bağlı)
 
 Faz 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse: Pico 2 W firmware'i ile gerçek USB DualSense görünümü; uygulama aynı UI ve profil motoruyla Pico'yu yönetir. Referans: DS5Dongle (MIT).

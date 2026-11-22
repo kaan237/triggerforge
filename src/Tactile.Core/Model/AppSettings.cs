@@ -1,4 +1,5 @@
 using Tactile.Device.DualSense;
+using Tactile.Input;
 
 namespace Tactile.Core;
 
@@ -29,6 +30,10 @@ public sealed record AppSettings
     public IntegrationSettings Integration { get; init; } = new();
     public UpdateSettings Updates { get; init; } = new();
     public bool FirstRunDone { get; init; }
+    public IReadOnlyList<string> PauseCombo { get; init; } = [];
+    public IReadOnlyList<Key> PauseHotkey { get; init; } = [];
+    public bool PauseOnFullscreen { get; init; }
+    public int BackupCount { get; init; } = 7;
 }
 
 public sealed record UpdateSettings

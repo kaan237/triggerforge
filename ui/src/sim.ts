@@ -2,7 +2,7 @@ import { L } from "./i18n";
 // Browser-only stand-in for the host. Keeps profiles and settings in memory and fakes
 // controller input so every screen can be used without hardware.
 
-import type { Action, AppSettings, AudioApp, Binding, ControllerStatus, DriverKind, DriverState, EmulationStatus, HapticStatus, HostMessage, Output, Profile, TelemetryConfig, TelemetryRule, TelemetryValues, TriggerConfig, UdpStatus, UpdateStatus } from "./host";
+import type { Action, AppSettings, AudioApp, Binding, ControllerStatus, DriverKind, DriverState, EmulationStatus, HapticStatus, HostMessage, Output, Profile, ProfileBackup, TelemetryConfig, TelemetryRule, TelemetryValues, TriggerConfig, UdpStatus, UpdateStatus } from "./host";
 import {
   clone,
   defaultBinding,
@@ -52,7 +52,7 @@ function sampleProfiles(): Profile[] {
     },
   ];
   race.mapping.buttons.create = { ...defaultBinding(), press: { kind: "macro", macroId: race.macros[0].id } };
-  race.emulation = { mode: "xbox360", remap: { cross: "circle", circle: "cross" }, swapSticks: false, hideMappedButtons: true };
+  race.emulation = { ...race.emulation, mode: "xbox360", remap: { cross: "circle", circle: "cross" } };
 
   return [base, ghost, race];
 }
@@ -115,6 +115,14 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   const sessionProfiles = new Map<string, string>();
   let thirdConnected = false;
   let profiles = sampleProfiles();
+  const localStamp = (now: Date) => new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString();
+  let backups: { info: ProfileBackup; snapshot: Profile[] }[] = [0, 1].map((daysAgo) => {
+    const day = new Date();
+    day.setDate(day.getDate() - daysAgo);
+    const date = localStamp(day).slice(0, 10);
+    const snapshot = clone(profiles.slice(0, profiles.length - daysAgo));
+    return { info: { id: date, date, profileCount: snapshot.length }, snapshot };
+  });
   let settings = normalizeSettings({
     ...defaultSettings(profiles[0].id),
     controllerDefaults: { [devices[0].mac]: profiles[0].id, [devices[1].mac]: profiles[1].id },
@@ -143,7 +151,8 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   const preview: { left: TriggerConfig | null; right: TriggerConfig | null } = { left: null, right: null };
   let reports = 0;
   let tick = 0;
-  let mappingPaused = false;
+  let uiPaused = false;
+  let userPaused = false;
   // Virtual controller: usbip-win2 starts missing so the install flow can be tried.
   const drivers: Record<DriverKind, { state: DriverState; version: string | null }> = {
     usbIp: { state: "missing", version: null },
@@ -170,6 +179,8 @@ export function createSimulator(emit: (m: HostMessage) => void) {
 
   function status() {
     const primary = slots[0];
+    const fullscreenPaused = settings.pauseOnFullscreen && previewOptions.get("fullscreen") === "1" && !activeReason.startsWith("game:");
+    const pauseReason = uiPaused ? "ui" : userPaused ? "shortcut" : fullscreenPaused ? "fullscreen" : null;
     emit({
       type: "status",
       connected: !!primary,
@@ -188,12 +199,48 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       version: update.current,
       activeProfileId: activeId,
       activeReason,
-      mapping: { active: !!primary && active().mapping.enabled && !mappingPaused, paused: mappingPaused, blockedBy: null },
+      mapping: { active: !!primary && active().mapping.enabled && pauseReason === null, paused: pauseReason !== null, pauseReason, blockedBy: null },
       elevated: false,
       portable: update.portable,
     });
   }
   const sendProfiles = () => emit({ type: "profiles", list: clone(profiles), activeId });
+  const sendBackups = () => {
+    const list = backups.map(({ info }) => info).sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return a.id === b.id ? 0 : a.id < b.id ? 1 : -1;
+    });
+    emit({ type: "backups", list });
+  };
+
+  function restoreBackup(id: unknown) {
+    const backup = backups.find(({ info }) => info.id === id);
+    if (!backup) {
+      emit({ type: "error", message: L("Backup not found.", "Yedek bulunamadı.") });
+      return;
+    }
+    let now = new Date();
+    const stamp = (date: Date) => localStamp(date).slice(0, 19);
+    const restoreId = (date: Date) => "pre-restore-" + stamp(date).replaceAll("-", "").replace("T", "-").replaceAll(":", "");
+    while (backups.some(({ info }) => info.id === restoreId(now))) now = new Date(now.getTime() + 1000);
+    backups = [
+      { info: { id: restoreId(now), date: stamp(now).slice(0, 10), profileCount: profiles.length }, snapshot: clone(profiles) },
+      ...backups.filter(({ info }) => info.id.startsWith("pre-restore-")).slice(0, 2),
+      ...backups.filter(({ info }) => !info.id.startsWith("pre-restore-")),
+    ];
+    profiles = clone(backup.snapshot);
+    if (!profiles.some((p) => p.id === activeId)) {
+      activeId = profiles.find((p) => p.id === settings.defaultProfileId)?.id ?? profiles[0].id;
+      activeReason = "default";
+    }
+    sendProfiles();
+    status();
+    sendBackups();
+    emit({ type: "notice", kind: "info", message: L(`Restored ${profiles.length} profiles from ${id}.`, `${id} yedeğinden ${profiles.length} profil geri yüklendi.`) });
+    sendEmulation();
+    sendHaptics();
+    pushOutput();
+  }
 
   function syncSlots() {
     const previousPrimary = slots[0];
@@ -483,6 +530,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       case "hello":
         status();
         sendProfiles();
+        sendBackups();
         emit({ type: "settings", settings: clone(settings) });
         output = computeOutput();
         emit(output);
@@ -539,7 +587,17 @@ export function createSimulator(emit: (m: HostMessage) => void) {
           // Shared profiles must not start programs.
           let removed = 0;
           const strip = (a: Action | null): Action | null => (a && a.kind === "run" ? (removed++, { kind: "none" }) : a);
-          const stripBinding = (b: Binding): Binding => ({ ...b, press: strip(b.press)!, hold: strip(b.hold), double: strip(b.double) });
+          const stripBinding = (b: Binding): Binding => {
+            const cycle = b.cycle?.flatMap((action) => {
+              const safe = strip(action);
+              return safe && safe.kind !== "none" ? [safe] : [];
+            }) ?? [];
+            const triple = strip(b.triple);
+            return {
+              ...b, press: strip(b.press)!, hold: strip(b.hold), double: strip(b.double),
+              triple: triple?.kind === "none" ? null : triple, cycle: cycle.length ? cycle : null,
+            };
+          };
           for (const map of [p.mapping.buttons, p.mapping.layer]) for (const k of Object.keys(map) as (keyof typeof map)[]) map[k] = stripBinding(map[k]!);
           p.mapping.touchpad.zones = p.mapping.touchpad.zones.map(stripBinding);
           for (const d of ["up", "down", "left", "right"] as const) p.mapping.touchpad.swipes[d] = strip(p.mapping.touchpad.swipes[d])!;
@@ -671,8 +729,18 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         emit({ type: "audioApps", apps: audioApps });
         return;
       case "mapping.pause":
-        mappingPaused = m.paused === true;
+        uiPaused = m.paused === true;
         status();
+        return;
+      case "mapping.togglePause":
+        userPaused = !userPaused;
+        status();
+        return;
+      case "backups.list":
+        sendBackups();
+        return;
+      case "backups.restore":
+        restoreBackup(m.id);
         return;
       case "run.pick":
         window.setTimeout(() => emit({ type: "runPicked", path: String.raw`C:\Program Files\Example\example.exe` }), 200);

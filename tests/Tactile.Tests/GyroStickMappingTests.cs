@@ -19,6 +19,42 @@ public class GyroMouseTests
     }
 
     [Fact]
+    public void While_released_moves_then_discards_the_filter_while_held()
+    {
+        using MapperRig rig = Rig(new GyroMouseConfig { Mode = GyroMouseMode.WhileReleased, Smoothing = 0.9 });
+
+        Feed(rig, new Vector3(0, 100, 0), 5);
+        Assert.NotEmpty(rig.Take());
+        rig.Press(Buttons.R1);
+        Feed(rig, new Vector3(0, 100, 0), 5);
+        Assert.Empty(rig.Take());
+        rig.Gyro(default).Release(Buttons.R1);
+        Feed(rig, default, 5);
+        Assert.Empty(rig.Take());
+        Feed(rig, new Vector3(0, 100, 0), 5);
+        Assert.NotEmpty(rig.Take());
+    }
+
+    [Fact]
+    public void While_touchpad_uses_either_finger()
+    {
+        using MapperRig rig = Rig(new GyroMouseConfig { Mode = GyroMouseMode.WhileTouchpad });
+        var rate = new Vector3(0, 20, 0);
+        var finger = new TouchPoint(true, 1, 100, 100);
+        Feed(rig, rate, 5);
+        Assert.Empty(rig.Take());
+        rig.Touch(finger);
+        Feed(rig, rate, 5);
+        Assert.NotEmpty(rig.Take());
+        rig.Touch(default, finger);
+        Feed(rig, rate, 5);
+        Assert.NotEmpty(rig.Take());
+        rig.Touch(default);
+        Feed(rig, rate, 5);
+        Assert.Empty(rig.Take());
+    }
+
+    [Fact]
     public void Ten_pixels_per_degree_at_sensitivity_1()
     {
         using MapperRig rig = Rig(new GyroMouseConfig { Mode = GyroMouseMode.Always, Smoothing = 0 });
@@ -43,6 +79,25 @@ public class GyroMouseTests
         Assert.Empty(rig.Take());
         Feed(rig, new Vector3(0, 5, 0), 20);
         Assert.NotEmpty(rig.Take());
+    }
+
+    [Theory]
+    [InlineData(GyroAxis.Yaw, -1)]
+    [InlineData(GyroAxis.Yaw, 1)]
+    [InlineData(GyroAxis.Roll, -1)]
+    [InlineData(GyroAxis.Roll, 1)]
+    public void Gyro_stick_and_mouse_move_in_the_same_horizontal_direction(GyroAxis axis, int direction)
+    {
+        using MapperRig mouse = Rig(new GyroMouseConfig { Mode = GyroMouseMode.Always, Axis = axis, Smoothing = 0 });
+        var stick = new GyroStick(new GyroStickConfig { Mode = GyroMouseMode.Always, Axis = axis, Smoothing = 0 });
+        Vector3 rate = axis == GyroAxis.Yaw ? new(0, -60 * direction, 0) : new(0, 0, -60 * direction);
+        InputState input = Inputs.Make(right: new Stick(128, 128));
+
+        Feed(mouse, rate, 3);
+        var offset = stick.Input(rate, input, TimeSpan.Zero);
+        InputState result = EmulationInput.Transform(input, new EmulationConfig(), gyro: offset);
+        Assert.Equal(direction, Math.Sign(mouse.Fake.Injector.MovedX));
+        Assert.Equal(direction, Math.Sign(result.Right.X - input.Right.X));
     }
 
     [Fact]

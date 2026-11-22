@@ -1,6 +1,8 @@
+using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Tactile.Core;
 
@@ -22,7 +24,19 @@ public static class TactileJson
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         };
         o.Converters.Add(new LenientEnumConverterFactory());
-        o.MakeReadOnly(populateMissingResolver: true);
+        var defaultGyroStick = new GyroStickConfig();
+        var resolver = new DefaultJsonTypeInfoResolver();
+        resolver.Modifiers.Add(info =>
+        {
+            if (info.Type == typeof(EmulationConfig))
+            {
+                // Preserve the legacy emulation JSON shape until gyro stick is configured.
+                info.Properties.Single(p => p.Name == "gyroStick").ShouldSerialize =
+                    (_, value) => value is GyroStickConfig gyro && gyro != defaultGyroStick;
+            }
+        });
+        o.TypeInfoResolver = resolver;
+        o.MakeReadOnly();
         return o;
     }
 }
@@ -49,11 +63,13 @@ internal sealed class LenientEnumConverterFactory : JsonConverterFactory
                 return value;
             }
 
-            if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out int n) && Enum.IsDefined(typeof(T), n))
+            if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out int n) &&
+                Enum.TryParse(n.ToString(CultureInfo.InvariantCulture), out value) && Enum.IsDefined(value))
             {
-                return (T)Enum.ToObject(typeof(T), n);
+                return value;
             }
 
+            reader.Skip();
             return default;
         }
 

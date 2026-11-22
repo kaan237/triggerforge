@@ -8,6 +8,7 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>..\..\assets\icon\triggerforge.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup><InternalsVisibleTo Include="Tactile.Tests" /></ItemGroup>
   <ItemGroup>
     <!-- The window and tray pick the size they need from this copy of the exe icon. -->
     <EmbeddedResource Include="..\..\assets\icon\triggerforge.ico" LogicalName="TriggerForge.ico" />
@@ -15,7 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Tactile.Core\Tactile.Core.csproj" />
     <ProjectReference Include="..\Tactile.Input.Windows\Tactile.Input.Windows.csproj" />
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" PrivateAssets="contentfiles;analyzers;build;buildTransitive" />
   </ItemGroup>
   <!-- The WebView2 package also adds its WPF control; this is a WinForms host. -->
   <Target Name="DropWebView2Wpf" BeforeTargets="ResolveAssemblyReferences">

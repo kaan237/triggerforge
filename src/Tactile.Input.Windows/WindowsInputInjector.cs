@@ -86,7 +86,7 @@ public sealed class WindowsInputInjector : IInputInjector
 
     private static unsafe void Send(InputRecord input) => SendInput(1, &input, InputSize);
 
-    private static ushort VirtualKey(Key key) => key switch
+    public static ushort VirtualKey(Key key) => key switch
     {
         K.MediaPrevious => 0xB1,
         K.MediaNext => 0xB0,

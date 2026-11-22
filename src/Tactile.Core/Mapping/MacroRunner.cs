@@ -51,23 +51,24 @@ internal sealed class MacroRunner : IDisposable
     }
 
     /// <summary>Starts unless that macro already runs. <paramref name="loop"/> repeats until stopped.</summary>
-    public void Start(Macro macro, bool loop, int generation)
+    public bool Start(Macro macro, bool loop, int generation)
     {
         lock (_lock)
         {
             if (_disposed || generation != _generation || _running.Any(p => p.Macro.Id == macro.Id))
             {
-                return;
+                return false;
             }
 
             _running.Add(new Playback(macro, loop, _clock()));
         }
 
         Wake();
+        return true;
     }
 
     /// <summary>Starts a looping playback, or asks a running one to stop.</summary>
-    public void Toggle(Macro macro, int generation)
+    public bool Toggle(Macro macro, int generation)
     {
         bool stop;
         lock (_lock)
@@ -78,11 +79,10 @@ internal sealed class MacroRunner : IDisposable
         if (stop)
         {
             Stop(macro.Id, generation);
+            return false;
         }
-        else
-        {
-            Start(macro, loop: true, generation);
-        }
+
+        return Start(macro, loop: true, generation);
     }
 
     /// <summary>Stops at the next step boundary; a pending delay is cut short.</summary>

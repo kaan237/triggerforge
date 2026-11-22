@@ -242,9 +242,19 @@ export function ActionEditor({ action, onChange, kinds }: { action: Action; onCh
 
 // ---- binding ----
 
+const cycleKinds = actionKinds.map(({ id }) => id).filter((id) => id !== "none");
+
 export function BindingEditor({ binding, onChange }: { binding: Binding; onChange: (b: Binding) => void }) {
   const set = (patch: Partial<Binding>) => onChange({ ...binding, ...patch });
-  const plain = !binding.hold && !binding.double;
+  const cycle = binding.cycle ?? [];
+  const plain = !binding.hold && !binding.double && !binding.triple && !cycle.length;
+  const setCycle = (actions: Action[]) => set({ cycle: actions.length ? actions : null });
+  const move = (from: number, to: number) => {
+    const actions = [...cycle];
+    const [action] = actions.splice(from, 1);
+    actions.splice(to, 0, action);
+    setCycle(actions);
+  };
 
   return (
     <div className="binding">
@@ -265,17 +275,44 @@ export function BindingEditor({ binding, onChange }: { binding: Binding; onChang
 
       <div className="bind-row">
         <Check label={L("On double press", "Çift basınca")} checked={!!binding.double} onChange={(on) => set({ double: on ? actionOfKind("key") : null })} />
-        {binding.double && (
-          <div className="bind-sub">
-            <ActionEditor action={binding.double} onChange={(double) => set({ double })} />
-            <Slider label={L("Interval", "Aralık")} min={100} max={600} step={10} value={binding.doubleMs} format={(v) => `${v} ms`} onChange={(doubleMs) => set({ doubleMs })} />
-          </div>
+        {binding.double && <div className="bind-sub"><ActionEditor action={binding.double} onChange={(double) => set({ double })} /></div>}
+      </div>
+
+      <div className="bind-row">
+        <Check label={L("On triple press", "Üç kez basınca")} checked={!!binding.triple} onChange={(on) => set({ triple: on ? actionOfKind("key") : null })} />
+        {binding.triple && <div className="bind-sub"><ActionEditor action={binding.triple} onChange={(triple) => set({ triple: triple.kind === "none" ? null : triple })} /></div>}
+        {(binding.double || binding.triple) && (
+          <Slider label={L("Multi-press interval", "Çoklu basış aralığı")} min={100} max={600} step={10} value={binding.doubleMs} format={(v) => `${v} ms`} onChange={(doubleMs) => set({ doubleMs })} />
         )}
       </div>
 
       <div className="bind-row">
+        <span className="label">{L("Action cycle", "Eylem döngüsü")} (A → B → C)</span>
+        {cycle.length > 0 && (
+          <>
+            <p className="hint">{L("Each press runs the next action. The cycle overrides the other actions and options.", "Her basış sıradaki eylemi çalıştırır. Döngü diğer eylem ve seçeneklerin yerine geçer.")}</p>
+            <ol className="bind-sub">
+              {cycle.map((action, index) => (
+                <li key={index} className="bind-row">
+                  <ActionEditor action={action} kinds={cycleKinds} onChange={(next) => setCycle(cycle.map((current, i) => i === index ? next : current))} />
+                  <div className="button-row">
+                    <button className="button ghost" disabled={index === 0} onClick={() => move(index, index - 1)}>{L("Move up", "Yukarı taşı")}</button>
+                    <button className="button ghost" disabled={index === cycle.length - 1} onClick={() => move(index, index + 1)}>{L("Move down", "Aşağı taşı")}</button>
+                    <button className="button ghost" onClick={() => setCycle(cycle.filter((_, i) => i !== index))}>{L("Remove", "Kaldır")}</button>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </>
+        )}
+        <div className="button-row">
+          <button className="button" disabled={cycle.length >= 8} onClick={() => setCycle([...cycle, actionOfKind("key")])}>{L("Add action", "Eylem ekle")}</button>
+        </div>
+      </div>
+
+      <div className="bind-row">
         <div className="bind-flags">
-          <Check label="Turbo" disabled={!plain} checked={binding.turbo} onChange={(turbo) => set({ turbo })} />
+          <Check label={L("Turbo", "Turbo")} disabled={!plain} checked={binding.turbo} onChange={(turbo) => set({ turbo })} />
           <Check label={L("Latch", "Kilitle")} disabled={!plain} checked={binding.toggle} onChange={(toggle) => set({ toggle })} />
         </div>
         {plain && binding.turbo && (
@@ -288,7 +325,7 @@ export function BindingEditor({ binding, onChange }: { binding: Binding; onChang
             ? binding.turbo && binding.toggle
               ? L("Turbo takes priority when both are on.", "İkisi birden açıksa turbo geçerli.")
               : L("Turbo repeats while held. Latch holds on the first press and releases on the second.", "Turbo: basılıyken tekrarlar. Kilitle: ilk basış basılı tutar, ikincisi bırakır.")
-            : L("Turbo and latch require hold and double press to be off.", "Turbo ve kilit yalnız tutma ve çift basma kapalıyken çalışır.")}
+            : L("Turbo and latch are inactive with hold, multi-press, or a cycle.", "Tutma, çoklu basış veya döngü açıksa turbo ve kilitleme çalışmaz.")}
         </p>
       </div>
     </div>

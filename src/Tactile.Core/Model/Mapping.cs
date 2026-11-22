@@ -15,7 +15,7 @@ public enum TouchpadMode { Off, Mouse, Zones }
 
 public enum ZoneLayout { Halves, Quadrants }
 
-public enum GyroMouseMode { Off, Always, WhileHeld, Toggle }
+public enum GyroMouseMode { Off, Always, WhileHeld, Toggle, WhileReleased, WhileTouchpad }
 
 public enum GyroAxis { Yaw, Roll }
 
@@ -47,6 +47,8 @@ public sealed record Binding
     public ActionConfig Press { get; init; } = ActionConfig.None;
     public ActionConfig? Hold { get; init; }
     public ActionConfig? Double { get; init; }
+    public ActionConfig? Triple { get; init; }
+    public IReadOnlyList<ActionConfig>? Cycle { get; init; }
     /// <summary>150-2000.</summary>
     public int HoldMs { get; init; } = 400;
     /// <summary>100-600.</summary>

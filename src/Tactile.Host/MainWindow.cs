@@ -9,6 +9,8 @@ namespace Tactile.Host;
 /// <summary>The WebView2 window. The view is created on first show, so a tray start stays light.</summary>
 internal sealed class MainWindow : Form
 {
+    internal const int PauseHotkeyId = 1;
+    private const int WmHotkey = 0x0312;
     private const string AppHost = "app.tactile";
     private static readonly Color Background = Color.FromArgb(0x16, 0x17, 0x19);
 
@@ -30,6 +32,18 @@ internal sealed class MainWindow : Form
     }
 
     public Bridge Bridge { get; }
+    public event Action? PauseHotkeyPressed;
+
+    protected override void WndProc(ref Message message)
+    {
+        if (message.Msg == WmHotkey && message.WParam == PauseHotkeyId)
+        {
+            PauseHotkeyPressed?.Invoke();
+            return;
+        }
+
+        base.WndProc(ref message);
+    }
 
     /// <summary>Visible and not minimized.</summary>
     public bool OnScreen => Visible && WindowState != FormWindowState.Minimized;

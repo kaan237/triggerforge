@@ -12,10 +12,11 @@ internal sealed class Tray : IDisposable
     private readonly Action<string> _activate;
     private readonly ToolStripMenuItem _showItem;
     private readonly ToolStripMenuItem _restoreItem;
+    private readonly ToolStripMenuItem _pauseItem;
     private readonly ToolStripMenuItem _exitItem;
     private string _text = "";
 
-    public Tray(Icon icon, Action show, Action<string> activate, Action restore, Action exit)
+    public Tray(Icon icon, Action show, Action<string> activate, Action restore, Action togglePause, Action exit)
     {
         _activate = activate;
         _showItem = new ToolStripMenuItem("", null, (_, _) => show());
@@ -23,6 +24,8 @@ internal sealed class Tray : IDisposable
         _menu.Items.Add(_showItem);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(_profilesEnd);
+        _pauseItem = new ToolStripMenuItem("", null, (_, _) => togglePause());
+        _menu.Items.Add(_pauseItem);
         _restoreItem = new ToolStripMenuItem("", null, (_, _) => restore());
         _menu.Items.Add(_restoreItem);
         _menu.Items.Add(new ToolStripSeparator());
@@ -37,6 +40,7 @@ internal sealed class Tray : IDisposable
     public void UpdateLanguage()
     {
         _showItem.Text = Text.Pick("Show", "Göster");
+        _pauseItem.Text = Text.Pick("Pause mapping", "Eşlemeyi duraklat");
         _restoreItem.Text = Text.Pick("Restore controller", "Kontrolcüyü geri getir");
         _exitItem.Text = Text.Pick("Exit", "Çıkış");
     }
@@ -63,18 +67,17 @@ internal sealed class Tray : IDisposable
         }
     }
 
-    public void SetStatus(string? controller, int? battery, bool charging)
+    public void SetStatus(string? controller, int? battery, bool charging, bool paused, bool userPaused)
     {
+        _pauseItem.Checked = userPaused;
         string text = controller is null
             ? Text.Pick("TriggerForge\nNo controller connected", "TriggerForge\nKontrolcü bağlı değil")
             : battery is int b
                 ? Text.Pick($"TriggerForge\n{controller} · {b}%{(charging ? " (charging)" : "")}",
                     $"TriggerForge\n{controller} · %{b}{(charging ? " (şarjda)" : "")}")
                 : $"TriggerForge\n{controller}";
-        if (text.Length > 127)
-        {
-            text = text[..127];
-        }
+        string suffix = paused ? Text.Pick("\nMapping paused", "\nEşleme duraklatıldı") : "";
+        text = text[..Math.Min(text.Length, 127 - suffix.Length)] + suffix;
 
         if (text != _text)
         {

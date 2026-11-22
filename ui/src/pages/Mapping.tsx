@@ -33,18 +33,26 @@ function StatusLine({ draft }: { draft: Profile }) {
   else if (dirty && draftBase && draftBase.mapping.enabled !== draft.mapping.enabled) text = L("Save to apply.", "Kaydedince geçerli olur.");
   else if (!draft.mapping.enabled) text = L("Off.", "Kapalı.");
   else if (!status?.connected) text = L("No controller connected.", "Kontrolcü bağlı değil.");
-  else if (s?.paused) text = L("Paused while capturing a key.", "Duraklatıldı. Tuş yakalanırken atamalar durur.");
+  else if (s?.paused) text = s.pauseReason === "ui" ? L("Capturing a key.", "Tuş yakalanıyor.") : "";
   else if (s?.blockedBy) {
     text = L(`${s.blockedBy} is running as administrator, so it cannot receive mappings.`, `${s.blockedBy} yönetici olarak çalışıyor, atamalar ona ulaşmıyor.`);
     warn = true;
     restart = !status.elevated;
-  } else if (s?.active) text = "Aktif.";
-  else text = "Bekliyor.";
+  } else if (s?.active) text = L("Active.", "Etkin.");
+  else text = L("Waiting.", "Bekliyor.");
+  const paused = s?.pauseReason === "shortcut" ? L("Paused (shortcut)", "Duraklatıldı (kısayol)")
+    : s?.pauseReason === "fullscreen" ? L("Paused (fullscreen)", "Duraklatıldı (tam ekran)")
+      : L("Paused", "Duraklatıldı");
 
   return (
     <div className="map-status">
       <span className={s?.active && !s.blockedBy && draft.id === activeId ? "dot live" : "dot"} aria-hidden />
-      <span className={warn ? "small warn" : "small muted-text"}>{text}</span>
+      {text && <span className={warn ? "small warn" : "small muted-text"}>{text}</span>}
+      {s?.paused && <span className="tag accent">{paused}</span>}
+      <button className="button" disabled={!s} onClick={() => send({ type: "mapping.togglePause" })}>
+        {s?.pauseReason === "shortcut" ? L("Resume", "Sürdür")
+          : s?.pauseReason === "ui" ? L("Toggle pause", "Duraklatmayı değiştir") : L("Pause", "Duraklat")}
+      </button>
       {restart && (
         <button className="button" onClick={() => send({ type: "app.restartElevated" })}>
           {L("Restart as administrator", "Yönetici olarak yeniden başlat")}

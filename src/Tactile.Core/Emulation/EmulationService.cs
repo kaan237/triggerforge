@@ -86,6 +86,10 @@ public sealed partial class EmulationService : IDisposable
     private TimeSpan? _driversCheckedAt;
     private EmulationStatus _lastStatus = EmulationStatus.Unavailable;
     private bool _steamNoticed;
+    private GyroStick? _gyroStick;
+    private GyroStickConfig? _gyroConfig;
+    private string? _gyroProfile;
+    private IVirtualPad? _gyroPad;
     private volatile InputPlan _plan = new(new EmulationConfig(), Buttons.None, 1);
     private volatile bool _disposed;
 
@@ -203,7 +207,7 @@ public sealed partial class EmulationService : IDisposable
         _plan = new InputPlan(config,
             _slotIndex == 0 && config.HideMappedButtons && profile is not null ? EmulationInput.MappedButtons(profile) : Buttons.None,
             profile?.Rumble?.Strength ?? 1,
-            _slotIndex == 0 || profile is null ? null : new SecondaryAxes(profile));
+            _slotIndex == 0 || profile is null ? null : new SecondaryAxes(profile), profile?.Id);
         var wanted = new Wanted(profile?.Id ?? "", config.Mode, settings, controller);
         lock (_stateLock)
         {
@@ -282,7 +286,7 @@ public sealed partial class EmulationService : IDisposable
     }
 
     /// <summary>Real controller input → remap → pad. Reader thread.</summary>
-    internal void OnInput(InputState s, ControllerSlot? slot = null)
+    internal void OnInput(InputState s, ControllerSlot? slot = null, Vector3 gyroDegPerSec = default, TimeSpan now = default)
     {
         IVirtualPad? pad = _pad;
         if (pad is null || _route is not { IsCurrent: true } route || !ReferenceEquals(route.Pad, pad) ||
@@ -294,7 +298,21 @@ public sealed partial class EmulationService : IDisposable
         InputPlan plan = _plan;
         try
         {
-            pad.Submit(EmulationInput.Transform(plan.Axes?.Apply(s) ?? s, plan.Config, plan.Hidden));
+            (float X, float Y) offset = default;
+            if (_slotIndex == 0)
+            {
+                GyroStickConfig? gyro = plan.Config.GyroStick is { Mode: not GyroMouseMode.Off } configured
+                    ? configured : null;
+                if (gyro != _gyroConfig || plan.ProfileId != _gyroProfile || !ReferenceEquals(pad, _gyroPad))
+                {
+                    (_gyroConfig, _gyroProfile, _gyroPad) = (gyro, plan.ProfileId, pad);
+                    _gyroStick = gyro is null ? null : new GyroStick(gyro);
+                }
+
+                offset = _gyroStick?.Input(gyroDegPerSec, s, now) ?? default;
+            }
+
+            pad.Submit(EmulationInput.Transform(plan.Axes?.Apply(s) ?? s, plan.Config, plan.Hidden, offset));
         }
         catch (ObjectDisposedException)
         {
@@ -999,5 +1017,6 @@ public sealed partial class EmulationService : IDisposable
             (ProfileId, Mode, Mode == EmulationMode.DualSense && Settings.Audio, Controller?.Secondary);
     }
 
-    private sealed record InputPlan(EmulationConfig Config, Buttons Hidden, double RumbleStrength, SecondaryAxes? Axes = null);
+    private sealed record InputPlan(EmulationConfig Config, Buttons Hidden, double RumbleStrength, SecondaryAxes? Axes = null,
+        string? ProfileId = null);
 }

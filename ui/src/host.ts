@@ -99,6 +99,8 @@ export type Binding = {
   press: Action;
   hold: Action | null;
   double: Action | null;
+  triple: Action | null;
+  cycle: Action[] | null;
   holdMs: number;
   doubleMs: number;
   turbo: boolean;
@@ -119,7 +121,7 @@ export type TouchpadMapping = {
 };
 
 export type GyroMouse = {
-  mode: "off" | "always" | "whileHeld" | "toggle";
+  mode: "off" | "always" | "whileHeld" | "whileReleased" | "toggle" | "whileTouchpad";
   button: ButtonName;
   axis: "yaw" | "roll";
   sensitivityX: number;
@@ -160,11 +162,12 @@ export type Macro = {
   steps: MacroStep[];
 };
 
-export type MappingStatus = { active: boolean; paused: boolean; blockedBy: string | null };
+export type MappingStatus = { active: boolean; paused: boolean; pauseReason: "ui" | "shortcut" | "fullscreen" | null; blockedBy: string | null };
 
 // ---- virtual controller (docs/contract-phase4.md) ----
 
 export type EmulationMode = "off" | "xbox360" | "dualSense";
+export type GyroStickConfig = GyroMouse & { antiDeadzone: number };
 
 export type EmulationConfig = {
   mode: EmulationMode;
@@ -172,6 +175,7 @@ export type EmulationConfig = {
   remap: Partial<Record<ButtonName, ButtonName | "none">>;
   swapSticks: boolean;
   hideMappedButtons: boolean;
+  gyroStick: GyroStickConfig;
 };
 
 export type SpeakerPacket = "double39" | "single36";
@@ -208,6 +212,7 @@ export type HapticsConfig = {
   rumbleToHaptics: boolean;
   clicks: boolean;
   clickStrength: number;
+  confirmPulses: boolean;
   speaker: HapticsConfig["audio"];
   speakerApp: string;
   speakerVolume: number;
@@ -297,6 +302,10 @@ export type AppSettings = {
   primaryController: string | null;
   autoPlayerLeds: boolean;
   edgeShortcuts: boolean;
+  pauseCombo: ButtonName[];
+  pauseHotkey: KeyName[];
+  pauseOnFullscreen: boolean;
+  backupCount: number;
   maxControllers: number;
   idleSleepMinutes: number;
   lowBatteryWarnings: number[];
@@ -393,11 +402,14 @@ export type NoticeKind = "lowBattery" | "brokenFile" | "idleSleep" | "gyroCalibr
 export type AudioApp = { pid: number; name: string; display: string };
 export type HapticStatus = { type: "haptics"; streaming: boolean; source: "off" | "system" | `app:${string}`; problem: string | null };
 
+export type ProfileBackup = { id: string; date: string; profileCount: number };
+
 export type HostMessage =
   | Status
   | Input
   | Output
   | { type: "profiles"; list: Profile[]; activeId: string }
+  | { type: "backups"; list: ProfileBackup[] }
   | { type: "settings"; settings: AppSettings }
   | { type: "export"; id: string; json: string }
   | { type: "logs.exported"; ok: boolean; path?: string; error?: string }
@@ -432,6 +444,9 @@ export type UiMessage =
   | { type: "foreground.pick" }
   | { type: "audio.apps" }
   | { type: "mapping.pause"; paused: boolean }
+  | { type: "mapping.togglePause" }
+  | { type: "backups.list" }
+  | { type: "backups.restore"; id: string }
   | { type: "run.pick" }
   | { type: "app.restartElevated" }
   | { type: "emulation.status" }

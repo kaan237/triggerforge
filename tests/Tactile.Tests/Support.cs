@@ -32,6 +32,11 @@ internal sealed class FakeForeground : IForegroundSource
     public event Action<string>? Changed;
 
     public string? Current { get; private set; }
+    public bool IsFullscreen { get; set; }
+    public string? FullscreenExe { get; set; }
+
+    public (bool Fullscreen, string? Exe) GetFullscreenWindow() =>
+        IsFullscreen ? (true, FullscreenExe ?? Current) : default;
 
     public void Set(string exe)
     {

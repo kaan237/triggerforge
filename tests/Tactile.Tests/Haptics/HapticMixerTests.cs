@@ -118,6 +118,22 @@ public sealed class HapticMixerTests
         Assert.All(samples, sample => Assert.Equal(0, sample));
     }
 
+    [Fact]
+    public void Confirmation_is_a_stereo_double_tap_independent_of_clicks()
+    {
+        var mixer = new HapticMixer(() => OutputState.Default);
+        mixer.ConfigureClicks(connected: true, enabled: false);
+        mixer.PulseConfirm();
+
+        var frames = Enumerable.Range(0, 5).SelectMany(_ => Block(mixer, clickStrength: 0)).ToArray();
+        Assert.Contains(frames[..72], sample => sample != 0);
+        Assert.All(frames[72..216], sample => Assert.Equal(0, sample));
+        Assert.Contains(frames[216..288], sample => sample != 0);
+        Assert.All(frames[288..], sample => Assert.Equal(0, sample));
+        Assert.All(frames.Where((_, i) => i % 2 == 0).Zip(frames.Where((_, i) => i % 2 != 0)),
+            pair => Assert.Equal(pair.First, pair.Second));
+    }
+
     private static int Amplitude(sbyte[] samples, int channel) =>
         samples.Where((_, i) => i % 2 == channel).Max(s => Math.Abs((int)s));
 

@@ -9,6 +9,98 @@ public class EmulationInputTests
         new() { Remap = pairs.ToDictionary(p => p.From, p => p.To) };
 
     [Fact]
+    public void Gyro_stick_applies_deadzone_anti_deadzone_and_independent_sensitivities()
+    {
+        var gyro = new GyroStick(new GyroStickConfig
+        {
+            Mode = GyroMouseMode.Always, Deadzone = 1, AntiDeadzone = 0.25, Smoothing = 0,
+            SensitivityX = 2, SensitivityY = 0.5,
+        });
+        InputState input = Inputs.Make();
+        Assert.Equal((0f, 0f), gyro.Input(new Vector3(1, 0.5f, 0), input, TimeSpan.Zero));
+        Assert.Equal((-0.625f, 0.4375f), gyro.Input(new Vector3(60, 30, 0), input, TimeSpan.Zero));
+        Assert.Equal((-1f, -1f), gyro.Input(new Vector3(-500, 500, 0), input, TimeSpan.Zero));
+    }
+
+    [Theory]
+    [InlineData(GyroAxis.Yaw, -0.5, -0.25)]
+    [InlineData(GyroAxis.Roll, 1, 0.5)]
+    public void Gyro_stick_selects_yaw_or_roll_inverts_both_axes_and_smooths(GyroAxis axis, double x, double nextX)
+    {
+        var gyro = new GyroStick(new GyroStickConfig
+        {
+            Mode = GyroMouseMode.Always, Axis = axis, Smoothing = 0.5, InvertX = true, InvertY = true,
+        });
+        InputState input = Inputs.Make();
+        Assert.Equal(((float)x, -0.25f), gyro.Input(new Vector3(30, -60, 120), input, TimeSpan.Zero));
+        Assert.Equal(((float)nextX, -0.125f), gyro.Input(default, input, TimeSpan.FromMilliseconds(10)));
+    }
+
+    [Theory]
+    [InlineData(GyroMouseMode.Off, false, false, false, false, false, false)]
+    [InlineData(GyroMouseMode.WhileHeld, false, true, true, false, false, true)]
+    [InlineData(GyroMouseMode.WhileReleased, true, false, false, true, true, false)]
+    [InlineData(GyroMouseMode.Toggle, false, true, true, true, true, false)]
+    [InlineData(GyroMouseMode.WhileTouchpad, false, false, false, true, true, false)]
+    public void Gyro_stick_activation_tracks_buttons_and_both_touches(GyroMouseMode mode,
+        bool initial, bool held, bool stillHeld, bool finger1, bool finger2, bool nextPress)
+    {
+        var gyro = new GyroStick(new GyroStickConfig { Mode = mode });
+        var rate = new Vector3(0, 120, 0);
+        var touch = new TouchPoint(true, 1, 100, 100);
+        (InputState Input, bool Active)[] samples =
+        [
+            (Inputs.Make(), initial), (Inputs.Make(Buttons.L2), held), (Inputs.Make(Buttons.L2), stillHeld),
+            (Inputs.Make(touch1: touch), finger1), (Inputs.Make(touch2: touch), finger2), (Inputs.Make(Buttons.L2), nextPress),
+        ];
+        for (int i = 0; i < samples.Length; i++)
+        {
+            Assert.Equal(samples[i].Active ? -1f : 0f, gyro.Input(rate, samples[i].Input, TimeSpan.FromMilliseconds(i * 10)).X);
+        }
+    }
+
+    [Fact]
+    public void Gyro_stick_restarts_smoothing_after_inactive_input()
+    {
+        var gyro = new GyroStick(new GyroStickConfig { Mode = GyroMouseMode.WhileHeld, Smoothing = 0.9 });
+        Assert.Equal(-1f, gyro.Input(new Vector3(0, 120, 0), Inputs.Make(Buttons.L2), TimeSpan.Zero).X);
+        Assert.Equal(0f, gyro.Input(default, Inputs.Make(), TimeSpan.FromMilliseconds(5)).X);
+        Assert.Equal(0.5f, gyro.Input(new Vector3(0, -60, 0), Inputs.Make(Buttons.L2), TimeSpan.FromMilliseconds(10)).X);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Gyro_is_added_to_raw_virtual_right_stick_after_swap_and_clamped(bool swap)
+    {
+        InputState input = Inputs.Make(left: new Stick(200, 200), right: new Stick(230, 230));
+        InputState transformed = EmulationInput.Transform(input, new EmulationConfig { SwapSticks = swap },
+            gyro: (0.8f, -0.8f));
+        Assert.Equal(new Stick(255, 255), transformed.Right);
+        Assert.Equal(swap ? input.Right : input.Left, transformed.Left);
+
+        transformed = EmulationInput.Transform(input, new EmulationConfig { SwapSticks = swap },
+            gyro: (0.2f, -0.2f));
+        Assert.Equal(swap ? new Stick(226, 226) : new Stick(255, 255), transformed.Right);
+    }
+
+    [Fact]
+    public void Triple_and_cycle_alone_mark_the_virtual_buttons_as_mapped()
+    {
+        ActionConfig action = ActionConfig.ForKeys(Tactile.Input.Key.A);
+        var profile = new Profile
+        {
+            Mapping = new MappingConfig
+            {
+                Enabled = true,
+                Buttons = Bind.Map(("cross", new Binding { Triple = action }), ("circle", new Binding { Cycle = [action] })),
+            },
+        };
+
+        Assert.Equal(Buttons.Cross | Buttons.Circle, EmulationInput.MappedButtons(profile));
+    }
+
+    [Fact]
     public void Without_config_input_passes_through()
     {
         InputState s = Inputs.Make(Buttons.Cross | Buttons.L1, new Stick(10, 20), new Stick(30, 40), l2: 100, r2: 200);

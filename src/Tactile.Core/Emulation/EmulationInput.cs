@@ -11,7 +11,8 @@ public static class EmulationInput
     /// Hidden buttons are dropped first, as the physical buttons they are, so a hidden source
     /// never presses its remap target. Then remap, then the stick swap.
     /// </summary>
-    public static InputState Transform(InputState s, EmulationConfig config, Buttons hidden = Buttons.None)
+    public static InputState Transform(InputState s, EmulationConfig config, Buttons hidden = Buttons.None,
+        (float X, float Y) gyro = default)
     {
         IReadOnlyDictionary<string, string> remap = config.Remap ?? new Dictionary<string, string>();
         Buttons source = s.Buttons & ~hidden;
@@ -62,15 +63,24 @@ public static class EmulationInput
             }
         }
 
+        Stick right = config.SwapSticks ? s.Left : s.Right;
+        if (gyro != default)
+        {
+            (float x, float y) = right.Normalized;
+            right = new Stick(ToByte(x + gyro.X), ToByte(-y - gyro.Y));
+        }
+
         return s with
         {
             Buttons = buttons,
             L2 = outL2,
             R2 = outR2,
             Left = config.SwapSticks ? s.Right : s.Left,
-            Right = config.SwapSticks ? s.Left : s.Right,
+            Right = right,
         };
     }
+
+    private static byte ToByte(float axis) => (byte)MathF.Round((Math.Clamp(axis, -1, 1) + 1) * 127.5f);
 
     /// <summary>Buttons the profile's keyboard/mouse mapping uses; empty while mapping is off.</summary>
     public static Buttons MappedButtons(Profile p)
@@ -111,7 +121,8 @@ public static class EmulationInput
     }
 
     private static bool IsBound(Binding? b) =>
-        b is not null && (b.Press?.Kind is not (null or ActionKind.None) || b.Hold is { Kind: not ActionKind.None } || b.Double is { Kind: not ActionKind.None });
+        b is not null && (b.Press?.Kind is not (null or ActionKind.None) || b.Hold is { Kind: not ActionKind.None } || b.Double is { Kind: not ActionKind.None }
+            || b.Triple is { Kind: not ActionKind.None } || b.Cycle is { Count: > 0 });
 
     private static Buttons Target(IReadOnlyDictionary<string, string> remap, Buttons b)
     {

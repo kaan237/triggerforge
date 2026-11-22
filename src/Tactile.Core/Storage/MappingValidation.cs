@@ -8,6 +8,7 @@ public static partial class Validation
 {
     public const int MaxMacros = 50;
     public const int MaxMacroSteps = 500;
+    public const int MaxCycleActions = 8;
     public const int MaxChordKeys = 4;
     public const int MaxRunPath = 260;
     public const int MaxRunArgs = 512;
@@ -70,11 +71,15 @@ public static partial class Validation
     private static Binding MapBinding(Binding? b, Func<ActionConfig, ActionConfig> f)
     {
         b ??= new();
+        ActionConfig[] cycle = (b.Cycle ?? []).Where(a => a is not null).Select(f)
+            .Where(a => a.Kind != ActionKind.None).ToArray();
         return b with
         {
             Press = f(b.Press ?? ActionConfig.None),
             Hold = b.Hold is null ? null : f(b.Hold),
             Double = b.Double is null ? null : f(b.Double),
+            Triple = b.Triple is { } triple && f(triple) is { Kind: not ActionKind.None } kept ? kept : null,
+            Cycle = cycle.Length == 0 ? null : cycle,
         };
     }
 
@@ -273,11 +278,21 @@ public static partial class Validation
     private static Binding BindingOf(Binding? b, string label, HashSet<string> macroIds, List<string> issues)
     {
         b ??= new();
+        ActionConfig[] cycle = (b.Cycle ?? []).Select(a => ActionOf(a, label, macroIds, issues))
+            .Where(a => a.Kind != ActionKind.None).Take(MaxCycleActions + 1).ToArray();
+        if (cycle.Length > MaxCycleActions)
+        {
+            issues.Add(Text.Pick($"{label}: cycle limited to {MaxCycleActions} actions.", $"{label}: döngü {MaxCycleActions} eylemle sınırlandı."));
+            cycle = cycle[..MaxCycleActions];
+        }
+
         return new Binding
         {
             Press = ActionOf(b.Press, label, macroIds, issues),
             Hold = Optional(b.Hold, label + Text.Pick(" (hold)", " (basılı tutma)"), macroIds, issues),
             Double = Optional(b.Double, label + Text.Pick(" (double press)", " (çift basma)"), macroIds, issues),
+            Triple = Optional(b.Triple, label + Text.Pick(" (triple press)", " (üçlü basma)"), macroIds, issues),
+            Cycle = cycle.Length == 0 ? null : cycle,
             HoldMs = Math.Clamp(b.HoldMs, 150, 2000),
             DoubleMs = Math.Clamp(b.DoubleMs, 100, 600),
             Turbo = b.Turbo,

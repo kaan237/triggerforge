@@ -12,6 +12,8 @@ internal interface IMappingHost
 
     void ShowApp();
 
+    void PulseConfirm() { }
+
     /// <summary>A runtime failure, shown as a <c>mapping</c> notice.</summary>
     void Report(Notice notice);
 }
@@ -174,14 +176,22 @@ internal sealed class ActionDispatcher
         switch (macro.Repeat)
         {
             case MacroRepeat.WhileHeld:
-                _worker.Post(() => _macros.Start(macro, loop: true, generation));
+                _worker.Post(() => ConfirmMacroStart(_macros.Start(macro, loop: true, generation)));
                 return new HeldAction { Macro = macro };
             case MacroRepeat.Toggle:
-                _worker.Post(() => _macros.Toggle(macro, generation));
+                _worker.Post(() => ConfirmMacroStart(_macros.Toggle(macro, generation)));
                 return null;
             default:
-                _worker.Post(() => _macros.Start(macro, loop: false, generation));
+                _worker.Post(() => ConfirmMacroStart(_macros.Start(macro, loop: false, generation)));
                 return null;
+        }
+    }
+
+    private void ConfirmMacroStart(bool started)
+    {
+        if (started)
+        {
+            _host.PulseConfirm();
         }
     }
 

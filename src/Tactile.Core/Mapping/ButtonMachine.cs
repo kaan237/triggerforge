@@ -7,7 +7,7 @@ namespace Tactile.Core;
 /// </summary>
 internal sealed class ButtonMachine
 {
-    private enum Phase { Idle, Ignored, Plain, Turbo, Pending, Fired, WaitDouble }
+    private enum Phase { Idle, Ignored, Plain, Turbo, Pending, Fired, WaitDouble, PendingSecond, WaitTriple }
 
     private readonly ActionDispatcher _actions;
     private Phase _phase;
@@ -17,19 +17,46 @@ internal sealed class ButtonMachine
     private TimeSpan _since;
     private TimeSpan _nextEdge;
     private bool _turboOn;
+    private int _cycleIndex;
+    private int _layerCycleIndex;
 
     public ButtonMachine(ActionDispatcher actions) => _actions = actions;
 
     public bool Idle => _phase == Phase.Idle && _latched is null;
 
-    public void Down(Binding? binding, TimeSpan now)
+    public void Down(Binding? binding, TimeSpan now, bool layered = false)
     {
         Update(now);
+        if (_phase == Phase.WaitTriple)
+        {
+            _active = _actions.Down(_binding!.Triple!, now);
+            _phase = Phase.Fired;
+            return;
+        }
+
         if (_phase == Phase.WaitDouble)
         {
+            if (_binding!.Triple is not null)
+            {
+                _since = now;
+                _phase = Phase.PendingSecond;
+                return;
+            }
+
             // Second press in time: double fires, held actions follow this press.
             _active = _actions.Down(_binding!.Double!, now);
             _phase = Phase.Fired;
+            return;
+        }
+
+        if (binding?.Cycle is { Count: > 0 } cycle)
+        {
+            _actions.Up(_latched);
+            _latched = null;
+            ref int index = ref (layered ? ref _layerCycleIndex : ref _cycleIndex);
+            _active = _actions.Down(cycle[index % cycle.Count], now);
+            index = (index + 1) % cycle.Count;
+            _phase = Phase.Plain;
             return;
         }
 
@@ -49,7 +76,7 @@ internal sealed class ButtonMachine
             return;
         }
 
-        if (binding.Hold is not null || binding.Double is not null)
+        if (binding.Hold is not null || binding.Double is not null || binding.Triple is not null)
         {
             _since = now;
             _phase = Phase.Pending;
@@ -93,7 +120,7 @@ internal sealed class ButtonMachine
 
                 break;
             case Phase.Pending:
-                if (_binding!.Double is not null)
+                if (_binding!.Double is not null || _binding.Triple is not null)
                 {
                     _since = now;
                     _phase = Phase.WaitDouble;
@@ -102,7 +129,11 @@ internal sealed class ButtonMachine
 
                 _actions.Tap(_binding.Press, now);
                 break;
-            case Phase.WaitDouble:
+            case Phase.PendingSecond:
+                _since = now;
+                _phase = Phase.WaitTriple;
+                return;
+            case Phase.WaitDouble or Phase.WaitTriple:
                 // Release without a press (state reset mid-press); keep waiting.
                 return;
         }
@@ -116,12 +147,12 @@ internal sealed class ButtonMachine
     {
         switch (_phase)
         {
-            case Phase.Pending when _binding!.Hold is { } hold && now - _since >= TimeSpan.FromMilliseconds(_binding.HoldMs):
+            case Phase.Pending or Phase.PendingSecond when _binding!.Hold is { } hold && now - _since >= TimeSpan.FromMilliseconds(_binding.HoldMs):
                 _active = _actions.Down(hold, now);
                 _phase = Phase.Fired;
                 break;
-            case Phase.WaitDouble when now - _since > TimeSpan.FromMilliseconds(_binding!.DoubleMs):
-                _actions.Tap(_binding.Press, now);
+            case Phase.WaitDouble or Phase.WaitTriple when now - _since > TimeSpan.FromMilliseconds(_binding!.DoubleMs):
+                _actions.Tap(_phase == Phase.WaitTriple ? _binding.Double ?? _binding.Press : _binding.Press, now);
                 _phase = Phase.Idle;
                 break;
             case Phase.Turbo:
@@ -164,6 +195,7 @@ internal sealed class ButtonMachine
         _active = null;
         _latched = null;
         _binding = null;
+        _cycleIndex = _layerCycleIndex = 0;
         _phase = Phase.Idle;
     }
 

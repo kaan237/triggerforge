@@ -44,6 +44,17 @@ internal sealed class HapticEngine : IDisposable
         }
     }
 
+    internal bool PulseConfirm()
+    {
+        if (!_state.Streaming || _disposed)
+        {
+            return false;
+        }
+
+        _mixer.PulseConfirm();
+        return true;
+    }
+
     internal IReadOnlyList<AudioApp> ListApps() => _audio.ListApps();
 
     // Called by the core's serialized configuration path, independently of WASAPI startup.

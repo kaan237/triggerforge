@@ -17,6 +17,18 @@ internal sealed class HapticMixer(Func<OutputState> output)
         .Select(i => FullScale * MathF.Sin(Tau * 250 * i / HapticReport.SampleRate) * (1f - i / (float)ClickFrames))
         .ToArray();
 
+    private static readonly float[] Confirm = new float[ClickFrames * 4];
+
+    static HapticMixer()
+    {
+        for (int i = 0; i < ClickFrames; i++)
+        {
+            Confirm[i] = Confirm[i + ClickFrames * 3] = Click[i] * 0.65f;
+        }
+    }
+
+    private int _confirmPending;
+    private int _confirmFrame;
     private readonly Lock _clickLock = new();
     private bool _connected;
     private bool _clicks;
@@ -31,7 +43,22 @@ internal sealed class HapticMixer(Func<OutputState> output)
     private Motor _left;
     private Motor _right;
 
-    internal void ResetRumble() => Volatile.Write(ref _resetRumble, 1);
+    internal void PulseConfirm()
+    {
+        lock (_clickLock)
+        {
+            _confirmPending++;
+        }
+    }
+
+    internal void ResetRumble()
+    {
+        Volatile.Write(ref _resetRumble, 1);
+        lock (_clickLock)
+        {
+            _confirmPending = _confirmFrame = 0;
+        }
+    }
 
     internal void ConfigureClicks(bool connected, bool enabled)
     {
@@ -87,6 +114,8 @@ internal sealed class HapticMixer(Func<OutputState> output)
         OutputState state = output();
         _left.SetTarget(state.RumbleLeft);
         _right.SetTarget(state.RumbleRight);
+        Span<float> confirm = stackalloc float[HapticReport.FramesPerReport];
+        confirm.Clear();
         int leftClicks, rightClicks, leftTail, rightTail;
         lock (_clickLock)
         {
@@ -97,6 +126,15 @@ internal sealed class HapticMixer(Func<OutputState> output)
             _leftTail = leftClicks;
             _rightTail = rightClicks;
             _leftPending = _rightPending = 0;
+            for (int i = 0; i < confirm.Length && _confirmPending > 0; i++)
+            {
+                confirm[i] = Confirm[_confirmFrame++];
+                if (_confirmFrame == Confirm.Length)
+                {
+                    _confirmFrame = 0;
+                    _confirmPending--;
+                }
+            }
         }
 
         for (int frame = 0; frame < HapticReport.FramesPerReport; frame++)
@@ -104,9 +142,9 @@ internal sealed class HapticMixer(Func<OutputState> output)
             int i = frame * 2;
             int tailIndex = frame + HapticReport.FramesPerReport;
             float tail = tailIndex < ClickFrames ? Click[tailIndex] : 0;
-            samples[i] = Quantize(samples[i] * audioStrength + _left.Next(50)
+            samples[i] = Quantize(samples[i] * audioStrength + _left.Next(50) + confirm[frame]
                 + (leftClicks * Click[frame] + leftTail * tail) * clickStrength);
-            samples[i + 1] = Quantize(samples[i + 1] * audioStrength + _right.Next(175)
+            samples[i + 1] = Quantize(samples[i + 1] * audioStrength + _right.Next(175) + confirm[frame]
                 + (rightClicks * Click[frame] + rightTail * tail) * clickStrength);
         }
     }

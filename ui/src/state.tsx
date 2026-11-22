@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { send, subscribe, type AppSettings, type DriverKind, type DriverProgress, type EmulationStatus, type HapticStatus, type Input, type NoticeKind, type Output, type Profile, type Status, type TelemetryRule, type UpdateStatus } from "./host";
+import { send, subscribe, type AppSettings, type DriverKind, type DriverProgress, type EmulationStatus, type HapticStatus, type Input, type NoticeKind, type Output, type Profile, type ProfileBackup, type Status, type TelemetryRule, type UpdateStatus } from "./host";
 import { L, setLanguage } from "./i18n";
 import { clone, deepEqual, normalizeProfile, normalizeSettings } from "./model";
 
@@ -10,6 +10,7 @@ type AppState = {
   liveInput: ReturnType<typeof createLiveInput>;
   output: Output | null;
   profiles: Profile[];
+  backups: ProfileBackup[] | null;
   activeId: string;
   settings: AppSettings | null;
   update: UpdateStatus | null;
@@ -28,6 +29,7 @@ type AppState = {
   edit: (fn: (p: Profile) => Profile) => void;
   saveDraft: () => void;
   revertDraft: () => void;
+  restoreBackup: (id: string) => void;
   telemetryDrafts: ReadonlyMap<string, TelemetryRule[]>;
   setTelemetryDraft: (id: string, rules?: TelemetryRule[]) => void;
 };
@@ -81,6 +83,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [liveInput] = useState(createLiveInput);
   const [output, setOutput] = useState<Output | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [backups, setBackups] = useState<ProfileBackup[] | null>(null);
   const [activeId, setActiveId] = useState("");
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [update, setUpdate] = useState<UpdateStatus | null>(null);
@@ -92,6 +95,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [draft, setDraft] = useState<Profile | null>(null);
   const [telemetryDrafts, setTelemetryDrafts] = useState<ReadonlyMap<string, TelemetryRule[]>>(new Map());
   const touched = useRef(false);
+  const restoringBackup = useRef(false);
+  const refreshRestoredDraft = useRef(false);
   const language = useRef<AppSettings["language"]>("en");
   const profilesRef = useRef<Profile[]>([]);
 
@@ -122,6 +127,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
         case "profiles": {
           const list = m.list.map((p) => normalizeProfile(p));
+          if (restoringBackup.current) {
+            restoringBackup.current = false;
+            refreshRestoredDraft.current = true;
+            setTelemetryDrafts(new Map());
+          }
           profilesRef.current = list;
           setProfiles(list);
           setActiveId(m.activeId);
@@ -141,6 +151,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setSettings(saved);
           break;
         }
+        case "backups":
+          setBackups(m.list);
+          break;
         case "foreground":
           setRecent(m.recent);
           break;
@@ -163,6 +176,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           push(m.kind, m.message, m.progress);
           break;
         case "error":
+          restoringBackup.current = false;
           push("error", m.message);
           break;
       }
@@ -173,8 +187,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Follow the stored active profile unless the user has unsaved edits.
   useEffect(() => {
+    const restored = refreshRestoredDraft.current;
+    if (restored) {
+      refreshRestoredDraft.current = false;
+      touched.current = false;
+    }
     setDraft((d) => {
       const active = profiles.find((p) => p.id === activeId) ?? null;
+      if (restored) {
+        const saved = profiles.find((p) => p.id === d?.id) ?? active;
+        return saved ? clone(saved) : null;
+      }
       if (!d || !touched.current) return active ? clone(active) : null;
       const base = profiles.find((p) => p.id === d.id);
       if (!base) {
@@ -206,6 +229,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDraft(active ? clone(active) : null);
   }, [activeId]);
 
+  const restoreBackup = useCallback((id: string) => {
+    if (restoringBackup.current) return;
+    restoringBackup.current = true;
+    send({ type: "backups.restore", id });
+  }, []);
+
   const setTelemetryDraft = useCallback((id: string, rules?: TelemetryRule[]) => {
     setTelemetryDrafts((drafts) => {
       const next = new Map(drafts);
@@ -216,8 +245,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AppState>(
-    () => ({ status, liveInput, output, profiles, activeId, settings, update, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, telemetryDrafts, setTelemetryDraft }),
-    [status, liveInput, output, profiles, activeId, settings, update, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, telemetryDrafts, setTelemetryDraft],
+    () => ({ status, liveInput, output, profiles, backups, activeId, settings, update, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, restoreBackup, telemetryDrafts, setTelemetryDraft }),
+    [status, liveInput, output, profiles, backups, activeId, settings, update, emulation, haptics, installs, recent, notices, dismiss, draft, draftBase, dirty, edit, saveDraft, revertDraft, restoreBackup, telemetryDrafts, setTelemetryDraft],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

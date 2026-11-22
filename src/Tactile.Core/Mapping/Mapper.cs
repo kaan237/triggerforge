@@ -6,8 +6,11 @@ namespace Tactile.Core;
 
 /// <summary>Active = enabled in the active profile, not paused, controller connected.</summary>
 /// <param name="BlockedBy">Exe name of an elevated foreground window that drops our input, else null.</param>
-public sealed record MappingStatus(bool Active, bool Paused, string? BlockedBy)
+public sealed record MappingStatus(bool Active, bool Paused, string? BlockedBy, string? PauseReason)
 {
+    public MappingStatus(bool Active, bool Paused, string? BlockedBy)
+        : this(Active, Paused, BlockedBy, Paused ? "ui" : null) { }
+
     public static MappingStatus Off { get; } = new(false, false, null);
 }
 
@@ -21,6 +24,7 @@ internal sealed class Mapper : IDisposable
     private readonly HeldOutputs _outputs;
     private readonly PointerOutput _pointer;
     private readonly ActionWorker _worker;
+    private readonly IMappingHost _host;
     private readonly MacroRunner _macros;
     private readonly ActionDispatcher _actions;
     private readonly bool _threaded;
@@ -43,6 +47,7 @@ internal sealed class Mapper : IDisposable
     public Mapper(InputPlatform platform, IMappingHost host, Func<TimeSpan> clock, bool threaded)
     {
         _threaded = threaded;
+        _host = host;
         _outputs = new HeldOutputs(platform.Injector);
         _pointer = new PointerOutput(platform.Injector);
         _worker = new ActionWorker(threaded, e => host.Report(new Notice(NoticeKinds.Mapping, $"Mapping error: {Text.English(e)}", $"Eşleme hatası: {e.Message}")));
@@ -115,7 +120,7 @@ internal sealed class Mapper : IDisposable
         }
     }
 
-    public void OnInput(InputState s, Vector3 gyroDegPerSec, TimeSpan now)
+    public void OnInput(InputState s, Vector3 gyroDegPerSec, TimeSpan now, bool suppressLayerPulse = false)
     {
         lock (_gate)
         {
@@ -130,12 +135,12 @@ internal sealed class Mapper : IDisposable
             Buttons changed = _prev ^ s.Buttons;
             if (changed != Buttons.None)
             {
-                ProcessButtons(s.Buttons, changed, now);
+                ProcessButtons(s.Buttons, changed, now, suppressLayerPulse);
             }
 
             _prev = s.Buttons;
             _pad.Input(s.Touch1, s.Touch2, s.IsDown(Buttons.Touchpad), now);
-            _gyro.Input(gyroDegPerSec, GyroEnabled(s.Buttons), now);
+            _gyro.Input(gyroDegPerSec, GyroEnabled(s.Buttons, s.Touch1.Active || s.Touch2.Active), now);
             _left.Input(s.Left, now);
             _right.Input(s.Right, now);
             _pointer.Flush(now);
@@ -231,9 +236,14 @@ internal sealed class Mapper : IDisposable
         _pad.Update(now);
     }
 
-    private void ProcessButtons(Buttons current, Buttons changed, TimeSpan now)
+    private void ProcessButtons(Buttons current, Buttons changed, TimeSpan now, bool suppressLayerPulse)
     {
         bool layerHeld = _layerButton != Buttons.None && (current & _layerButton) != 0;
+        if (!suppressLayerPulse && (changed & _layerButton) != 0)
+        {
+            _worker.Post(_host.PulseConfirm);
+        }
+
         foreach (Buttons b in ButtonNames.All)
         {
             if ((changed & b) == 0)
@@ -256,7 +266,8 @@ internal sealed class Mapper : IDisposable
             ButtonMachine machine = _machines[b];
             if (down)
             {
-                machine.Down(Lookup(b, layerHeld), now);
+                Binding? binding = Lookup(b, layerHeld, out bool layered);
+                machine.Down(binding, now, layered);
             }
             else
             {
@@ -265,21 +276,25 @@ internal sealed class Mapper : IDisposable
         }
     }
 
-    private Binding? Lookup(Buttons b, bool layerHeld)
+    private Binding? Lookup(Buttons b, bool layerHeld, out bool layered)
     {
         string name = ButtonNames.Name(b);
-        if (layerHeld && _config.Layer?.TryGetValue(name, out Binding? layered) == true)
+        if (layerHeld && _config.Layer?.TryGetValue(name, out Binding? binding) == true)
         {
-            return layered;
+            layered = true;
+            return binding;
         }
 
+        layered = false;
         return _config.Buttons?.GetValueOrDefault(name);
     }
 
-    private bool GyroEnabled(Buttons current) => _config.GyroMouse?.Mode switch
+    private bool GyroEnabled(Buttons current, bool touched) => _config.GyroMouse?.Mode switch
     {
         GyroMouseMode.Always => true,
         GyroMouseMode.WhileHeld => _gyroButton != Buttons.None && (current & _gyroButton) != 0,
+        GyroMouseMode.WhileReleased => (current & _gyroButton) == 0,
+        GyroMouseMode.WhileTouchpad => touched,
         GyroMouseMode.Toggle => _gyroLatched,
         _ => false,
     };
