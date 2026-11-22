@@ -80,6 +80,8 @@ public sealed class AppCore : IDisposable
     private readonly EmulationService? _emulation;
     private readonly UdpApiServer _udpApi;
     private readonly TelemetryListener _telemetry;
+    private readonly DsuServer _dsu;
+    private int _emulationMode = -1;
     private volatile SecondaryControllers? _secondary;
     private (DualSenseController? Source, RealController? Value) _real;
 
@@ -159,10 +161,13 @@ public sealed class AppCore : IDisposable
         }, SetControllerProfile, GetUdpControllerStatus, _outbox.Enqueue, getSlots: () => Controllers.Slots);
         _telemetry = new TelemetryListener(Now, () => ActiveProfile.Telemetry,
             layer => SetOutputLayerNow(IntegrationLayers.Telemetry, layer), _outbox.Enqueue);
+        _dsu = new DsuServer(Now, _outbox.Enqueue);
         _foreground.Changed += OnForeground;
         Profiles.Changed += Refresh;
         Settings.Changed += OnSettingsChanged;
         Controllers.PrimaryInput += OnPrimaryInput;
+        Controllers.IdentifiedSlotInput += OnSecondaryInput;
+        Controllers.SlotDisconnected += _dsu.Disconnect;
         Controllers.ConnectionChanged += OnConnection;
         ConfigureControllers();
         ConfigureIntegration();
@@ -230,7 +235,7 @@ public sealed class AppCore : IDisposable
 
     public SettingsStore Settings { get; }
 
-    public IntegrationStatus Integration => new(_udpApi.Status, _telemetry.Status);
+    public IntegrationStatus Integration => new(_udpApi.Status, _telemetry.Status, _dsu.Status);
 
     public void ReleaseIntegration() => _udpApi.Release();
 
@@ -517,6 +522,7 @@ public sealed class AppCore : IDisposable
         Settings.Changed -= OnSettingsChanged;
         _udpApi.Dispose();
         _telemetry.Dispose();
+        _dsu.Dispose();
         // The game layers clear and the journal is closed before output stops.
         _emulation?.Dispose();
         _disposed = true;
@@ -525,6 +531,8 @@ public sealed class AppCore : IDisposable
         _foreground.Changed -= OnForeground;
         Profiles.Changed -= Refresh;
         Controllers.PrimaryInput -= OnPrimaryInput;
+        Controllers.IdentifiedSlotInput -= OnSecondaryInput;
+        Controllers.SlotDisconnected -= _dsu.Disconnect;
         Controllers.ConnectionChanged -= OnConnection;
         _mapper.Dispose();
         if (_ownsForeground && _foreground is IDisposable d)
@@ -551,6 +559,7 @@ public sealed class AppCore : IDisposable
         bool profileChanged = false;
         AppSettings activeSettings;
         ControllerSlot? activeSlot;
+        string? settledExe;
         lock (_lock)
         {
             if (_disposed)
@@ -566,6 +575,7 @@ public sealed class AppCore : IDisposable
 
             IReadOnlyList<Profile> profiles = Profiles.All;
             ProfileSelection selection = _selector.Select(_foreground.Current, profiles, settings, mac, now);
+            settledExe = _selector.SettledForeground;
             if (!ReferenceEquals(selection.Profile, _active.Profile) || selection.Reason != _active.Reason)
             {
                 if (!ReferenceEquals(selection.Profile, _active.Profile))
@@ -643,9 +653,18 @@ public sealed class AppCore : IDisposable
             PulseConfirm(now);
         }
 
-        if (ReferenceEquals(activeSlot, Controllers.PrimarySlot))
+        if (ReferenceEquals(activeSlot, Controllers.PrimarySlot) && _emulation is { } emulation)
         {
-            _emulation?.Update(activeProfile, activeSettings, RealOf(activeSlot?.Controller));
+            emulation.Update(activeProfile, activeSettings, RealOf(activeSlot?.Controller), settledExe,
+                ProfileSelector.MatchGame(settledExe, Profiles.All) is not null || IsFullscreenGame(settledExe));
+            // The first tick establishes the baseline; later mode changes release held inputs.
+            int mode = (int)emulation.ResolvedMode;
+            int previousMode = Interlocked.Exchange(ref _emulationMode, mode);
+            if (previousMode >= 0 && previousMode != mode)
+            {
+                // Keys still held on the controller stay suppressed instead of counting as new presses.
+                _mapper.ReleaseAll();
+            }
         }
 
         if (sleepMac is not null)
@@ -656,6 +675,11 @@ public sealed class AppCore : IDisposable
         _mapper.Tick(now);
         Flush();
     }
+
+    /// <summary>A full-screen window of the settled exe counts as a game even when nothing lists it.</summary>
+    private bool IsFullscreenGame(string? settledExe) =>
+        settledExe is not null && _foreground.GetFullscreenWindow() is (true, { } exe) &&
+        string.Equals(AutoEmulationResolver.NormalizeExe(exe), AutoEmulationResolver.NormalizeExe(settledExe), StringComparison.Ordinal);
 
     /// <summary>Writes a computed state unless a newer one was computed meanwhile. True when the controller write went out.</summary>
     private bool Send(OutputState? toSend, long version, ControllerSlot? slot)
@@ -748,6 +772,8 @@ public sealed class AppCore : IDisposable
     private void OnPrimaryInput(ControllerSlot? slot, InputState s)
     {
         TimeSpan now = Now();
+        // Taken before anything else, so a disconnect that follows makes this report stale for the DSU server.
+        int dsuGeneration = _dsu.Generation(0);
         bool refresh;
         lock (_primaryInputLock)
         {
@@ -757,7 +783,7 @@ public sealed class AppCore : IDisposable
             }
 
             SynchronizePrimary(slot);
-            refresh = ProcessPrimaryInput(slot, s, now);
+            refresh = ProcessPrimaryInput(slot, s, now, dsuGeneration);
         }
 
         if (refresh)
@@ -768,10 +794,11 @@ public sealed class AppCore : IDisposable
         Flush();
     }
 
-    private bool ProcessPrimaryInput(ControllerSlot? slot, InputState s, TimeSpan now)
+    private bool ProcessPrimaryInput(ControllerSlot? slot, InputState s, TimeSpan now, int dsuGeneration)
     {
         bool firstInput;
         Vector3 gyro;
+        Vector3 accel;
         EdgeShortcut? shortcut;
         lock (_lock)
         {
@@ -786,6 +813,7 @@ public sealed class AppCore : IDisposable
             _latestInput = s;
             ImuCalibration imu = slot?.Controller.Details.Calibration ?? ImuCalibration.Identity;
             gyro = GyroCalibrationResult.Apply(imu.GyroDegPerSec(s.GyroRaw), _gyroBias);
+            accel = imu.AccelG(s.AccelRaw);
             _idle.Observe(s, now);
 
             if (_battery.Update(s.Battery, Settings.Current.LowBatteryWarnings) is int threshold)
@@ -808,6 +836,10 @@ public sealed class AppCore : IDisposable
         }
 
         _haptics.Observe(s);
+        if (slot is not null && Controllers.IsCurrent(slot))
+        {
+            _dsu.PublishInput(0, s, gyro, accel, slot.Controller.Details.Link, slot.Mac, dsuGeneration);
+        }
 
         if (firstInput)
         {
@@ -849,6 +881,20 @@ public sealed class AppCore : IDisposable
         }
 
         return false;
+    }
+
+    private void OnSecondaryInput(ControllerSlot slot, InputState s)
+    {
+        int dsuGeneration = _dsu.Generation(slot.Index);
+        if (slot.Index == 0 || _disposed || !Controllers.IsCurrent(slot))
+        {
+            return;
+        }
+
+        // The primary controller goes through its bias-corrected path in ProcessPrimaryInput.
+        ImuCalibration imu = slot.Controller.Details.Calibration;
+        _dsu.PublishInput(slot.Index, s, imu.GyroDegPerSec(s.GyroRaw), imu.AccelG(s.AccelRaw),
+            slot.Controller.Details.Link, slot.Mac, dsuGeneration);
     }
 
     private void Finish(GyroCalibrationResult result)
@@ -915,6 +961,13 @@ public sealed class AppCore : IDisposable
     private void ConfigureIntegration()
     {
         IntegrationSettings settings = Settings.Current.Integration;
+        if (_dsu.Status is { State: DsuListenerState.Listening } dsu &&
+            ((settings.UdpEnabled && dsu.Port == settings.UdpPort) ||
+             (settings.ForzaEnabled && dsu.Port == settings.ForzaPort)))
+        {
+            _dsu.Configure(settings with { DsuEnabled = false });
+        }
+
         if (settings.UdpEnabled && _telemetry.Status is
             { State: ForzaListenerState.Listening or ForzaListenerState.Receiving } forza && forza.Port == settings.UdpPort)
         {
@@ -924,6 +977,7 @@ public sealed class AppCore : IDisposable
 
         _udpApi.Configure(settings);
         _telemetry.Configure(settings);
+        _dsu.Configure(settings);
     }
 
     private UdpControllerStatus GetUdpControllerStatus(int index) =>

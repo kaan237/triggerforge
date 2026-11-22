@@ -213,6 +213,219 @@ public class VirtualPadTests
     }
 
     [Fact]
+    public void DualShock4_descriptors_and_feature_reports_match_declared_sizes()
+    {
+        using IUsbIpServer server = UsbIpServerFactory.Start();
+        var pad = Assert.IsType<VirtualDualShock4>(server.Create(VirtualKind.DualShock4, null));
+        Assert.Equal(Convert.FromHexString("12010002000000404C05CC09000101020001"), pad.DeviceDescriptor);
+        Assert.Equal(VirtualUsbDevice.SpeedHigh, pad.Speed);
+        Assert.Equal(4, pad.IntervalMs);
+        Assert.Equal(4, pad.InEndpoint);
+        Assert.Equal(3, pad.OutEndpoint);
+
+        byte[] report = pad.Control(new SetupPacket(0x81, 0x06, 0x2200, 0, 512), [], 0).Data;
+        byte[] config = pad.ConfigDescriptor;
+        Assert.Equal(41, config.Length);
+        Assert.Equal(Convert.FromHexString("09022900010100C0FA09040000020300000009211101000122"), config[..25]);
+        Assert.Equal(report.Length, BinaryPrimitives.ReadUInt16LittleEndian(config.AsSpan(25)));
+        Assert.Equal(Convert.FromHexString("0705840340000607050303400006"), config[27..]);
+        Assert.Equal(config[18..27], pad.Control(new SetupPacket(0x81, 0x06, 0x2100, 0, 9), [], 0).Data);
+
+        var bits = new Dictionary<(byte Kind, byte Id), int>();
+        byte id = 0;
+        int count = 0, size = 0;
+        for (int offset = 0; offset < report.Length;)
+        {
+            byte item = report[offset];
+            switch (item)
+            {
+                case 0x85: id = report[offset + 1]; break;
+                case 0x75: size = report[offset + 1]; break;
+                case 0x95: count = report[offset + 1]; break;
+                case 0x81 or 0x91 or 0xB1:
+                    bits[(item, id)] = bits.GetValueOrDefault((item, id)) + size * count;
+                    break;
+            }
+
+            int itemSize = item & 0x03;
+            offset += 1 + (itemSize == 3 ? 4 : itemSize);
+        }
+
+        Assert.Equal(63 * 8, bits[(0x81, 0x01)]);
+        Assert.Equal(31 * 8, bits[(0x91, 0x05)]);
+        (byte Id, int Bytes)[] required =
+        [
+            (0x02, 37), (0x04, 42), (0x08, 48), (0x10, 5), (0x11, 3), (0x12, 16), (0x13, 24),
+            (0x14, 21), (0x15, 45), (0x80, 7), (0x81, 7), (0x82, 6), (0x83, 2), (0xA3, 49),
+        ];
+        foreach (var feature in required)
+        {
+            Assert.Equal((feature.Bytes - 1) * 8, bits[(0xB1, feature.Id)]);
+        }
+
+        foreach (((byte kind, byte reportId), int bitCount) in bits)
+        {
+            if (kind != 0xB1) continue;
+            byte[] data = GetFeature(pad, reportId);
+            Assert.Equal(0, bitCount % 8);
+            Assert.Equal(bitCount / 8 + 1, data.Length);
+            Assert.Equal(reportId, data[0]);
+            if (reportId is not (0x02 or 0x12 or 0x81 or 0xA3))
+            {
+                Assert.All(data[1..], value => Assert.Equal(0, value));
+            }
+        }
+
+        Assert.Equal(UsbIpCodec.EPipe, pad.Control(new SetupPacket(0xA1, 0x01, 0x0377, 0, 64), [], 0).Status);
+    }
+
+    [Fact]
+    public void DualShock4_default_and_identity_calibration_and_version_are_valid()
+    {
+        using IUsbIpServer server = UsbIpServerFactory.Start();
+        var pad = Assert.IsType<VirtualDualShock4>(server.Create(VirtualKind.DualShock4, null));
+        byte[] calibration = GetFeature(pad, 0x02);
+        for (int axis = 0; axis < 3; axis++)
+        {
+            short plus = BinaryPrimitives.ReadInt16LittleEndian(calibration.AsSpan(7 + axis * 2));
+            short minus = BinaryPrimitives.ReadInt16LittleEndian(calibration.AsSpan(13 + axis * 2));
+            Assert.True(plus > minus);
+        }
+
+        Assert.True(BinaryPrimitives.ReadInt16LittleEndian(calibration.AsSpan(19)) > 0);
+        for (int i = 23; i <= 31; i += 4)
+        {
+            Assert.True(BinaryPrimitives.ReadInt16LittleEndian(calibration.AsSpan(i))
+                > BinaryPrimitives.ReadInt16LittleEndian(calibration.AsSpan(i + 2)));
+        }
+
+        Assert.Equal([0, 0], calibration[35..]);
+        Assert.Equal([0x81, 1, 0x54, 0x43, 0x41, 0x54, 0x02], GetFeature(pad, 0x81));
+        Assert.Equal([.. GetFeature(pad, 0x81)[1..], 8, 0x25, 0, .. new byte[6]], GetFeature(pad, 0x12)[1..]);
+
+        byte[] realCalibration = [0x05, .. calibration[1..35], 0xAA, 0xBB];
+        realCalibration[1] = 0x11;
+        byte[] pairing = [0x09, 6, 5, 4, 3, 2, 1, 0, 0, 0, 7, 8, 9, 10, 11, 12];
+        var real = Assert.IsType<VirtualDualShock4>(server.Create(VirtualKind.DualShock4, new(realCalibration, pairing, [])));
+        byte[] expectedReal = new byte[37];
+        expectedReal[0] = 0x02;
+        VirtualDualShock4.ConvertCalibration(realCalibration, expectedReal);
+        Assert.Equal(expectedReal, GetFeature(real, 0x02));
+        Assert.Equal([0x12, 6, 5, 4, 3, 2, 1, 8, 0x25, 0, 7, 8, 9, 10, 11, 12], GetFeature(real, 0x12));
+        Assert.Equal([0x81, 6, 5, 4, 3, 2, 1], GetFeature(real, 0x81));
+
+        byte[] version = GetFeature(real, 0xA3);
+        Assert.Equal("Jun  2 2018\0\0\0\0\0"u8.ToArray(), version[1..17]);
+        Assert.Equal("12:00:00\0\0\0\0\0\0\0\0"u8.ToArray(), version[17..33]);
+        Assert.Equal(0x0100, BinaryPrimitives.ReadUInt16LittleEndian(version.AsSpan(35)));
+        Assert.Equal(0x00000100u, BinaryPrimitives.ReadUInt32LittleEndian(version.AsSpan(41)));
+    }
+
+    [Fact]
+    public void DualShock4_calibration_reorders_gyro_ranges_to_usb_layout()
+    {
+        byte[] dualSense = new byte[41];
+        dualSense[0] = 0x05;
+        for (int i = 1; i < 35; i++)
+        {
+            dualSense[i] = (byte)i;
+        }
+
+        byte[] ds4 = new byte[37];
+        VirtualDualShock4.ConvertCalibration(dualSense, ds4);
+
+        Assert.Equal(dualSense[1..7], ds4[1..7]);
+        Assert.Equal([7, 8, 11, 12, 15, 16, 9, 10, 13, 14, 17, 18], ds4[7..19]);
+        Assert.Equal(dualSense[19..35], ds4[19..35]);
+    }
+
+    [Fact]
+    public void DualShock4_secondary_slots_have_unique_serial_and_default_mac()
+    {
+        using IUsbIpServer server = UsbIpServerFactory.Start();
+        for (int slot = 1; slot <= 3; slot++)
+        {
+            var pad = Assert.IsType<VirtualDualShock4>(server.CreateSecondaryPad(slot, VirtualKind.DualShock4, null));
+            Assert.Equal(3, pad.DeviceDescriptor[16]);
+            byte[] serial = pad.Control(new SetupPacket(0x80, 0x06, 0x0303, 0x0409, 255), [], 0).Data;
+            Assert.Equal($"TACTILE{slot}", System.Text.Encoding.Unicode.GetString(serial[2..]));
+            Assert.Equal(slot + 1, GetFeature(pad, 0x81)[1]);
+        }
+    }
+
+    [Fact]
+    public void DualShock4_input_report_packs_buttons_sticks_triggers_imu_touch_and_battery()
+    {
+        byte[] report = new byte[64];
+        Array.Fill(report, (byte)0xFF);
+        VirtualDualShock4.WriteInput(Sample with
+        {
+            Buttons = Sample.Buttons | Buttons.Create | Buttons.R2 | Buttons.L3 | Buttons.Mic,
+            Touch2 = new TouchPoint(true, 0x82, 2048, 255),
+            MicConnected = true,
+        }, 0xC9, report);
+
+        Assert.Equal(new byte[]
+        {
+            1, 10, 200, 255, 0, 0xA5, 0xF9, 0x27, 77, 255, 0x67, 0x45, 0x14,
+            0x9C, 0xFF, 0xD0, 0x07, 0x00, 0x80, 0x00, 0x20, 0x00, 0xE0, 0x2C, 0x01,
+            0, 0, 0, 0, 0, 0x75, 0, 0, 1, 0xC9, 5, 0x7F, 0xD7, 0x3A, 2, 0x7F, 0xF7, 0x0F,
+            0, 0x80, 0, 0, 0, 0x80, 0, 0, 0,
+            0, 0x80, 0, 0, 0, 0x80, 0, 0, 0,
+            0, 0, 0,
+        }, report);
+
+        VirtualDualShock4.WriteInput(Sample with
+        {
+            Buttons = Buttons.Up | Buttons.Down | Buttons.Left | Buttons.Right,
+            Battery = new Battery(100, ChargeState.Full),
+        }, 0x40, report);
+        Assert.Equal(8, report[5]);
+        Assert.Equal(0, report[7]);
+        Assert.Equal(0x3B, report[30]);
+        Assert.Equal([0x80, 0, 0, 0], report[39..43]);
+    }
+
+    [Fact]
+    public void DualShock4_output_report_raises_rumble_and_lightbar_feedback()
+    {
+        using IUsbIpServer server = UsbIpServerFactory.Start();
+        var pad = Assert.IsType<VirtualDualShock4>(server.Create(VirtualKind.DualShock4, null));
+        var got = new List<PadFeedback>();
+        pad.Feedback += got.Add;
+        byte[] report = [0x05, 1, 0, 0, 0x23, 0x45, 0x67, 0x89, 0xAB, .. new byte[23]];
+        var rgb = new Rgb(0x67, 0x89, 0xAB);
+
+        pad.Out(report, 1);
+        report[1] = 2;
+        Assert.Equal(0, pad.Control(new SetupPacket(0x21, 0x09, 0x0205, 0, 32), report, 2).Status);
+        report[1] = 3;
+        Assert.Equal(0, pad.Control(new SetupPacket(0x21, 0x09, 0x0205, 0, 31), report.AsSpan(1), 3).Status);
+        pad.Out([.. report, .. new byte[32]], 4);
+        pad.Out(report.AsSpan(1), 5);
+        pad.Out([.. report, .. new byte[33]], 5);
+        report[0] = 0x02;
+        pad.Out(report, 5);
+        pad.Control(new SetupPacket(0x21, 0x09, 0x0205, 0, 32), report, 5);
+        Assert.Equal(UsbIpCodec.EPipe, pad.Control(new SetupPacket(0x21, 0x09, 0x0202, 0, 32), report, 5).Status);
+
+        Assert.Equal(new PadFeedback[]
+        {
+            new DualShock4Feedback(1, true, 0x45, 0x23, false, rgb),
+            new DualShock4Feedback(2, false, 0x45, 0x23, true, rgb),
+            new DualShock4Feedback(3, true, 0x45, 0x23, true, rgb),
+            new DualShock4Feedback(4, true, 0x45, 0x23, true, rgb),
+        }, got);
+    }
+
+    private static byte[] GetFeature(VirtualUsbDevice pad, byte id)
+    {
+        ControlResult result = pad.Control(new SetupPacket(0xA1, 0x01, (ushort)(0x0300 | id), 0, 64), [], 0);
+        Assert.Equal(0, result.Status);
+        return result.Data;
+    }
+
+    [Fact]
     public void Xbox360_vendor_requests_follow_length_rules_and_output_raises_feedback()
     {
         using IUsbIpServer server = UsbIpServerFactory.Start();

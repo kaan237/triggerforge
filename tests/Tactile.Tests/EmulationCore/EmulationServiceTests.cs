@@ -339,4 +339,127 @@ public class EmulationServiceTests
         e.Update(Xbox, EmulationRig.Settings(), null);
         Assert.Equal(2, changes);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DualShock4_mode_attaches_over_bluetooth_and_usb_and_overlays_rumble_and_lightbar(bool usb)
+    {
+        var rig = new EmulationRig();
+        using EmulationService e = rig.Create();
+        Profile profile = EmulationRig.ProfileWith(EmulationMode.DualShock4) with { Rumble = new RumbleConfig { Strength = 0.5 } };
+
+        e.Update(profile, EmulationRig.Settings(), usb ? EmulationRig.Usb : EmulationRig.Bluetooth);
+
+        FakePad pad = Assert.Single(rig.Server.Pads);
+        Assert.Equal(VirtualKind.DualShock4, pad.Kind);
+        Assert.Equal(EmulationMode.DualShock4, e.Status.Mode);
+        Assert.True(e.Status.Attached);
+
+        pad.Raise(new DualShock4Feedback(0, HasRumble: true, Large: 200, Small: 100, HasLightbar: true, new Rgb(1, 2, 3)));
+        OutputState o = rig.Apply(OutputState.Default);
+        Assert.Equal(100, o.RumbleLeft);
+        Assert.Equal(50, o.RumbleRight);
+        Assert.Equal(new Rgb(1, 2, 3), o.Lightbar);
+
+        // A report that only sets the lightbar keeps the rumble the game set before.
+        pad.Raise(new DualShock4Feedback(0, HasRumble: false, 0, 0, HasLightbar: true, new Rgb(9, 8, 7)));
+        o = rig.Apply(OutputState.Default);
+        Assert.Equal((100, 50, new Rgb(9, 8, 7)), (o.RumbleLeft, o.RumbleRight, o.Lightbar));
+    }
+
+    [Fact]
+    public void Auto_mode_resolves_built_in_dualsense_games_user_overrides_and_xbox_fallback()
+    {
+        IReadOnlySet<string> builtIn = AutoEmulationResolver.BuiltInDualSenseGames;
+        Assert.NotEmpty(builtIn);
+        // The embedded list is in canonical form: lower-case file names with .exe, nothing else.
+        Assert.All(builtIn, name => Assert.Equal(AutoEmulationResolver.NormalizeExe(name), name));
+        Assert.Contains("ghostoftsushima.exe", builtIn);
+        Assert.Contains("returnal-win64-shipping.exe", builtIn);
+
+        Assert.Equal(EmulationMode.DualSense, AutoEmulationResolver.Resolve(EmulationMode.Auto, "ghostoftsushima.exe", null));
+        Assert.Equal(EmulationMode.DualSense, AutoEmulationResolver.Resolve(EmulationMode.Auto, @"C:\Games\GhostOfTsushima.exe", null));
+        Assert.Equal(EmulationMode.DualSense, AutoEmulationResolver.Resolve(EmulationMode.Auto, "returnal-win64-shipping.exe", null));
+        Assert.Equal(EmulationMode.Xbox360, AutoEmulationResolver.Resolve(EmulationMode.Auto, "eldenring.exe", null));
+        Assert.Equal(EmulationMode.Xbox360, AutoEmulationResolver.Resolve(EmulationMode.Auto, null, null));
+        Assert.Equal(EmulationMode.DualShock4, AutoEmulationResolver.Resolve(EmulationMode.DualShock4, "ghostoftsushima.exe", null));
+
+        var overrides = new Dictionary<string, EmulationMode>
+        {
+            ["eldenring.exe"] = EmulationMode.DualShock4,
+            ["ghostoftsushima.exe"] = EmulationMode.Xbox360,
+            [" Returnal-Win64-Shipping.exe "] = EmulationMode.Off,
+        };
+        Assert.Equal(EmulationMode.DualShock4, AutoEmulationResolver.Resolve(EmulationMode.Auto, "EldenRing.exe", overrides));
+        Assert.Equal(EmulationMode.Xbox360, AutoEmulationResolver.Resolve(EmulationMode.Auto, "ghostoftsushima.exe", overrides));
+        Assert.Equal(EmulationMode.Off, AutoEmulationResolver.Resolve(EmulationMode.Auto, "returnal-win64-shipping.exe", overrides));
+        Assert.Equal(EmulationMode.Xbox360, AutoEmulationResolver.Resolve(EmulationMode.Auto, "discord.exe", overrides));
+
+        Assert.True(AutoEmulationResolver.IsKnownGame("ghostoftsushima.exe", null));
+        Assert.True(AutoEmulationResolver.IsKnownGame("eldenring.exe", overrides));
+        Assert.False(AutoEmulationResolver.IsKnownGame("discord.exe", overrides));
+    }
+
+    [Fact]
+    public void Auto_mode_reattaches_only_when_settled_game_changes_and_submits_neutral_input_first()
+    {
+        var rig = new EmulationRig();
+        using EmulationService e = rig.Create();
+        Profile auto = EmulationRig.ProfileWith(EmulationMode.Auto);
+        AppSettings settings = EmulationRig.Settings();
+
+        // Nothing seen yet: Xbox 360.
+        e.Update(auto, settings, EmulationRig.Bluetooth, null);
+        Assert.Equal(VirtualKind.Xbox360, Assert.Single(rig.Server.Pads).Kind);
+
+        e.Update(auto, settings, EmulationRig.Bluetooth, "ghostoftsushima.exe");
+        Assert.Equal([VirtualKind.Xbox360, VirtualKind.DualSense], rig.Server.Pads.Select(p => p.Kind));
+        FakePad xbox = rig.Server.Pads[0];
+        InputState last = xbox.Submitted[^1];
+        Assert.Equal((Buttons.None, (byte)128, (byte)128, (byte)128, (byte)128, (byte)0, (byte)0),
+            (last.Buttons, last.Left.X, last.Left.Y, last.Right.X, last.Right.Y, last.L2, last.R2));
+        Assert.True(rig.Log.IndexOf("remove 1-1") < rig.Log.IndexOf("create DualSense 1-2"));
+
+        // Alt+Tab to chat, a browser, the shell or no window at all keeps the game's pad.
+        rig.Clear();
+        foreach (string? other in new[] { null, "explorer.exe", "discord.exe", "chrome.exe" })
+        {
+            e.Update(auto, settings, EmulationRig.Bluetooth, other);
+        }
+
+        Assert.Empty(rig.Log);
+        Assert.Equal(EmulationMode.DualSense, e.Status.Mode);
+        Assert.Equal("ghostoftsushima.exe", e.Status.AutoGame);
+
+        // A game with a profile rule that is not on the list does start a new resolution.
+        e.Update(auto, settings, EmulationRig.Bluetooth, "eldenring.exe", knownGame: true);
+        Assert.Equal(VirtualKind.Xbox360, rig.Server.Pads[^1].Kind);
+        Assert.Equal(3, rig.Server.Pads.Count);
+        Assert.Equal("eldenring.exe", e.Status.AutoGame);
+
+        // A user override makes an app known; only the file name is kept.
+        AppSettings withOverride = new()
+        {
+            Emulation = settings.Emulation with
+            {
+                GameModes = new Dictionary<string, EmulationMode> { ["emu.exe"] = EmulationMode.DualShock4 },
+            },
+        };
+        e.Update(auto, withOverride, EmulationRig.Bluetooth, @"D:\Tools\Emu.exe");
+        Assert.Equal(VirtualKind.DualShock4, rig.Server.Pads[^1].Kind);
+        Assert.Equal("Emu.exe", e.Status.AutoGame);
+    }
+
+    [Fact]
+    public void Auto_on_a_wired_dualsense_reports_the_resolved_mode_without_attaching()
+    {
+        var rig = new EmulationRig();
+        using EmulationService e = rig.Create();
+        e.Update(EmulationRig.ProfileWith(EmulationMode.Auto), EmulationRig.Settings(), EmulationRig.Usb, "ghostoftsushima.exe");
+
+        Assert.Empty(rig.Server.Pads);
+        Assert.Equal((EmulationMode.DualSense, false), (e.Status.Mode, e.Status.Attached));
+        Assert.Equal(EmulationMode.DualSense, e.Status.Slots[0].Mode);
+    }
 }

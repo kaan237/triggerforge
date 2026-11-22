@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Tactile.Device.DualSense;
 using Tactile.Input;
 
@@ -50,6 +51,8 @@ public sealed record IntegrationSettings
     public int ReleaseAfterSeconds { get; init; }
     public bool ForzaEnabled { get; init; }
     public int ForzaPort { get; init; } = 5555;
+    public bool DsuEnabled { get; init; }
+    public int DsuPort { get; init; } = 26760;
 }
 
 public sealed record EmulationSettings
@@ -63,4 +66,31 @@ public sealed record EmulationSettings
     public int HapticBuffer { get; init; } = 64;
     // 0x39 gave no sound on our controller in the 2026-11-19 hardware test; it stays an experimental option.
     public SpeakerPacket SpeakerPacket { get; init; } = SpeakerPacket.Single36;
+    /// <summary>Lower-case exe file name to the pad kind Auto uses for it (never Auto). At most 256.</summary>
+    [JsonConverter(typeof(GameModesConverter))]
+    public IReadOnlyDictionary<string, EmulationMode> GameModes { get; init; } = new Dictionary<string, EmulationMode>();
+
+    // Compared by content, so equal settings stay equal across separately built dictionaries.
+    public bool Equals(EmulationSettings? other) =>
+        other is not null && Enabled == other.Enabled && HideController == other.HideController && Audio == other.Audio &&
+        KeepAudioDefaults == other.KeepAudioDefaults && HapticBuffer == other.HapticBuffer &&
+        SpeakerPacket == other.SpeakerPacket && SameModes(GameModes, other.GameModes);
+
+    public override int GetHashCode() =>
+        HashCode.Combine(Enabled, HideController, Audio, KeepAudioDefaults, HapticBuffer, SpeakerPacket, GameModes?.Count ?? 0);
+
+    private static bool SameModes(IReadOnlyDictionary<string, EmulationMode>? a, IReadOnlyDictionary<string, EmulationMode>? b)
+    {
+        if (ReferenceEquals(a, b))
+        {
+            return true;
+        }
+
+        if ((a?.Count ?? 0) != (b?.Count ?? 0))
+        {
+            return false;
+        }
+
+        return a is null || b is null || a.All(pair => b.TryGetValue(pair.Key, out EmulationMode mode) && mode == pair.Value);
+    }
 }

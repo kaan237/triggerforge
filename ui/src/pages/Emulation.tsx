@@ -1,7 +1,8 @@
 import { L } from "../i18n";
-import { Fragment, useEffect } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { send, type ButtonName, type DriverKind, type DriverState, type DriverStatus, type EmulationConfig, type EmulationMode, type EmulationStatus, type GyroStickConfig } from "../host";
 import { buttonDefs, buttonLabel, gyroModes } from "../mapping";
+import { maxGameModeOverrides, normalizeExeName } from "../model";
 import { useApp } from "../state";
 import { Check, DraftBar, PageHead, Section, Segmented, Slider, Toggle, fixed, pct } from "../ui";
 
@@ -17,7 +18,16 @@ const stateLabel: Record<DriverState, string> = {
   get error() { return L("Error", "Hata"); },
 };
 
-const modeLabel: Record<EmulationMode, string> = { get off() { return L("Off", "Kapalı"); }, xbox360: "Xbox 360", dualSense: "DualSense" };
+const modeLabel: Record<EmulationMode, string> = {
+  get off() { return L("Off", "Kapalı"); }, xbox360: "Xbox 360", dualSense: "DualSense", dualShock4: "DualShock 4",
+  get auto() { return L("Auto (by game)", "Otomatik (oyuna göre)"); },
+};
+const overrideModes = (): { id: Exclude<EmulationMode, "auto">; label: string }[] => [
+  { id: "dualSense", label: "DualSense" },
+  { id: "xbox360", label: "Xbox 360" },
+  { id: "dualShock4", label: "DualShock 4" },
+  { id: "off", label: L("Off", "Kapalı") },
+];
 const audioLabel: Record<EmulationStatus["audio"], string> = { get off() { return L("Off", "Kapalı"); }, get ready() { return L("Ready", "Hazır"); }, get playing() { return L("Playing", "Oynatılıyor"); } };
 
 export function DriverCard({ driver }: { driver: DriverStatus }) {
@@ -57,6 +67,14 @@ function LiveStatus({ e }: { e: EmulationStatus }) {
     <dl className="kv emu-kv">
       <dt>{L("Virtual", "Sanal")}</dt>
       <dd>{e.attached ? L(`${modeLabel[e.mode]} connected`, `${modeLabel[e.mode]} takılı`) : L("disconnected", "takılı değil")}</dd>
+      {e.configuredMode === "auto" && (
+        <>
+          <dt>{L("Auto pick", "Otomatik seçim")}</dt>
+          <dd>
+            {e.autoGame ?? L("Desktop", "Masaüstü")} <span aria-hidden>→</span> <span className="chip">{modeLabel[e.mode]}</span>
+          </dd>
+        </>
+      )}
       <dt>{L("Physical", "Gerçek")}</dt>
       <dd>{e.hidden ? L("hidden from games", "oyunlardan gizli") : L("visible", "görünür")}</dd>
       <dt>{L("Audio interface", "Ses arayüzü")}</dt>
@@ -66,6 +84,100 @@ function LiveStatus({ e }: { e: EmulationStatus }) {
         {latency}
       </dd>
     </dl>
+  );
+}
+
+function GameOverrides() {
+  const { settings, recent } = useApp();
+  const [value, setValue] = useState("");
+  const [mode, setMode] = useState<Exclude<EmulationMode, "auto">>("dualSense");
+  const [picking, setPicking] = useState(false);
+  if (!settings) return null;
+  const overrides = settings.emulation.gameModes;
+  const rows = Object.entries(overrides);
+  const full = rows.length >= maxGameModeOverrides;
+  const save = (gameModes: typeof overrides) => send({ type: "settings.save", settings: { ...settings, emulation: { ...settings.emulation, gameModes } } });
+  const add = (exe: string) => {
+    const name = normalizeExeName(exe);
+    if (!name || (full && !(name in overrides))) return;
+    save({ ...overrides, [name]: mode });
+    setValue("");
+  };
+  const options = (recent ?? []).filter((r) => {
+    const name = normalizeExeName(r);
+    return name !== undefined && !(name in overrides);
+  });
+
+  return (
+    <Section title={L("Per-game overrides (Auto mode)", "Oyuna göre özel seçimler (Otomatik kip)")}>
+      <p className="hint">{L("Used when a profile's virtual controller type is Auto. A game listed here takes priority over the built-in list.", "Profilin sanal kontrolcü türü Otomatik iken kullanılır. Burada listelenen oyun, yerleşik listenin önüne geçer.")}</p>
+      {rows.length === 0 ? (
+        <p className="hint">{L("No overrides. Auto uses DualSense for supported games and Xbox 360 for everything else.", "Özel seçim yok. Otomatik kip desteklenen oyunlarda DualSense, diğerlerinde Xbox 360 kullanır.")}</p>
+      ) : (
+        <ul className="game-list">
+          {rows.map(([exe, current]) => (
+            <li key={exe}>
+              <span className="num">{exe}</span>
+              <span className="override-actions">
+                <select aria-label={L(`Virtual controller for ${exe}`, `${exe} için sanal kontrolcü`)} value={current}
+                  onChange={(e) => {
+                    const next = overrideModes().find(({ id }) => id === e.target.value);
+                    if (next) save({ ...overrides, [exe]: next.id });
+                  }}>
+                  {overrideModes().map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+                </select>
+                <button aria-label={L(`Remove ${exe}`, `${exe} kaldır`)} onClick={() => {
+                  const next = { ...overrides };
+                  delete next[exe];
+                  save(next);
+                }}>
+                  {L("Remove", "Kaldır")}
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form className="game-add" onSubmit={(e) => { e.preventDefault(); add(value); }}>
+        <input type="text" value={value} onChange={(e) => setValue(e.target.value)} placeholder={L("example.exe", "ornek.exe")} spellCheck={false}
+          aria-label={L("Game executable", "Oyunun exe dosyası")} />
+        <select aria-label={L("Virtual controller for new override", "Yeni seçim için sanal kontrolcü")} value={mode}
+          onChange={(e) => {
+            const next = overrideModes().find(({ id }) => id === e.target.value);
+            if (next) setMode(next.id);
+          }}>
+          {overrideModes().map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+        </select>
+        <button className="button" type="submit" disabled={!normalizeExeName(value) || full}>{L("Add", "Ekle")}</button>
+        <button className={picking ? "button on" : "button"} type="button" onClick={() => {
+          if (!picking) send({ type: "foreground.pick" });
+          setPicking(!picking);
+        }}>
+          {L("Choose from recent apps", "Son açılanlardan seç")}
+        </button>
+      </form>
+      {full && <p className="hint warn">{L(`At most ${maxGameModeOverrides} overrides.`, `En fazla ${maxGameModeOverrides} özel seçim eklenebilir.`)}</p>}
+      {picking && (
+        <div className="recent">
+          {recent === null ? (
+            <p className="hint">{L("Loading list…", "Liste alınıyor…")}</p>
+          ) : options.length === 0 ? (
+            <p className="hint">{L("No new apps to add.", "Eklenecek yeni uygulama yok.")}</p>
+          ) : (
+            <ul>
+              {options.map((r) => (
+                <li key={r}>
+                  <button disabled={full} onClick={() => add(r)}>
+                    <span className="num">{r}</span>
+                    <span className="faint">{L("add", "ekle")}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -146,6 +258,8 @@ function SystemPanel() {
         <Slider label={L("Haptics buffer", "Haptik tamponu")} min={16} max={128} value={s.hapticBuffer} onChange={(hapticBuffer) => save({ hapticBuffer })} />
         <p className="hint">{L("For haptics only. Smaller buffers reduce delay and larger buffers prevent dropouts.", "Yalnız haptik akışında küçük tampon gecikmeyi, büyük tampon kesintileri azaltır.")}</p>
       </Section>
+
+      <GameOverrides />
 
       <Section title={L("Drivers", "Sürücüler")}>
         {unavailable && <p className="hint warn">{L("Virtual controller unavailable on this system. Other features still work.", "Sanal kontrolcü bu sistemde başlatılamadı; diğer özellikler çalışmaya devam eder.")}</p>}
@@ -228,7 +342,7 @@ function RemapEditor({ config, onChange }: { config: EmulationConfig; onChange: 
 }
 
 function ProfilePanel() {
-  const { draft, edit, status } = useApp();
+  const { draft, edit, status, emulation } = useApp();
   if (!draft) return null;
   const c = draft.emulation;
   const set = (patch: Partial<EmulationConfig>) => edit((p) => ({ ...p, emulation: { ...p.emulation, ...patch } }));
@@ -254,11 +368,23 @@ function ProfilePanel() {
               { id: "off", label: L("Off", "Kapalı") },
               { id: "xbox360", label: "Xbox 360" },
               { id: "dualSense", label: "DualSense", disabled: usb && c.mode !== "dualSense" },
+              { id: "dualShock4", label: "DualShock 4" },
+              { id: "auto", label: modeLabel.auto },
             ]}
           />
         </div>
         {usb && (
-          <p className="hint emu-note">{L("Games already see your USB controller as a wired DualSense. DualSense mode requires Bluetooth. Xbox 360 mode works over either connection.", "Kontrolcü USB ile bağlı; oyunlar onu zaten kablolu DualSense olarak görür. DualSense kipi yalnız Bluetooth'ta çalışır, Xbox 360 kipi her iki bağlantıda da çalışır.")}</p>
+          <p className="hint emu-note">{L("Games already see your USB controller as a wired DualSense. DualSense mode requires Bluetooth. Xbox 360 and DualShock 4 modes work over either connection.", "Kontrolcü USB ile bağlı; oyunlar onu zaten kablolu DualSense olarak görür. DualSense kipi yalnız Bluetooth'ta çalışır, Xbox 360 ve DualShock 4 kipleri her iki bağlantıda da çalışır.")}</p>
+        )}
+        {c.mode === "auto" && (
+          <p className="hint emu-note">
+            {L("Auto picks DualSense for supported games and Xbox 360 for everything else.", "Otomatik kip desteklenen oyunlarda DualSense, diğerlerinde Xbox 360 seçer.")}
+            {emulation?.configuredMode === "auto" && (
+              <> {L(`Now: ${emulation.autoGame ?? "Desktop"} → ${modeLabel[emulation.mode]}.`, `Şu an: ${emulation.autoGame ?? "Masaüstü"} → ${modeLabel[emulation.mode]}.`)}</>
+            )}
+            {usb && " "}
+            {usb && L("Over USB, a DualSense game uses your wired controller directly.", "USB bağlantıda DualSense seçilen oyun kablolu kontrolcünüzü doğrudan kullanır.")}
+          </p>
         )}
         {c.mode !== "off" && (
           <p className="hint emu-note">{L("Online games may block virtual controllers or flag accounts. Check the game's rules before playing multiplayer.", "Çevrim içi oyunların hile koruması sanal kontrolcülere izin vermeyebilir ya da hesabı işaretleyebilir. Çok oyunculu oyunlarda oyunun kurallarına bakın.")}</p>

@@ -471,6 +471,15 @@ Yol haritası `docs/yol-haritasi.md` (Faz 10-15), dayanağı `docs/rakip-analizi
 - Testler 774/774, build 0 uyarı, arayüz önizlemede açıldı (Tuşlar → Akorlar, Tetikler, katman seçici).
 - Denenmeyenler (KH donanım listesi `docs/contract-phase11.md` §7): gerçek chord zamanlaması, Edge kolu ile katman, tetik kademeleri hissi, flick stick oyunda 360° kalibrasyon.
 
+### Faz 12 — Oyun uyumu → 1.3.0 (2026-11-22)
+
+**Faz 12 sonucu**
+- Araştırma (DS4 USB descriptor/raporları, DSU protokolü, oyun listesi kaynakları) Gemini'de; sözleşme `docs/contract-phase12.md` (Gemini taslağı; plan-audit: gömülü oyun exe listesi yalnız doğrulanmış adlar, kanonik biçim testi). İş A (sanal DS4) Codex, İş C (arayüz) agy Claude Sonnet, İş B (DSU + otomatik seçim) agy Sonnet'te başladı ve kotaya takıldı; kalan üç paket Codex'te. Codex 5 saatlik kotası %7'ye, Gemini Argon haftalık kotası bitince düzeltmeler KH'nin onayıyla Claude Sonnet alt ajanlarına verildi; denetimler Gemini Neon'da.
+- Özellikler: sanal DualShock 4 (USB v2 `054C:09CC`, HID; giriş, rumble + ışık geri bildirimi, kalibrasyon DS4 USB düzeninde, 14 feature raporu; ikincil yuvalarda da). DSU/cemuhook hareket sunucusu (`127.0.0.1`, varsayılan 26760, kapalı başlar; 4 yuva, CRC, istemci başına hız sınırı ve çoklu abonelik, 5 sn zaman aşımı, yeniden bağlanmada ve 32-bit sarmada tekdüze zaman damgası, kopma sonrası eski raporu yok sayan nesil sayacı). Profil `emulation.mode: auto`: kullanıcı exe seçimi > gömülü DualSense oyun listesi > Xbox 360; yalnız bilinen oyun (liste, seçim, profil oyun kuralı ya da tam ekran exe) değişince çözülür, Discord/tarayıcıya Alt+Tab pad'i değiştirmez; geçişte nötr giriş ve basılı tuşların bırakılması. USB'de DualSense çözülünce sanal pad takılmaz, durum "dualSense, takılı değil".
+- Denetim: code-review high 2 bulgu (Alt+Tab'da pad değişimi, DSU küresel hız sınırı), Gemini Neon 11; birleşince 12 madde + 4 eksik test. İki tekrar denetimde 5 + 2 kalan sorun daha (DSU zaman damgası uç durumları, kopma yarışı, kilitsiz otomatik çözüm, oyun seçimi okuma, liste testi) bulundu ve düzeltildi; son kontrol temiz.
+- Testler 805/805 (iki kez), build 0 uyarı, `npm run build` temiz; Sanal kontrolcü sayfası önizlemede açıldı.
+- Denenmeyenler (KH donanım listesi `docs/contract-phase12.md` §7): joy.cpl'de sanal DS4 ve bir DS4 oyunu, Steam/SDL'nin 507 baytlık v2 descriptor beklentisi (tam tablo doğrulanmadı), Cemu/Dolphin'de DSU gyro yönleri, otomatik kip geçişleri gerçek oyunlarda.
+
 ### Faz 9 — Yedek yol: Pico 2 W köprü (isteğe bağlı)
 
 Faz 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse: Pico 2 W firmware'i ile gerçek USB DualSense görünümü; uygulama aynı UI ve profil motoruyla Pico'yu yönetir. Referans: DS5Dongle (MIT).

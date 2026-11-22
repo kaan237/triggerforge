@@ -18,6 +18,8 @@ import type {
   Curve,
   CurvePoint,
   EmulationConfig,
+  EmulationMode,
+  EmulationSettings,
   LightEffect,
   Lightbar,
   Profile,
@@ -30,6 +32,7 @@ import type {
 
 // ---- defaults ----
 
+export const emulationModes: EmulationMode[] = ["off", "xbox360", "dualSense", "dualShock4", "auto"];
 export const defaultTrigger = (): TriggerConfig => ({ mode: "off", params: {}, zones: null, frequency: 0 });
 export const defaultTelemetryRule = (): TelemetryRule => ({
   signal: "brake", from: 0, to: 1, exponent: 1, target: "leftTrigger",
@@ -186,10 +189,11 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     runAsAdminHint: false,
     updates: { autoCheck: true },
     firstRunDone: false,
-    emulation: { enabled: true, hideController: true, audio: true, keepAudioDefaults: true, hapticBuffer: 64, speakerPacket: "single36" },
+    emulation: { enabled: true, hideController: true, audio: true, keepAudioDefaults: true, hapticBuffer: 64, speakerPacket: "single36", gameModes: {} },
     integration: {
       udpEnabled: false, udpPort: 6969, dsx: true, dsxPortFile: true,
       releaseAfterSeconds: 0, forzaEnabled: false, forzaPort: 5555,
+      dsuEnabled: false, dsuPort: 26760,
     },
   };
 }
@@ -240,6 +244,7 @@ export function normalizeProfile(p: Partial<Profile> & { id: string }): Profile 
     emulation: {
       ...d.emulation,
       ...p.emulation,
+      mode: emulationModes.includes(p.emulation?.mode as EmulationMode) ? p.emulation!.mode : d.emulation.mode,
       remap: { ...(p.emulation?.remap ?? {}) },
       gyroStick: {
         ...normalizeGyro(p.emulation?.gyroStick, d.emulation.gyroStick),
@@ -488,10 +493,33 @@ export function normalizeMacro(m: Partial<Macro>): Macro {
   return { ...defaultMacro(m.name ?? L("Macro", "Makro"), m.id ?? newId()), ...m, steps: (m.steps ?? []).map((s) => ({ ...s }) as MacroStep) };
 }
 
+export const maxGameModeOverrides = 256;
+
+// Lower-case .exe file name, as the host stores it; undefined when the text is not a usable name.
+export function normalizeExeName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const name = value.trim().split(/[\\/]/).pop()?.trim().toLowerCase() ?? "";
+  if (!name || name === ".exe" || /[<>:"|?*\u0000-\u001f]/.test(name)) return undefined;
+  return name.endsWith(".exe") ? name : `${name}.exe`;
+}
+
+function normalizeGameModes(value: unknown): EmulationSettings["gameModes"] {
+  const out: EmulationSettings["gameModes"] = {};
+  if (!value || typeof value !== "object") return out;
+  for (const [key, mode] of Object.entries(value)) {
+    const name = normalizeExeName(key);
+    if (name && (mode === "off" || mode === "xbox360" || mode === "dualSense" || mode === "dualShock4")) out[name] = mode;
+    if (Object.keys(out).length >= maxGameModeOverrides) break;
+  }
+  return out;
+}
+
 export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
   const d = defaultSettings();
-  const emulation = { ...d.emulation, ...s.emulation };
+  const emulation = { ...d.emulation, ...s.emulation, gameModes: normalizeGameModes(s.emulation?.gameModes) };
   if (emulation.speakerPacket !== "single36") emulation.speakerPacket = d.emulation.speakerPacket;
+  const dsuPort = typeof s.integration?.dsuPort === "number" && Number.isFinite(s.integration.dsuPort) && s.integration.dsuPort > 0
+    ? Math.min(65535, Math.max(1024, Math.trunc(s.integration.dsuPort))) : d.integration.dsuPort;
   const primaryController = s.primaryController?.trim().replaceAll("-", ":").toUpperCase();
   const combo = Array.isArray(s.pauseCombo)
     ? [...new Set(s.pauseCombo.map(normalizeButton).filter((button) => button !== undefined))].slice(0, 3)
@@ -514,7 +542,7 @@ export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
       ? Math.min(4, Math.max(1, Math.trunc(s.maxControllers)))
       : d.maxControllers,
     emulation,
-    integration: { ...d.integration, ...s.integration },
+    integration: { ...d.integration, ...s.integration, dsuEnabled: s.integration?.dsuEnabled === true, dsuPort },
     updates: { autoCheck: s.updates?.autoCheck !== false },
     firstRunDone: s.firstRunDone === true,
   };

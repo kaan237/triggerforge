@@ -242,6 +242,7 @@ public static partial class Validation
                 UdpPort = Math.Clamp(integration.UdpPort, 1024, 65535),
                 ReleaseAfterSeconds = Math.Clamp(integration.ReleaseAfterSeconds, 0, 3600),
                 ForzaPort = Math.Clamp(integration.ForzaPort, 1024, 65535),
+                DsuPort = Math.Clamp(integration.DsuPort <= 0 ? 26760 : integration.DsuPort, 1024, 65535),
             },
             Emulation = new EmulationSettings
             {
@@ -251,8 +252,31 @@ public static partial class Validation
                 KeepAudioDefaults = s.Emulation?.KeepAudioDefaults ?? true,
                 HapticBuffer = Math.Clamp(s.Emulation?.HapticBuffer ?? 64, 16, 128),
                 SpeakerPacket = Defined(s.Emulation?.SpeakerPacket ?? SpeakerPacket.Single36, SpeakerPacket.Single36),
+                GameModes = NormalizeGameModes(s.Emulation?.GameModes),
             },
         };
+    }
+
+    public const int MaxGameModeOverrides = 256;
+
+    private static Dictionary<string, EmulationMode> NormalizeGameModes(IReadOnlyDictionary<string, EmulationMode>? input)
+    {
+        var modes = new Dictionary<string, EmulationMode>(StringComparer.Ordinal);
+        foreach ((string key, EmulationMode mode) in input ?? new Dictionary<string, EmulationMode>())
+        {
+            if (modes.Count >= MaxGameModeOverrides)
+            {
+                break;
+            }
+
+            if (AutoEmulationResolver.IsOverrideMode(mode) && Enum.IsDefined(mode) &&
+                AutoEmulationResolver.NormalizeExe(key) is { } name)
+            {
+                modes.TryAdd(name, mode);
+            }
+        }
+
+        return modes;
     }
 
     internal static string? NormalizeMac(string? mac) =>

@@ -61,6 +61,7 @@ function PortField({ label, port, onSave, onInput }: {
 function Connections({ status }: { status: IntegrationStatus | null }) {
   const { settings } = useApp();
   const [forzaInput, setForzaInput] = useState<number>();
+  const [dsuInput, setDsuInput] = useState<number>();
   if (!settings) return null;
   const s = settings.integration;
   const save = (patch: Partial<IntegrationSettings>) => send({ type: "settings.save", settings: { ...settings, integration: { ...s, ...patch } } });
@@ -68,6 +69,11 @@ function Connections({ status }: { status: IntegrationStatus | null }) {
   const forza = status?.forza;
   const values = forza?.state === "receiving" ? forza.values : null;
   const forzaPort = forzaInput ?? s.forzaPort;
+  const dsu = status?.dsu;
+  const dsuPort = dsuInput ?? s.dsuPort;
+  const dsuLabel = !dsu ? L("Waiting…", "Bekleniyor…") : dsu.state === "off" ? L("Off", "Kapalı")
+    : dsu.state === "portBusy" ? L("Port in use", "Port kullanımda") : dsu.state === "portConflict" ? L("Port conflict", "Port çakışıyor")
+    : L(`Listening on :${dsu.port}`, `Dinliyor :${dsu.port}`);
   const udpLabel = !udp ? L("Waiting…", "Bekleniyor…") : udp.state === "off" ? L("Off", "Kapalı")
     : udp.state === "portBusy" ? L("Port in use", "Port kullanımda") : L(`Listening on :${udp.port}`, `Dinliyor :${udp.port}`);
 
@@ -121,6 +127,19 @@ function Connections({ status }: { status: IntegrationStatus | null }) {
           <dt>{signals.slipFront}</dt><dd className="num">{fixed(2)(values.slipFront)}</dd>
           <dt>{signals.slipRear}</dt><dd className="num">{fixed(2)(values.slipRear)}</dd>
         </dl>}
+      </Section>
+
+      <Section title={L("Motion server (DSU / Cemuhook)", "Hareket sunucusu (DSU / Cemuhook)")}>
+        <Toggle label={L("DSU motion server", "DSU hareket sunucusu")} checked={s.dsuEnabled} onChange={(dsuEnabled) => save({ dsuEnabled })}
+          hint={L("Streams gyro, accelerometer, touchpad, and buttons to Cemu, Dolphin, Ryujinx, and Yuzu on 127.0.0.1.", "Gyro, ivmeölçer, touchpad ve tuşları 127.0.0.1 üzerinden Cemu, Dolphin, Ryujinx ve Yuzu'ya aktarır.")} />
+        <PortField label={L("DSU port", "DSU portu")} port={s.dsuPort} onInput={(port) => setDsuInput(Number.isFinite(port) ? port : undefined)}
+          onSave={(dsuPort) => { save({ dsuPort }); setDsuInput(undefined); }} />
+        {(dsuPort === s.udpPort || dsuPort === s.forzaPort) && <p className="hint warn">{L("The DSU port must differ from the UDP and Forza ports.", "DSU portu UDP ve Forza portlarından farklı olmalı.")}</p>}
+        <p className="hint">{L("In the emulator, add a DSU server at 127.0.0.1 with this port.", "Emülatörde 127.0.0.1 adresi ve bu portla bir DSU sunucusu ekleyin.")}</p>
+        <p className={dsu?.state === "portBusy" || dsu?.state === "portConflict" ? "small warn" : "small muted-text"}>{dsuLabel}</p>
+        {dsu && dsu.state !== "off" && <p className="hint num">
+          {L(`${dsu.clients} clients`, `${dsu.clients} istemci`)} · {dsu.packets} {L("packets", "paket")}
+        </p>}
       </Section>
     </>
   );

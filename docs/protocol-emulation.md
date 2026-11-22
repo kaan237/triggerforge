@@ -957,3 +957,11 @@ this is verified on our hardware yet.
 - Mic with no data: zero-filled 192-byte packets every ms (keeps the host streaming).
 - Open (needs a capture): packets per URB Windows sends, whether it sends the endpoint
   frequency SET_CUR, its reaction to early/late completions, its `start_frame` values.
+
+## Virtual DualShock 4 (Phase 12)
+
+- USB v2 (`054C:09CC`), HID only: 41-byte configuration, interrupt IN `0x84` and OUT `0x03`, 4 ms interval.
+- Input report `0x01` is 64 bytes; IMU timestamp is `SensorTimestamp >> 4`; touchpad holds two contacts, maximum `1919 × 941`.
+- Output report `0x05` is 32 bytes (rumble and lightbar); on EP0 a 31-byte report without the ID is also accepted.
+- Feature reports answered: `0x02` calibration, `0x12` pairing, `0x81` device MAC (reversed byte order), `0xA3` version info; 14 feature reports with documented sizes. Secondary slots use serials `TACTILE1`–`TACTILE3`.
+- Not verified yet: the full 507-byte v2 report descriptor table and behaviour in Steam/SDL on real hardware.

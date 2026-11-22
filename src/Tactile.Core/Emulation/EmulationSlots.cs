@@ -110,6 +110,8 @@ public sealed partial class EmulationService
         }
 
         EmulationSettings settings = (primary?.Settings ?? new()) with { Audio = false, KeepAudioDefaults = false };
+        // Secondary profiles on Auto follow the same game as the primary.
+        string? exe = _autoExe;
         for (int index = 1; index <= _secondarySlots.Length; index++)
         {
             EmulationService? service = _secondarySlots[index - 1];
@@ -143,10 +145,10 @@ public sealed partial class EmulationService
                 }
 
                 if (!ReferenceEquals(profile, service._secondaryProfile) || real != service._wanted?.Controller ||
-                    settings != service._wanted?.Settings)
+                    settings != service._wanted?.Settings || exe != service._autoExe)
                 {
                     service._secondaryProfile = profile;
-                    service.UpdateWanted(profile, settings, real);
+                    service.UpdateWanted(profile, settings, real, exe, knownGame: true);
                 }
             }
         }
@@ -178,9 +180,7 @@ public sealed partial class EmulationService
                     continue;
                 }
 
-                EmulationMode mode = attached
-                    ? slot._kind == VirtualKind.DualSense ? EmulationMode.DualSense : EmulationMode.Xbox360
-                    : EmulationMode.Off;
+                EmulationMode mode = attached ? ModeOf(slot._kind) : EmulationMode.Off;
                 string? error = slot._error is { } failure ? Text.Pick(failure.En, failure.Tr) : slot._hideError?.Value;
                 slots.Add(new(slot._slotIndex, mode, attached, hidden, error));
             }

@@ -569,4 +569,108 @@ public class StoreTests
             Assert.NotNull(JsonSerializer.Deserialize<Profile>(File.ReadAllText(f), TactileJson.Options));
         }
     }
+
+    [Fact]
+    public void Backwards_compatibility_and_validation_for_phase12_settings_and_profiles()
+    {
+        using var legacy = new TempDir();
+        Directory.CreateDirectory(legacy.Profiles);
+        string id = Validation.NewId();
+        File.WriteAllText(Path.Combine(legacy.Profiles, id + ".json"), """
+            { "version": 1, "name": "Old", "emulation": { "mode": "dualSense" } }
+            """);
+        File.WriteAllText(Path.Combine(legacy.Path, "settings.json"), """
+            { "version": 1, "integration": { "udpPort": 9000 }, "emulation": { "hideController": false } }
+            """);
+        Assert.Equal(EmulationMode.DualSense, Assert.Single(new ProfileStore(legacy.Path).All).Emulation.Mode);
+        AppSettings old = new SettingsStore(legacy.Path).Current;
+        Assert.False(old.Integration.DsuEnabled);
+        Assert.Equal(26760, old.Integration.DsuPort);
+        Assert.Empty(old.Emulation.GameModes);
+        Assert.False(old.Emulation.HideController);
+
+        using var dir = new TempDir();
+        File.WriteAllText(Path.Combine(dir.Path, "settings.json"), """
+            {
+              "version": 1,
+              "integration": { "dsuEnabled": true, "dsuPort": 80 },
+              "emulation": { "gameModes": {
+                "  EldenRing.EXE ": "dualShock4",
+                "C:\\Games\\Returnal-Win64-Shipping.exe": "off",
+                "ghostoftsushima": "xbox360",
+                "auto.exe": "auto",
+                "typo.exe": "dualsens",
+                "number.exe": 2,
+                "bad<name>.exe": "off",
+                "": "off"
+              } }
+            }
+            """);
+        AppSettings settings = new SettingsStore(dir.Path).Current;
+        Assert.True(settings.Integration.DsuEnabled);
+        Assert.Equal(1024, settings.Integration.DsuPort);
+        Assert.Equal(new Dictionary<string, EmulationMode>
+        {
+            ["eldenring.exe"] = EmulationMode.DualShock4,
+            ["returnal-win64-shipping.exe"] = EmulationMode.Off,
+            ["ghostoftsushima.exe"] = EmulationMode.Xbox360,
+        }, settings.Emulation.GameModes.ToDictionary(m => m.Key, m => m.Value));
+
+        Assert.Equal(26760, Validation.Normalize(new AppSettings { Integration = new() { DsuPort = 0 } }).Integration.DsuPort);
+        Assert.Equal(65535, Validation.Normalize(new AppSettings { Integration = new() { DsuPort = 70000 } }).Integration.DsuPort);
+        var many = Enumerable.Range(0, 300).ToDictionary(i => $"game{i}.exe", _ => EmulationMode.DualSense);
+        Assert.Equal(Validation.MaxGameModeOverrides,
+            Validation.Normalize(new AppSettings { Emulation = new() { GameModes = many } }).Emulation.GameModes.Count);
+
+        string json = JsonSerializer.Serialize(settings, TactileJson.Options);
+        Assert.Equal(settings.Emulation.GameModes.OrderBy(m => m.Key),
+            JsonSerializer.Deserialize<AppSettings>(json, TactileJson.Options)!.Emulation.GameModes.OrderBy(m => m.Key));
+
+        var profiles = new ProfileStore(dir.Path);
+        Profile auto = profiles.Save(new Profile { Name = "Auto", Emulation = new EmulationConfig { Mode = EmulationMode.Auto } });
+        Assert.Equal(EmulationMode.Auto, new ProfileStore(dir.Path).All.Single(p => p.Id == auto.Id).Emulation.Mode);
+        Profile ds4 = profiles.Save(new Profile { Name = "DS4", Emulation = new EmulationConfig { Mode = EmulationMode.DualShock4 } });
+        Assert.Equal(EmulationMode.DualShock4, new ProfileStore(dir.Path).All.Single(p => p.Id == ds4.Id).Emulation.Mode);
+    }
+
+    [Fact]
+    public void Game_modes_keep_only_written_concrete_names_and_a_valid_duplicate_wins()
+    {
+        AppSettings settings = JsonSerializer.Deserialize<AppSettings>("""
+            { "emulation": { "gameModes": {
+              "a.exe": "OFF", "b.exe": "DualShock4", "c.exe": "xbox360", "d.exe": "dualSense",
+              "e.exe": "auto", "f.exe": "2", "g.exe": "1,2", "h.exe": "Off, Xbox360", "i.exe": 3, "j.exe": "",
+              "k.exe": "xbox360", "k.exe": "nope", "L.exe": "nope", "L.exe": "dualSense"
+            } } }
+            """, TactileJson.Options)!;
+        Assert.Equal(new SortedDictionary<string, EmulationMode>
+        {
+            ["a.exe"] = EmulationMode.Off,
+            ["b.exe"] = EmulationMode.DualShock4,
+            ["c.exe"] = EmulationMode.Xbox360,
+            ["d.exe"] = EmulationMode.DualSense,
+            ["k.exe"] = EmulationMode.Xbox360,
+            ["L.exe"] = EmulationMode.DualSense,
+        }, new SortedDictionary<string, EmulationMode>(settings.Emulation.GameModes.ToDictionary(m => m.Key, m => m.Value)));
+    }
+
+    [Fact]
+    public void Embedded_dualsense_game_list_is_canonical_in_its_raw_form()
+    {
+        using Stream stream = typeof(AutoEmulationResolver).Assembly.GetManifestResourceStream("dualsense-games.json")!;
+        using JsonDocument doc = JsonDocument.Parse(stream);
+        string[] list = doc.RootElement.GetProperty("executables").EnumerateArray().Select(e => e.GetString()!).ToArray();
+        Assert.NotEmpty(list);
+        Assert.All(list, name =>
+        {
+            Assert.Equal(name.Trim(), name);
+            Assert.Equal(name.ToLowerInvariant(), name);
+            Assert.EndsWith(".exe", name);
+            Assert.DoesNotContain((char)92, name);
+            Assert.DoesNotContain('/', name);
+        });
+        Assert.Equal(list.Distinct(StringComparer.Ordinal).Count(), list.Length);
+        Assert.Equal(list.Order(StringComparer.Ordinal), list);
+        Assert.Equal(list.Order(), AutoEmulationResolver.BuiltInDualSenseGames.Order());
+    }
 }

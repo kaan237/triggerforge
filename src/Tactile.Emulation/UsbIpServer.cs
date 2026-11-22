@@ -57,6 +57,7 @@ public sealed class UsbIpServer : IUsbIpServer
             {
                 VirtualKind.DualSense when audio => new VirtualDualSense.WithAudio(this, busNum, identity),
                 VirtualKind.DualSense => new VirtualDualSense(this, busNum, identity, slot),
+                VirtualKind.DualShock4 => new VirtualDualShock4(this, busNum, identity, slot),
                 _ => new VirtualXbox360(this, busNum, slot),
             };
             _pads.Add(pad);

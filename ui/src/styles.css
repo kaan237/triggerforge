@@ -493,6 +493,8 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 2px; }
 .game-list { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 1px; }
 .game-list li { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; background: var(--bg); border-radius: 3px; font-size: 13px; }
 .game-list button { font-size: 12px; color: var(--faint); }
+.game-list .override-actions { display: flex; align-items: center; gap: 8px; }
+.game-list .override-actions select { min-width: 120px; }
 .game-list button:hover { color: var(--warn); }
 .games > .hint { margin-bottom: 10px; }
 .game-add { display: flex; gap: 8px; flex-wrap: wrap; }

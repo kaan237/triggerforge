@@ -2,7 +2,7 @@ import { L } from "./i18n";
 // Browser-only stand-in for the host. Keeps profiles and settings in memory and fakes
 // controller input so every screen can be used without hardware.
 
-import type { Action, AppSettings, AudioApp, Binding, ControllerStatus, DriverKind, DriverState, EmulationStatus, HapticStatus, HostMessage, Output, Profile, ProfileBackup, TelemetryConfig, TelemetryRule, TelemetryValues, TriggerConfig, UdpStatus, UpdateStatus } from "./host";
+import type { Action, ActiveEmulationMode, AppSettings, AudioApp, Binding, ControllerStatus, DriverKind, DriverState, DsuStatus, EmulationMode, EmulationStatus, HapticStatus, HostMessage, Output, Profile, ProfileBackup, TelemetryConfig, TelemetryRule, TelemetryValues, TriggerConfig, UdpStatus, UpdateStatus } from "./host";
 import {
   clamp,
   clone,
@@ -73,6 +73,8 @@ const recentExes = [
   "firefox.exe",
   "Discord.exe",
 ];
+
+const nativeDualSenseGames = new Set(["ghostoftsushima.exe", "returnal-win64-shipping.exe", "cyberpunk2077.exe"]);
 
 const audioApps: AudioApp[] = [
   { pid: 1001, name: "Spotify.exe", display: "Spotify" },
@@ -148,6 +150,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   let udpHolding = true;
   let udpFormat: UdpStatus["format"] = "dsx";
   let forzaPackets = 1;
+  let dsuPackets = 0;
   let telemetry = sampleTelemetry(performance.now() / 1000);
   let activeId = profiles[0].id;
   let activeReason = "controllerDefault";
@@ -171,6 +174,13 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   let lastHaptics: HapticStatus | undefined;
 
   const active = () => profiles.find((p) => p.id === activeId) ?? profiles[0];
+
+  // "auto": a per-game override wins, then the native DualSense list, then Xbox 360.
+  function resolveMode(mode: EmulationMode, exe: string | null): ActiveEmulationMode {
+    if (mode !== "auto") return mode;
+    const name = exe?.toLowerCase() ?? "";
+    return settings.emulation.gameModes[name] ?? (nativeDualSenseGames.has(name) ? "dualSense" : "xbox360");
+  }
 
   let output: Output = {
     type: "output",
@@ -333,8 +343,15 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     }, 250);
   }
 
+  function dsuState(): DsuStatus["state"] {
+    const s = settings.integration;
+    if (!s.dsuEnabled) return "off";
+    return s.dsuPort === s.udpPort || s.dsuPort === s.forzaPort ? "portConflict" : "listening";
+  }
+
   function sendIntegration() {
     const s = settings.integration;
+    const dsu = dsuState();
     const elapsed = Math.floor(performance.now() - udpLastPacket);
     if (!s.udpEnabled || (s.releaseAfterSeconds > 0 && elapsed >= s.releaseAfterSeconds * 1000)) udpHolding = false;
     const forzaState = !s.forzaEnabled ? "off" : s.forzaPort === s.udpPort ? "portConflict" : "receiving";
@@ -349,6 +366,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         state: forzaState, port: s.forzaPort, format: forzaState === "receiving" ? "fh" : null,
         packets: forzaPackets, rejected: 0, values: forzaState === "receiving" ? telemetry : null,
       },
+      dsu: { state: dsu, port: s.dsuPort, clients: dsu === "listening" ? 1 : 0, packets: dsuPackets, rejected: 0 },
     });
   }
 
@@ -375,7 +393,9 @@ export function createSimulator(emit: (m: HostMessage) => void) {
 
   function emulationStatus(): EmulationStatus {
     const profile = active();
-    const mode = profile.emulation.mode;
+    const configuredMode = profile.emulation.mode;
+    const autoGame = profile.games[0] ?? null;
+    const mode = resolveMode(configuredMode, autoGame);
     const ready = drivers.usbIp.state === "ready" && (!settings.emulation.hideController || drivers.hidHide.state === "ready");
     const attached = settings.emulation.enabled && mode !== "off" && ready && emuError === null;
     const audio = attached && mode === "dualSense" && settings.emulation.audio
@@ -386,6 +406,8 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       available: true,
       enabled: settings.emulation.enabled,
       mode: attached ? mode : "off",
+      configuredMode,
+      ...(configuredMode === "auto" ? { autoGame } : {}),
       attached,
       audio,
       hidden: attached && settings.emulation.hideController,
@@ -398,7 +420,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
           if (!device || index === 0) return [];
           const selected = profiles.find((p) => p.id === sessionProfiles.get(device.mac)) ??
             profiles.find((p) => p.id === settings.controllerDefaults[device.mac]) ?? profile;
-          const mode = selected.emulation.mode;
+          const mode = resolveMode(selected.emulation.mode, selected.games[0] ?? null);
           const attached = settings.emulation.enabled && ready && mode !== "off";
           return [{ index, mode: attached ? mode : "off", attached, hidden: attached && settings.emulation.hideController }];
         }),
@@ -530,6 +552,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         forzaPackets += 30;
         telemetry = sampleTelemetry(t);
       }
+      if (dsuState() === "listening") dsuPackets += 250;
       sendIntegration();
     }
     // Slow drain so the low battery notice shows up once in a long session.

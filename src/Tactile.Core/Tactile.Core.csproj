@@ -10,5 +10,6 @@
     <ProjectReference Include="../Tactile.Audio/Tactile.Audio.csproj" />
   </ItemGroup>
   <ItemGroup><InternalsVisibleTo Include="Tactile.Tests" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Emulation\dualsense-games.json" LogicalName="dualsense-games.json" /></ItemGroup>
   <ItemGroup><ProjectReference Include="../Tactile.Localization/Tactile.Localization.csproj" /></ItemGroup>
 </Project>

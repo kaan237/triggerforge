@@ -199,7 +199,7 @@ internal partial class VirtualDualSense : VirtualUsbDevice
         Raise(new DualSenseOutputFeedback(timestamp, block.ToArray()));
     }
 
-    private static byte Hat(Buttons k)
+    internal static byte Hat(Buttons k)
     {
         bool up = (k & Buttons.Up) != 0, down = (k & Buttons.Down) != 0;
         bool left = (k & Buttons.Left) != 0, right = (k & Buttons.Right) != 0;
@@ -219,7 +219,7 @@ internal partial class VirtualDualSense : VirtualUsbDevice
         };
     }
 
-    private static void WriteVector(Span<byte> b, Vector3 v)
+    internal static void WriteVector(Span<byte> b, Vector3 v)
     {
         BinaryPrimitives.WriteInt16LittleEndian(b, ToShort(v.X));
         BinaryPrimitives.WriteInt16LittleEndian(b[2..], ToShort(v.Y));
@@ -228,7 +228,7 @@ internal partial class VirtualDualSense : VirtualUsbDevice
 
     private static short ToShort(float f) => (short)Math.Clamp(MathF.Round(f), short.MinValue, short.MaxValue);
 
-    private static void WriteTouch(Span<byte> t, TouchPoint p)
+    internal static void WriteTouch(Span<byte> t, TouchPoint p)
     {
         t[0] = (byte)((p.Active ? 0 : 0x80) | (p.Id & 0x7F));
         t[1] = (byte)p.X;
@@ -246,7 +246,7 @@ internal partial class VirtualDualSense : VirtualUsbDevice
     }
 
     // Zero bias, about ±2000 deg/s over the int16 range for the gyro and 1 g = 8192 counts for the accelerometer.
-    private static byte[] DefaultCalibration()
+    internal static byte[] DefaultCalibration()
     {
         byte[] f = new byte[41];
         short[] values =
@@ -264,7 +264,6 @@ internal partial class VirtualDualSense : VirtualUsbDevice
         return f;
     }
 
-    // Stable, locally administered fake MAC (stored reversed), then the two bytes seen after it.
     private static byte[] WithSerial()
     {
         byte[] descriptor = (byte[])Device.Clone();
@@ -272,7 +271,8 @@ internal partial class VirtualDualSense : VirtualUsbDevice
         return descriptor;
     }
 
-    private static byte[] DefaultPairing(int slot)
+    // Stable, locally administered fake MAC (stored reversed), then the two bytes seen after it.
+    internal static byte[] DefaultPairing(int slot)
     {
         byte[] f = new byte[20];
         byte[] mac = [0x02, 0x54, 0x41, 0x43, 0x54, (byte)(slot + 1)];

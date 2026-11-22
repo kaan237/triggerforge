@@ -15,7 +15,8 @@ public enum CurveKind { Linear, Exponential, Custom }
 
 public enum StickShape { Round, Square }
 
-public enum EmulationMode { Off, Xbox360, DualSense }
+/// <summary>Auto picks the pad kind per game; it never describes an attached pad.</summary>
+public enum EmulationMode { Off, Xbox360, DualSense, DualShock4, Auto }
 
 public enum AudioHapticSource { Off, System, App }
 public enum GameAudioMode { Both, Haptics, Speaker, Off }

@@ -77,3 +77,59 @@ internal sealed class LenientEnumConverterFactory : JsonConverterFactory
             writer.WriteStringValue(JsonNamingPolicy.CamelCase.ConvertName(value.ToString()));
     }
 }
+
+/// <summary>
+/// The per-game pad overrides. An entry whose mode this version does not know is left out
+/// instead of becoming Off, so a typo or a newer file never switches a pad off.
+/// </summary>
+internal sealed class GameModesConverter : JsonConverter<IReadOnlyDictionary<string, EmulationMode>>
+{
+    public override IReadOnlyDictionary<string, EmulationMode> Read(ref Utf8JsonReader reader, Type typeToConvert,
+        JsonSerializerOptions options)
+    {
+        var modes = new Dictionary<string, EmulationMode>();
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            reader.Skip();
+            return modes;
+        }
+
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            string key = reader.GetString() ?? "";
+            reader.Read();
+            if (reader.TokenType == JsonTokenType.String && ParseName(reader.GetString()) is { } mode)
+            {
+                // A repeated key (they differ only in case or spacing after cleaning) keeps the valid one.
+                modes[key] = mode;
+            }
+            else
+            {
+                reader.Skip();
+            }
+        }
+
+        return modes;
+    }
+
+    /// <summary>Only the written names of a concrete kind; numbers, lists of names and Auto do not count.</summary>
+    private static EmulationMode? ParseName(string? text) => text?.Trim().ToLowerInvariant() switch
+    {
+        "off" => EmulationMode.Off,
+        "xbox360" => EmulationMode.Xbox360,
+        "dualsense" => EmulationMode.DualSense,
+        "dualshock4" => EmulationMode.DualShock4,
+        _ => null,
+    };
+
+    public override void Write(Utf8JsonWriter writer, IReadOnlyDictionary<string, EmulationMode> value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        foreach ((string key, EmulationMode mode) in value)
+        {
+            writer.WriteString(key, JsonNamingPolicy.CamelCase.ConvertName(mode.ToString()));
+        }
+
+        writer.WriteEndObject();
+    }
+}

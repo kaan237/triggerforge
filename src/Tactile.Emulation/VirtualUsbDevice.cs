@@ -122,7 +122,7 @@ internal abstract class VirtualUsbDevice : IVirtualPad
             }
 
             _fresh = false;
-            return _input ??= BuildInput(Neutral);
+            return ReadInput(_input ??= BuildInput(Neutral));
         }
     }
 
@@ -130,12 +130,15 @@ internal abstract class VirtualUsbDevice : IVirtualPad
     {
         lock (_gate)
         {
-            return _input ??= BuildInput(Neutral);
+            return ReadInput(_input ??= BuildInput(Neutral));
         }
     }
 
     /// <summary>Called under the device lock; may keep counters.</summary>
     protected abstract byte[] BuildInput(InputState state);
+
+    /// <summary>Called per returned input report under the device lock, including interval repeats.</summary>
+    protected virtual byte[] ReadInput(byte[] report) => report;
 
     public abstract void Out(ReadOnlySpan<byte> data, long timestamp);
 

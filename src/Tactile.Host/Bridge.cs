@@ -512,13 +512,16 @@ internal sealed class Bridge
     /// <summary>Also sent every second while the window is on screen.</summary>
     public void PostEmulation()
     {
-        EmulationStatus s = _core.Emulation?.Status ?? EmulationStatus.Unavailable with { Error = Unavailable.Value };
+        EmulationStatus s = _core.Emulation?.Status ??
+            EmulationStatus.Unavailable with { Error = Unavailable.Value, ConfiguredMode = _core.ActiveProfile.Emulation.Mode };
         Post(new
         {
             type = "emulation",
             available = s.Available,
             enabled = _core.Settings.Current.Emulation.Enabled,
             mode = s.Mode,
+            configuredMode = s.ConfiguredMode,
+            autoGame = s.AutoGame,
             attached = s.Attached,
             hidden = s.Hidden,
             audio = s.Audio,
@@ -532,7 +535,7 @@ internal sealed class Bridge
     public void PostIntegration()
     {
         IntegrationStatus status = _core.Integration;
-        Post(new { type = "integration", status.Udp, status.Forza });
+        Post(new { type = "integration", status.Udp, status.Forza, status.Dsu });
     }
 
     private void PickRun()

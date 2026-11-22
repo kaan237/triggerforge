@@ -209,7 +209,9 @@ export type MappingStatus = { active: boolean; paused: boolean; pauseReason: "ui
 
 // ---- virtual controller (docs/contract-phase4.md) ----
 
-export type EmulationMode = "off" | "xbox360" | "dualSense";
+export type EmulationMode = "off" | "xbox360" | "dualSense" | "dualShock4" | "auto";
+// What is actually attached: "auto" always resolves to one of these.
+export type ActiveEmulationMode = Exclude<EmulationMode, "auto">;
 export type GyroStickConfig = GyroMouse & { antiDeadzone: number };
 
 export type EmulationConfig = {
@@ -222,7 +224,11 @@ export type EmulationConfig = {
 };
 
 export type SpeakerPacket = "double39" | "single36";
-export type EmulationSettings = { enabled: boolean; hideController: boolean; audio: boolean; keepAudioDefaults: boolean; hapticBuffer: number; speakerPacket: SpeakerPacket };
+export type EmulationSettings = {
+  enabled: boolean; hideController: boolean; audio: boolean; keepAudioDefaults: boolean; hapticBuffer: number; speakerPacket: SpeakerPacket;
+  // lower-case .exe file name -> virtual controller used when a profile is on "auto"
+  gameModes: Record<string, Exclude<EmulationMode, "auto">>;
+};
 
 export type DriverKind = "usbIp" | "hidHide";
 export type DriverState = "missing" | "ready" | "unsupported" | "error";
@@ -233,13 +239,15 @@ export type EmulationStatus = {
   audio: "off" | "ready" | "playing";
   available?: boolean;
   enabled: boolean;
-  mode: EmulationMode;
+  mode: ActiveEmulationMode;
+  configuredMode?: EmulationMode;
+  autoGame?: string | null;
   attached: boolean;
   hidden: boolean;
   drivers: DriverStatus[];
   latency: { p50Ms: number; p95Ms: number; samples: number };
   error: string | null;
-  slots: { index: number; mode: EmulationMode; attached: boolean; hidden: boolean; error?: string | null }[];
+  slots: { index: number; mode: ActiveEmulationMode; attached: boolean; hidden: boolean; error?: string | null }[];
 };
 
 export type DriverProgress = { type: "driver.progress"; kind: DriverKind; message: string; done: boolean; ok: boolean };
@@ -269,6 +277,8 @@ export type IntegrationSettings = {
   releaseAfterSeconds: number;
   forzaEnabled: boolean;
   forzaPort: number;
+  dsuEnabled: boolean;
+  dsuPort: number;
 };
 
 export type TelemetrySignal =
@@ -311,7 +321,14 @@ export type ForzaStatus = {
   rejected: number;
   values: TelemetryValues | null;
 };
-export type IntegrationStatus = { type: "integration"; udp: UdpStatus; forza: ForzaStatus };
+export type DsuStatus = {
+  state: "off" | "listening" | "portBusy" | "portConflict";
+  port: number;
+  clients: number;
+  packets: number;
+  rejected: number;
+};
+export type IntegrationStatus = { type: "integration"; udp: UdpStatus; forza: ForzaStatus; dsu?: DsuStatus };
 
 export type Profile = {
   version: number;

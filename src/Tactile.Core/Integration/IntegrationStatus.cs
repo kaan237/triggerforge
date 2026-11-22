@@ -2,7 +2,13 @@ using Tactile.Device.DualSense;
 
 namespace Tactile.Core.Integration;
 
-public sealed record IntegrationStatus(UdpStatus Udp, ForzaStatus Forza);
+public sealed record IntegrationStatus(UdpStatus Udp, ForzaStatus Forza, DsuStatus? Dsu = null);
+
+public enum DsuListenerState { Off, Listening, PortBusy, PortConflict }
+
+/// <param name="Packets">Datagrams sent to emulators.</param>
+/// <param name="Rejected">Datagrams received and dropped.</param>
+public sealed record DsuStatus(DsuListenerState State, int Port, int Clients, long Packets, long Rejected);
 
 public enum UdpListenerState { Off, Listening, PortBusy }
 public enum UdpFormat { Native, Dsx }

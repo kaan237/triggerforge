@@ -25,13 +25,19 @@ public sealed record EmulationStatus(
 {
     public IReadOnlyList<EmulationSlotStatus> Slots { get; init; } = [];
 
+    /// <summary>What the profile asks for; Auto while <see cref="Mode"/> shows the pad Auto picked.</summary>
+    public EmulationMode ConfiguredMode { get; init; }
+
+    /// <summary>The game exe Auto last decided on; null unless the profile is on Auto and one was seen.</summary>
+    public string? AutoGame { get; init; }
+
     public static EmulationStatus Unavailable { get; } = new(false, false, EmulationMode.Off, false, false, [], LatencySummary.Empty, null);
 
     /// <summary>Equal apart from latency, which moves all the time.</summary>
     public bool SameState(EmulationStatus other) =>
         Available == other.Available && Enabled == other.Enabled && Mode == other.Mode && Attached == other.Attached &&
         Hidden == other.Hidden && Error == other.Error && Audio == other.Audio && Drivers.SequenceEqual(other.Drivers) &&
-        Slots.SequenceEqual(other.Slots);
+        Slots.SequenceEqual(other.Slots) && ConfiguredMode == other.ConfiguredMode && AutoGame == other.AutoGame;
 }
 
 /// <summary>The real controller as the emulation needs it.</summary>
@@ -92,6 +98,11 @@ public sealed partial class EmulationService : IDisposable
     private IVirtualPad? _gyroPad;
     private volatile InputPlan _plan = new(new EmulationConfig(), Buttons.None, 1);
     private volatile bool _disposed;
+
+    private int _resolvedMode;
+    // The last game exe seen in front; shell windows and our own window never replace it.
+    private volatile string? _autoExe;
+    private volatile AutoResolution? _autoCache;
 
     // Current pad; only the worker (under _opLock) changes these.
     private volatile IVirtualPad? _pad;
@@ -191,27 +202,62 @@ public sealed partial class EmulationService : IDisposable
         }
     }
 
+    /// <summary>The resolved mode, or Off when emulation is disabled.</summary>
+    internal EmulationMode ResolvedMode => (EmulationMode)Volatile.Read(ref _resolvedMode);
+
     /// <summary>Called with every tick's view of the world; cheap when nothing changed.</summary>
-    internal void Update(Profile profile, AppSettings settings, RealController? controller)
+    /// <param name="foregroundExe">The settled foreground exe; only Auto mode looks at it.</param>
+    /// <param name="knownGame">True when a profile's game rule matches <paramref name="foregroundExe"/>.</param>
+    internal void Update(Profile profile, AppSettings settings, RealController? controller, string? foregroundExe = null,
+        bool knownGame = false)
     {
-        if (UpdateWanted(profile, settings.Emulation ?? new(), controller) ||
+        if (UpdateWanted(profile, settings.Emulation ?? new(), controller, foregroundExe, knownGame) ||
             (!_threaded && (_secondarySource is not null || SecondarySlots().Any())))
         {
             Signal();
         }
     }
 
-    private bool UpdateWanted(Profile? profile, EmulationSettings settings, RealController? controller)
+    private EmulationMode ResolveMode(EmulationMode configured, EmulationSettings settings)
+    {
+        if (configured != EmulationMode.Auto)
+        {
+            return configured;
+        }
+
+        string? exe = _autoExe;
+        if (_autoCache is { } cached && ReferenceEquals(cached.Modes, settings.GameModes) && cached.Exe == exe)
+        {
+            return cached.Mode;
+        }
+
+        EmulationMode mode = AutoEmulationResolver.Resolve(configured, exe, settings.GameModes);
+        _autoCache = new AutoResolution(settings.GameModes, exe, mode);
+        return mode;
+    }
+
+    private bool UpdateWanted(Profile? profile, EmulationSettings settings, RealController? controller,
+        string? foregroundExe = null, bool knownGame = false)
     {
         EmulationConfig config = profile?.Emulation ?? new();
-        _plan = new InputPlan(config,
-            _slotIndex == 0 && config.HideMappedButtons && profile is not null ? EmulationInput.MappedButtons(profile) : Buttons.None,
-            profile?.Rumble?.Strength ?? 1,
-            _slotIndex == 0 || profile is null ? null : new SecondaryAxes(profile), profile?.Id,
-            _slotIndex == 0 && profile?.Mapping is { Enabled: true, FlickStick.Enabled: true });
-        var wanted = new Wanted(profile?.Id ?? "", config.Mode, settings, controller);
+        // One step under the lock, so a slower earlier call cannot overwrite what a newer one decided.
         lock (_stateLock)
         {
+            // Only a game we know replaces the last one; other apps (chat, browser) leave the pad as it is.
+            if (!AutoEmulationResolver.IsAmbient(foregroundExe) &&
+                (knownGame || AutoEmulationResolver.IsKnownGame(foregroundExe, settings.GameModes)))
+            {
+                _autoExe = Path.GetFileName(foregroundExe?.Trim());
+            }
+
+            EmulationMode mode = ResolveMode(config.Mode, settings);
+            Volatile.Write(ref _resolvedMode, (int)(settings.Enabled ? mode : EmulationMode.Off));
+            _plan = new InputPlan(config,
+                _slotIndex == 0 && config.HideMappedButtons && profile is not null ? EmulationInput.MappedButtons(profile) : Buttons.None,
+                profile?.Rumble?.Strength ?? 1,
+                _slotIndex == 0 || profile is null ? null : new SecondaryAxes(profile), profile?.Id,
+                _slotIndex == 0 && profile?.Mapping is { Enabled: true, FlickStick.Enabled: true });
+            var wanted = new Wanted(profile?.Id ?? "", mode, settings, controller, config.Mode, _autoExe);
             if (wanted == _wanted)
             {
                 return false;
@@ -516,7 +562,12 @@ public sealed partial class EmulationService : IDisposable
             return null;
         }
 
-        return w.Mode == EmulationMode.DualSense ? VirtualKind.DualSense : VirtualKind.Xbox360;
+        return w.Mode switch
+        {
+            EmulationMode.DualSense => VirtualKind.DualSense,
+            EmulationMode.DualShock4 => VirtualKind.DualShock4,
+            _ => VirtualKind.Xbox360,
+        };
     }
 
     private void Start(VirtualKind kind, Wanted w, RealController controller)
@@ -537,7 +588,7 @@ public sealed partial class EmulationService : IDisposable
             pad = _slotIndex > 0 ? server.CreateSecondaryPad(_slotIndex, kind, controller.Identity)
                 : kind == VirtualKind.DualSense
                 ? server.CreateDualSense(controller.Identity, w.Settings.Audio)
-                : server.Create(kind, null);
+                : server.Create(kind, kind == VirtualKind.DualShock4 ? controller.Identity : null);
         }
         catch (Exception e)
         {
@@ -737,6 +788,9 @@ public sealed partial class EmulationService : IDisposable
         }
     }
 
+    private static readonly InputState NeutralInput = new(Buttons.None, new Stick(128, 128), new Stick(128, 128), 0, 0,
+        default, default, 0, default, default, new Battery(0, ChargeState.Discharging), false, false, false);
+
     /// <summary>Unhide, detach, remove. True when every step worked (or nothing was attached).</summary>
     private bool StopLocked()
     {
@@ -755,6 +809,15 @@ public sealed partial class EmulationService : IDisposable
         {
             pad.Feedback -= _padHandler;
             _padHandler = null;
+        }
+
+        // Nothing the game last saw may stay pressed on the way out.
+        try
+        {
+            pad.Submit(NeutralInput);
+        }
+        catch (Exception e) when (e is ObjectDisposedException or InvalidOperationException)
+        {
         }
 
         bool clean = Unhide();
@@ -833,15 +896,25 @@ public sealed partial class EmulationService : IDisposable
                 {
                     _gameFields |= OutputReport.ValidFields(block);
                     _game = OutputReport.ApplyState(block, _game);
-                    if (secondary is not null)
+                    sent = PushGame(route, secondary, strength);
+                    break;
+                }
+
+                case DualShock4Feedback ds4 when ds4.HasRumble || ds4.HasLightbar:
+                {
+                    if (ds4.HasRumble)
                     {
-                        secondary.SetFeedback(_game, _gameFields);
-                        return;
+                        _gameFields |= OutputFields.Rumble;
+                        _game = _game with { RumbleLeft = ds4.Large, RumbleRight = ds4.Small };
                     }
 
-                    OutputState game = _game;
-                    OutputFields fields = _gameFields;
-                    sent = _host.SetOutputLayer(GameLayer, o => route.IsCurrent ? GameOutput.Overlay(o, game, fields, strength) : o);
+                    if (ds4.HasLightbar)
+                    {
+                        _gameFields |= OutputFields.Lightbar;
+                        _game = _game with { Lightbar = ds4.Lightbar };
+                    }
+
+                    sent = PushGame(route, secondary, strength);
                     break;
                 }
 
@@ -855,6 +928,20 @@ public sealed partial class EmulationService : IDisposable
                 _latency.Add((_timestamp() - f.Timestamp) * 1000.0 / Stopwatch.Frequency);
             }
         }
+    }
+
+    /// <summary>Lays the game's accumulated output over the controller's. Under _feedbackLock; true when a controller write went out.</summary>
+    private bool PushGame(PadRoute route, SecondaryEmulationConnection? secondary, double strength)
+    {
+        if (secondary is not null)
+        {
+            secondary.SetFeedback(_game, _gameFields);
+            return false;
+        }
+
+        OutputState game = _game;
+        OutputFields fields = _gameFields;
+        return _host.SetOutputLayer(GameLayer, o => route.IsCurrent ? GameOutput.Overlay(o, game, fields, strength) : o);
     }
 
     /// <summary>The 47-byte state block: given as is, or inside a 48/63/64-byte report 0x02.</summary>
@@ -956,7 +1043,14 @@ public sealed partial class EmulationService : IDisposable
     private EmulationStatus BuildStatus()
     {
         IVirtualPad? pad = _pad;
-        EmulationMode mode = pad is null ? EmulationMode.Off : _kind == VirtualKind.DualSense ? EmulationMode.DualSense : EmulationMode.Xbox360;
+        EmulationMode mode = pad is null ? EmulationMode.Off : ModeOf(_kind);
+        if (pad is null && _slotIndex == 0 && _wanted is { Mode: EmulationMode.DualSense, Controller.Link: Link.Usb, Settings.Enabled: true })
+        {
+            // The wired DualSense itself is the pad; nothing of ours is attached.
+            mode = EmulationMode.DualSense;
+        }
+
+        EmulationMode configured = _wanted?.ConfiguredMode ?? EmulationMode.Off;
         return new EmulationStatus(
             Available: _server is not null,
             Enabled: _wanted?.Settings.Enabled ?? true,
@@ -972,8 +1066,17 @@ public sealed partial class EmulationService : IDisposable
         {
             Slots = BuildSlots(new(0, mode, pad is not null, pad is not null && _hiddenId is not null,
                 _error is { } slotError ? Text.Pick(slotError.En, slotError.Tr) : null)),
+            ConfiguredMode = configured,
+            AutoGame = configured == EmulationMode.Auto ? _wanted?.ForegroundExe : null,
         };
     }
+
+    private static EmulationMode ModeOf(VirtualKind kind) => kind switch
+    {
+        VirtualKind.DualSense => EmulationMode.DualSense,
+        VirtualKind.DualShock4 => EmulationMode.DualShock4,
+        _ => EmulationMode.Xbox360,
+    };
 
     private void RaiseIfChanged()
     {
@@ -1014,11 +1117,14 @@ public sealed partial class EmulationService : IDisposable
         return found.Length > 0;
     }
 
-    private sealed record Wanted(string ProfileId, EmulationMode Mode, EmulationSettings Settings, RealController? Controller)
+    private sealed record Wanted(string ProfileId, EmulationMode Mode, EmulationSettings Settings, RealController? Controller,
+        EmulationMode ConfiguredMode, string? ForegroundExe)
     {
         public (string ProfileId, EmulationMode Mode, bool Audio, SecondaryEmulationConnection? Secondary) FailureKey =>
             (ProfileId, Mode, Mode == EmulationMode.DualSense && Settings.Audio, Controller?.Secondary);
     }
+
+    private sealed record AutoResolution(IReadOnlyDictionary<string, EmulationMode>? Modes, string? Exe, EmulationMode Mode);
 
     private sealed record InputPlan(EmulationConfig Config, Buttons Hidden, double RumbleStrength, SecondaryAxes? Axes = null,
         string? ProfileId = null, bool FlickStickEnabled = false);

@@ -107,6 +107,62 @@ public class UsbIpServerTests
     }
 
     [Fact]
+    public void Full_dualshock4_session_over_loopback()
+    {
+        using IUsbIpServer server = UsbIpServerFactory.Start();
+        IVirtualPad pad = server.Create(VirtualKind.DualShock4, null);
+        PadFeedback? feedback = null;
+        pad.Feedback += f => Volatile.Write(ref feedback, f);
+        using var client = new FakeUsbIpClient(server.Port);
+
+        byte[] import = client.Import(pad.BusId);
+        Assert.Equal(320, import.Length);
+        Assert.Equal([0x05, 0x4C, 0x09, 0xCC], import[(8 + 0x12C)..(8 + 0x130)]);
+        WaitFor(() => pad.Imported);
+
+        var (header, device) = client.Control(new SetupPacket(0x80, 0x06, 0x0100, 0, 18));
+        Assert.Equal(0, header.Field14);
+        Assert.Equal([0x4C, 0x05, 0xCC, 0x09], device[8..12]);
+        (header, byte[] config) = client.Control(new SetupPacket(0x80, 0x06, 0x0200, 0, 41));
+        Assert.Equal(0, header.Field14);
+        Assert.Equal(41, config.Length);
+        ushort reportLength = BinaryPrimitives.ReadUInt16LittleEndian(config.AsSpan(25));
+        (header, byte[] descriptor) = client.Control(new SetupPacket(0x81, 0x06, 0x2200, 0, reportLength));
+        Assert.Equal(0, header.Field14);
+        Assert.Equal(reportLength, descriptor.Length);
+        (header, _) = client.Control(new SetupPacket(0x00, 0x09, 1, 0, 0));
+        Assert.Equal(0, header.Field14);
+        (header, byte[] calibration) = client.Control(new SetupPacket(0xA1, 0x01, 0x0302, 0, 37));
+        Assert.Equal(0, header.Field14);
+        Assert.Equal(37, calibration.Length);
+        Assert.Equal(0x02, calibration[0]);
+        Assert.NotEqual(0, BinaryPrimitives.ReadInt16LittleEndian(calibration.AsSpan(7)));
+
+        pad.Submit(State);
+        uint inputSequence = client.SendSubmit(4, true, 64);
+        (header, byte[] input) = client.ReadReply(true);
+        Assert.Equal(inputSequence, header.SeqNum);
+        Assert.Equal(0, header.Field14);
+        Assert.Equal(64, input.Length);
+        Assert.Equal([1, 1, 2, 3, 4, 0x48, 0, 0, 5, 6], input[..10]);
+        Assert.Equal(0, input[34]);
+        client.SendSubmit(4, true, 64);
+        (_, byte[] repeat) = client.ReadReply(true);
+        Assert.Equal(4, repeat[7]);
+        Assert.Equal(1, repeat[34]);
+
+        byte[] output = [0x05, 3, 0, 0, 0x10, 0x20, 0x30, 0x40, 0x50, .. new byte[23]];
+        uint outputSequence = client.SendSubmit(3, false, 32, payload: output);
+        (header, _) = client.ReadReply(false);
+        Assert.Equal(outputSequence, header.SeqNum);
+        Assert.Equal(0, header.Field14);
+        Assert.Equal(32, header.Length);
+        WaitFor(() => Volatile.Read(ref feedback) is not null);
+        var actual = Assert.IsType<DualShock4Feedback>(feedback);
+        Assert.Equal(new DualShock4Feedback(actual.Timestamp, true, 0x20, 0x10, true, new Rgb(0x30, 0x40, 0x50)), actual);
+    }
+
+    [Fact]
     public void Interval_repeats_current_state_without_new_input()
     {
         using IUsbIpServer server = UsbIpServerFactory.Start();

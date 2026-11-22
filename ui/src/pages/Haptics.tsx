@@ -91,7 +91,7 @@ export function Haptics() {
         </p>
         {config && (
           <>
-            {draft.emulation.mode === "dualSense" && (
+            {(draft.emulation.mode === "dualSense" || draft.emulation.mode === "auto") && (
               <Section title={L("Game haptics", "Oyun haptiği")}>
                 <div className="row-field">
                   <Segmented
