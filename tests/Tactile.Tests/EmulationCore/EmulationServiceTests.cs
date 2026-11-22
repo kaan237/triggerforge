@@ -80,6 +80,22 @@ public class EmulationServiceTests
         Assert.Equal(new Stick((byte)(physical.X + 26), physical.Y), pad.Submitted[^1].Right);
     }
 
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Flick_centers_the_virtual_stick_only_while_mapping_is_enabled_and_active(bool enabled, bool active)
+    {
+        var rig = new EmulationRig();
+        using EmulationService service = rig.Create();
+        Profile profile = Xbox with { Mapping = new() { Enabled = enabled, FlickStick = new() { Enabled = true } } };
+        InputState input = Inputs.Make(right: new Stick(200, 40));
+        service.Update(profile, EmulationRig.Settings(), EmulationRig.Bluetooth);
+        service.OnInput(input, mappingActive: active);
+        Assert.Equal(enabled && active ? new Stick(128, 128) : input.Right,
+            Assert.Single(rig.Server.Last!.Submitted).Right);
+    }
+
     [Fact]
     public void Hide_switch_off_attaches_without_hiding_and_without_needing_hidhide()
     {

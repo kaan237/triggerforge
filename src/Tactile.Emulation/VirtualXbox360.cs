@@ -84,11 +84,13 @@ internal sealed class VirtualXbox360 : VirtualUsbDevice
         BinaryPrimitives.WriteInt16LittleEndian(r[12..], AxisInverted(s.Right.Y));
     }
 
-    // 0..255 onto the full int16 range: 0 → -32768, 255 → 32767.
-    internal static short Axis(byte v) => (short)(v * 257 - 32768);
+    internal static short Axis(byte v) => ScaleAxis(v - 128, v > 128 ? 127 : 128);
 
-    // DualSense Y grows downwards, XInput Y grows upwards: 0 → 32767, 255 → -32768.
-    internal static short AxisInverted(byte v) => (short)(32767 - v * 257);
+    // DualSense Y grows downwards, XInput Y grows upwards.
+    internal static short AxisInverted(byte v) => ScaleAxis(128 - v, v > 128 ? 127 : 128);
+
+    private static short ScaleAxis(int delta, int range) =>
+        (short)(delta * (delta < 0 ? 32768 : 32767) / range);
 
     public override void Out(ReadOnlySpan<byte> data, long timestamp)
     {

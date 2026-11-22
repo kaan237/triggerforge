@@ -462,6 +462,15 @@ Yol haritası `docs/yol-haritasi.md` (Faz 10-15), dayanağı `docs/rakip-analizi
 - Testler 710/710, `dotnet build` 0 uyarı, `npm run build` temiz; arayüz tarayıcı önizlemesinde (Profiller → günlük yedekler, Ayarlar → duraklatma kısayolu) denendi.
 - Denenmeyenler (KH donanım listesi `docs/contract-phase10.md` §7): gerçek global hotkey, tam ekran oyunda duraklatma, gyro ratchet ve gyro stick yönleri, BT/USB onay darbeleri, gerçek yedek/geri yükleme.
 
+### Faz 11 — Tuş motoru v2 → 1.2.0 (2026-11-22)
+
+**Faz 11 sonucu**
+- Davranış araştırması Gemini'de (Steam Input, JoyShockMapper, reWASD belgeleri; yalnız davranış, kod alınmadı). Sözleşme `docs/contract-phase11.md` (Gemini taslağı; plan-audit 2 düzeltme: `layers` tek gerçek kaynak, eski `layerButton`/`layer` yalnız ayna; flick stick açıkken sanal pad sağ stiği ortada). İş A (`src/`+`tests/`) ve İş B (`ui/`) aynı anda Codex'te.
+- Özellikler: chord (2-3 tuş, pencere 20-300 ms, bileşen bastırma, 3'lü öncelik, chord'a girmeyen tuşlarda gecikme yok); 4'e kadar shift katmanı (hold/toggle, aktivatör herhangi bir tuş ya da Edge Fn/kol, alttaki katmana düşme, geçişte basılı her şey bırakılır; eski profiller otomatik göç); L2/R2 yumuşak/tam çekiş (additive, exclusive, hipFire; histerezis); stick dış/iç halka eylemleri; flick stick (sağ stick → fare, snap, ölü açı, yumuşatma, 360° kalibrasyon ve gecikmeli test dönüşü; gyro fare aynı kalibrasyonu kullanabilir).
+- Denetim: code-review high 1 (iki chord tuşu aynı anda bırakılınca TimeSpan taşması → çökme), Codex 8, Gemini 5; birleşince 12 madde. Sürüm numarası elle, kalan 11'i Codex düzeltti (öne çıkanlar: flick merkezlemesi ana şalteri yok sayıyordu, touchpad chord'u fazladan tık üretiyordu, hipFire sonucu işlem sırasına bağlıydı, katman geçişinde stick tamamen kilitleniyordu, gyro toggle sıfırlanıyordu, Xbox raporunda Y merkezi -129'du). Gemini tekrar denetimi: hepsi tamam, yeni bulgu yok.
+- Testler 774/774, build 0 uyarı, arayüz önizlemede açıldı (Tuşlar → Akorlar, Tetikler, katman seçici).
+- Denenmeyenler (KH donanım listesi `docs/contract-phase11.md` §7): gerçek chord zamanlaması, Edge kolu ile katman, tetik kademeleri hissi, flick stick oyunda 360° kalibrasyon.
+
 ### Faz 9 — Yedek yol: Pico 2 W köprü (isteğe bağlı)
 
 Faz 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse: Pico 2 W firmware'i ile gerçek USB DualSense görünümü; uygulama aynı UI ve profil motoruyla Pico'yu yönetir. Referans: DS5Dongle (MIT).

@@ -77,7 +77,7 @@ internal sealed class Bridge
                 return;
             }
 
-            if ((type is "mapping.togglePause" or "backups.list" or "backups.restore") && (!appSource || !_ready))
+            if ((type is "mapping.togglePause" or "mapping.testTurn" or "backups.list" or "backups.restore") && (!appSource || !_ready))
             {
                 return;
             }
@@ -279,6 +279,11 @@ internal sealed class Bridge
             case "mapping.togglePause":
                 _core.ToggleUserPause();
                 PostStatus();
+                break;
+
+            case "mapping.testTurn":
+                _core.StartTestTurn(Int(m, "counts", 500, 30000, clamp: true),
+                    m.TryGetProperty("delayMs", out _) ? Int(m, "delayMs", 0, 5000, clamp: true) : 2000);
                 break;
 
             case "backups.list":
@@ -872,19 +877,19 @@ internal sealed class Bridge
     private static string? OptStr(JsonElement m, string name) =>
         m.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
-    private static int Int(JsonElement m, string name, int min, int max)
+    private static int Int(JsonElement m, string name, int min, int max, bool clamp = false)
     {
         if (!m.TryGetProperty(name, out JsonElement v) || v.ValueKind != JsonValueKind.Number || !v.TryGetDouble(out double d))
         {
             throw new BadMessage(new LocalizedMessage($"Missing field: {name}", $"Eksik alan: {name}"));
         }
 
-        if (double.IsNaN(d) || d < min || d > max)
+        if (!double.IsFinite(d) || (!clamp && (d < min || d > max)))
         {
             throw new BadMessage(new LocalizedMessage($"{name} must be between {min} and {max}.", $"{name} {min}-{max} arası olmalı."));
         }
 
-        return (int)Math.Round(d);
+        return (int)Math.Round(Math.Clamp(d, min, max));
     }
 
     private static float Float(JsonElement m, string name) =>

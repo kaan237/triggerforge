@@ -21,6 +21,14 @@ public enum GyroAxis { Yaw, Roll }
 
 public enum StickMappingMode { Off, Keys, Mouse, Scroll }
 
+public enum LayerMode { Hold, Toggle }
+
+public enum TriggerStageMode { Off, Additive, Exclusive, HipFire }
+
+public enum StickRingMode { Off, Outer, Inner }
+
+public enum FlickSnapMode { Off, Four, Eight }
+
 public enum MacroRepeat { Once, WhileHeld, Toggle }
 
 public enum MacroOp { Down, Tap, Up, MouseDown, MouseUp, Click, Wheel, Delay }
@@ -36,9 +44,61 @@ public sealed record MappingConfig
     public IReadOnlyDictionary<string, Binding> Buttons { get; init; } = new Dictionary<string, Binding>();
     /// <summary>Second layer; a button missing here uses its base binding.</summary>
     public IReadOnlyDictionary<string, Binding> Layer { get; init; } = new Dictionary<string, Binding>();
+    public IReadOnlyList<MappingLayer> Layers { get; init; } = [];
+    public int ChordWindowMs { get; init; } = 50;
+    public IReadOnlyList<ButtonChord> Chords { get; init; } = [];
+    public TriggerMappingPair Triggers { get; init; } = new();
     public TouchpadMapping Touchpad { get; init; } = new();
     public GyroMouseConfig GyroMouse { get; init; } = new();
     public StickMappingPair Sticks { get; init; } = new();
+    public FlickStickConfig FlickStick { get; init; } = new();
+
+    internal IEnumerable<MappingLayer> ShiftLayers() => Layers is { Count: > 0 }
+        ? Layers
+        : [new MappingLayer { Button = LayerButton?.Trim().ToLowerInvariant() ?? "", Buttons = Layer }];
+}
+
+public sealed record MappingLayer
+{
+    public string Name { get; init; } = "";
+    /// <summary>Empty uses the positional default: PS for the first layer, none for the others.</summary>
+    public string Button { get; init; } = "";
+    public LayerMode Mode { get; init; }
+    public IReadOnlyDictionary<string, Binding> Buttons { get; init; } = new Dictionary<string, Binding>();
+}
+
+public sealed record ButtonChord
+{
+    public IReadOnlyList<string> Buttons { get; init; } = [];
+    public ActionConfig Action { get; init; } = ActionConfig.None;
+}
+
+public sealed record TriggerMappingPair
+{
+    public TriggerMapping Left { get; init; } = new();
+    public TriggerMapping Right { get; init; } = new();
+}
+
+public sealed record TriggerMapping
+{
+    public TriggerStageMode Mode { get; init; }
+    public double SoftThreshold { get; init; } = 0.25;
+    public double FullThreshold { get; init; } = 0.95;
+    public double Hysteresis { get; init; } = 0.05;
+    public int HipFireMs { get; init; } = 80;
+    public ActionConfig Soft { get; init; } = ActionConfig.None;
+    public ActionConfig Full { get; init; } = ActionConfig.None;
+}
+
+public sealed record FlickStickConfig
+{
+    public bool Enabled { get; init; }
+    public int CountsPer360 { get; init; } = 6545;
+    public double Threshold { get; init; } = 0.90;
+    public int FlickTimeMs { get; init; } = 100;
+    public FlickSnapMode Snap { get; init; }
+    public double DeadzoneAngle { get; init; }
+    public double Smoothing { get; init; } = 0.2;
 }
 
 /// <summary>What one button (or touchpad zone) does: press, hold, double press, turbo, toggle.</summary>
@@ -153,6 +213,7 @@ public sealed record GyroMouseConfig
     public double Smoothing { get; init; } = 0.2;
     /// <summary>deg/s, 0-5.</summary>
     public double Deadzone { get; init; } = 0.5;
+    public bool UseCalibration { get; init; }
 }
 
 public sealed record StickMappingPair
@@ -169,6 +230,10 @@ public sealed record StickMapping
     public double Threshold { get; init; } = 0.5;
     /// <summary>0.1-5. Mouse: full tilt = 1200 px/s × speed; scroll: 15 notches/s × speed.</summary>
     public double Speed { get; init; } = 1.0;
+    public StickRingMode RingMode { get; init; }
+    public double RingThreshold { get; init; } = 0.90;
+    public double RingHysteresis { get; init; } = 0.05;
+    public ActionConfig RingAction { get; init; } = ActionConfig.None;
 }
 
 public sealed record StickKeys

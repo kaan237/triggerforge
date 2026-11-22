@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Tactile.Core;
+using Tactile.Device.DualSense;
 using Tactile.Input;
 
 namespace Tactile.Tests;
@@ -7,6 +8,85 @@ namespace Tactile.Tests;
 [Collection("Localization")]
 public class MappingValidationTests
 {
+    [Fact]
+    public void Phase_11_layers_and_chords_are_canonical_and_capped()
+    {
+        string[] names = ButtonNames.All.Select(ButtonNames.Name).ToArray();
+        ButtonChord[] pairs = names.SelectMany((a, i) => names.Skip(i + 1)
+            .Select(b => new ButtonChord { Buttons = [a, b], Action = Bind.Keys(Key.A) })).Take(40).ToArray();
+        MappingConfig mapping = Normalize(new MappingConfig
+        {
+            LayerButton = "r3",
+            Layers = [new() { Button = "  FN1 ", Name = new string('x', 35) }, new() { Button = "fn1" },
+                new() { Button = "unknown" }, new() { Button = "paddleRight" }, new()],
+            ChordWindowMs = 999,
+            Chords =
+            [
+                new() { Buttons = ["cross", "CROSS", "unknown"], Action = Bind.Keys(Key.B) },
+                new() { Buttons = ["cross", "r1", "L1", "square", "L1"], Action = Bind.Keys(Key.C) },
+                new() { Buttons = ["l1", "r1", "cross", "square"], Action = Bind.Keys(Key.D) },
+                .. pairs,
+            ],
+        }, null, out List<string> issues).Mapping;
+
+        Assert.Equal(["fn1", "none", "none", "paddleRight"], mapping.Layers.Select(l => l.Button));
+        Assert.Equal("fn1", mapping.LayerButton);
+        Assert.Same(mapping.Layers[0].Buttons, mapping.Layer);
+        Assert.Equal(32, mapping.Layers[0].Name.Length);
+        Assert.Equal(300, mapping.ChordWindowMs);
+        Assert.Equal(32, mapping.Chords.Count);
+        Assert.All(mapping.Chords, c => Assert.InRange(c.Buttons.Count, 2, 3));
+        Assert.Equal(mapping.Chords.Count, mapping.Chords.Select(c => string.Join(",", c.Buttons)).Distinct().Count());
+        Assert.Equal(ButtonNames.All.Select(ButtonNames.Name).Where(n => n is "cross" or "l1" or "r1" or "square").Take(3),
+            mapping.Chords[0].Buttons);
+        Assert.Equal([Key.C], mapping.Chords[0].Action.Keys!);
+        Assert.Equal(8, issues.Count);
+        Assert.Equal(50, Normalize(new MappingConfig { ChordWindowMs = 0 }, null, out _).Mapping.ChordWindowMs);
+    }
+
+    [Fact]
+    public void Phase_11_analog_ranges_and_actions_are_normalized()
+    {
+        MappingConfig mapping = Normalize(new MappingConfig
+        {
+            Triggers = new() { Right = new() { Mode = (TriggerStageMode)99, SoftThreshold = 9, FullThreshold = 0, Hysteresis = 1, HipFireMs = 0 } },
+            Sticks = new()
+            {
+                Right = new() { RingMode = (StickRingMode)99, RingThreshold = 9, RingHysteresis = 0, RingAction = Bind.Keys(Key.None) },
+            },
+            FlickStick = new() { CountsPer360 = 0, Threshold = 1, FlickTimeMs = 0, Snap = (FlickSnapMode)99, DeadzoneAngle = 60, Smoothing = double.NaN },
+            GyroMouse = new() { UseCalibration = true },
+        }, null, out _).Mapping;
+
+        TriggerMapping trigger = mapping.Triggers.Right;
+        Assert.Equal(TriggerStageMode.Off, trigger.Mode);
+        Assert.Equal(0.9, trigger.SoftThreshold);
+        Assert.Equal(trigger.SoftThreshold + 0.05, trigger.FullThreshold);
+        Assert.Equal(0.2, trigger.Hysteresis);
+        Assert.Equal(20, trigger.HipFireMs);
+        Assert.Equal(StickRingMode.Off, mapping.Sticks.Right.RingMode);
+        Assert.Equal(0.98, mapping.Sticks.Right.RingThreshold);
+        Assert.Equal(0.01, mapping.Sticks.Right.RingHysteresis);
+        Assert.Equal(ActionKind.None, mapping.Sticks.Right.RingAction.Kind);
+        Assert.Equal(new FlickStickConfig { CountsPer360 = 500, Threshold = 0.98, FlickTimeMs = 30, DeadzoneAngle = 45 }, mapping.FlickStick);
+        Assert.True(mapping.GyroMouse.UseCalibration);
+    }
+
+    [Fact]
+    public void Missing_layer_buttons_default_by_position_and_legacy_button_is_canonical()
+    {
+        const string json = """{"layers":[{},{},{},{"button":"unknown"}]}""";
+        MappingConfig input = JsonSerializer.Deserialize<MappingConfig>(json, TactileJson.Compact)!;
+        MappingConfig mapping = Normalize(input, null, out List<string> issues).Mapping;
+        Assert.Equal(["ps", "none", "none", "none"], mapping.Layers.Select(l => l.Button));
+        Assert.Contains("unknown", Assert.Single(issues));
+
+        MappingConfig legacy = Normalize(new MappingConfig { LayerButton = " L1 " }, null, out issues).Mapping;
+        Assert.Equal("l1", Assert.Single(legacy.Layers).Button);
+        Assert.Equal("l1", legacy.LayerButton);
+        Assert.Empty(issues);
+    }
+
     private static Profile Normalize(MappingConfig m, IReadOnlyList<Macro>? macros, out List<string> issues)
     {
         issues = [];

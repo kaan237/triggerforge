@@ -46,7 +46,10 @@ public class ReleaseAllTests
         rig.Mapper.Configure(rig.Profile with { Lightbar = new LightbarConfig { Color = "#FF0000" } });
         Assert.Empty(rig.Take());
 
-        Profile changed = rig.Profile with { Mapping = rig.Profile.Mapping with { LayerButton = "none" } };
+        Profile changed = rig.Profile with
+        {
+            Mapping = rig.Profile.Mapping with { Layers = [rig.Profile.Mapping.Layers[0] with { Button = "none" }] },
+        };
         rig.Mapper.Configure(changed);
         Assert.Equal(["A up"], rig.Take());
 

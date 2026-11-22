@@ -316,7 +316,7 @@ public class BindingTests
     [Fact]
     public void Pause_combo_report_suppresses_only_its_layer_pulse()
     {
-        using var rig = new MapperRig(Bind.Buttons(("r1", Bind.Key(Key.A))) with { LayerButton = "ps" });
+        using var rig = new MapperRig(Bind.Buttons(("r1", Bind.Key(Key.A))) with { LayerButton = "ps" }, confirmPulses: true);
         rig.Mapper.OnInput(Inputs.Make(Buttons.PS | Buttons.R1), default, rig.Now, suppressLayerPulse: true);
         Assert.Equal(0, rig.ConfirmPulses);
         Assert.Equal(["A down"], rig.Take());

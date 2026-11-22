@@ -2,8 +2,7 @@ namespace Tactile.Core;
 
 /// <summary>
 /// The press-type state machine for one button or touchpad zone (contract rules 1-5).
-/// The binding is taken at press time and kept until the press sequence ends, so a layer
-/// change mid-press never moves the release elsewhere.
+/// The binding is taken at press time and kept until the press sequence ends or is cancelled.
 /// </summary>
 internal sealed class ButtonMachine
 {
@@ -17,16 +16,15 @@ internal sealed class ButtonMachine
     private TimeSpan _since;
     private TimeSpan _nextEdge;
     private bool _turboOn;
-    private int _cycleIndex;
-    private int _layerCycleIndex;
+    private readonly int[] _cycleIndices = new int[Validation.MaxLayers + 1];
 
     public ButtonMachine(ActionDispatcher actions) => _actions = actions;
 
     public bool Idle => _phase == Phase.Idle && _latched is null;
 
-    public void Down(Binding? binding, TimeSpan now, bool layered = false)
+    public void Down(Binding? binding, TimeSpan now, int layer = 0, TimeSpan? pressedAt = null)
     {
-        Update(now);
+        Update(pressedAt ?? now);
         if (_phase == Phase.WaitTriple)
         {
             _active = _actions.Down(_binding!.Triple!, now);
@@ -38,7 +36,7 @@ internal sealed class ButtonMachine
         {
             if (_binding!.Triple is not null)
             {
-                _since = now;
+                _since = pressedAt ?? now;
                 _phase = Phase.PendingSecond;
                 return;
             }
@@ -53,7 +51,7 @@ internal sealed class ButtonMachine
         {
             _actions.Up(_latched);
             _latched = null;
-            ref int index = ref (layered ? ref _layerCycleIndex : ref _cycleIndex);
+            ref int index = ref _cycleIndices[layer];
             _active = _actions.Down(cycle[index % cycle.Count], now);
             index = (index + 1) % cycle.Count;
             _phase = Phase.Plain;
@@ -78,7 +76,7 @@ internal sealed class ButtonMachine
 
         if (binding.Hold is not null || binding.Double is not null || binding.Triple is not null)
         {
-            _since = now;
+            _since = pressedAt ?? now;
             _phase = Phase.Pending;
             return;
         }
@@ -184,7 +182,7 @@ internal sealed class ButtonMachine
     }
 
     /// <summary>Rule 8 and swipe cancel: let go of everything, fire nothing pending.</summary>
-    public void ReleaseAll()
+    public void ReleaseAll(bool resetCycle = true)
     {
         if (_phase is Phase.Plain or Phase.Fired || (_phase == Phase.Turbo && _turboOn))
         {
@@ -195,7 +193,10 @@ internal sealed class ButtonMachine
         _active = null;
         _latched = null;
         _binding = null;
-        _cycleIndex = _layerCycleIndex = 0;
+        if (resetCycle)
+        {
+            Array.Clear(_cycleIndices);
+        }
         _phase = Phase.Idle;
     }
 

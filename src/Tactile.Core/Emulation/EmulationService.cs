@@ -207,7 +207,8 @@ public sealed partial class EmulationService : IDisposable
         _plan = new InputPlan(config,
             _slotIndex == 0 && config.HideMappedButtons && profile is not null ? EmulationInput.MappedButtons(profile) : Buttons.None,
             profile?.Rumble?.Strength ?? 1,
-            _slotIndex == 0 || profile is null ? null : new SecondaryAxes(profile), profile?.Id);
+            _slotIndex == 0 || profile is null ? null : new SecondaryAxes(profile), profile?.Id,
+            _slotIndex == 0 && profile?.Mapping is { Enabled: true, FlickStick.Enabled: true });
         var wanted = new Wanted(profile?.Id ?? "", config.Mode, settings, controller);
         lock (_stateLock)
         {
@@ -286,7 +287,8 @@ public sealed partial class EmulationService : IDisposable
     }
 
     /// <summary>Real controller input → remap → pad. Reader thread.</summary>
-    internal void OnInput(InputState s, ControllerSlot? slot = null, Vector3 gyroDegPerSec = default, TimeSpan now = default)
+    internal void OnInput(InputState s, ControllerSlot? slot = null, Vector3 gyroDegPerSec = default,
+        TimeSpan now = default, bool mappingActive = false)
     {
         IVirtualPad? pad = _pad;
         if (pad is null || _route is not { IsCurrent: true } route || !ReferenceEquals(route.Pad, pad) ||
@@ -312,7 +314,8 @@ public sealed partial class EmulationService : IDisposable
                 offset = _gyroStick?.Input(gyroDegPerSec, s, now) ?? default;
             }
 
-            pad.Submit(EmulationInput.Transform(plan.Axes?.Apply(s) ?? s, plan.Config, plan.Hidden, offset));
+            pad.Submit(EmulationInput.Transform(plan.Axes?.Apply(s) ?? s, plan.Config, plan.Hidden, offset,
+                mappingActive && plan.FlickStickEnabled));
         }
         catch (ObjectDisposedException)
         {
@@ -1018,5 +1021,5 @@ public sealed partial class EmulationService : IDisposable
     }
 
     private sealed record InputPlan(EmulationConfig Config, Buttons Hidden, double RumbleStrength, SecondaryAxes? Axes = null,
-        string? ProfileId = null);
+        string? ProfileId = null, bool FlickStickEnabled = false);
 }

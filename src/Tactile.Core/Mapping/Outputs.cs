@@ -121,6 +121,7 @@ internal sealed class PointerOutput
     private double _y;
     private double _wheel;
     private double _hwheel;
+    private int _horizontalCounts;
     private TimeSpan? _lastSend;
 
     public PointerOutput(IInputInjector injector) => _injector = injector;
@@ -132,6 +133,9 @@ internal sealed class PointerOutput
         _y += dy;
     }
 
+    /// <summary>Whole calibration counts, independent of the fractional remainder from other sources.</summary>
+    public void MoveCounts(int dx) => _horizontalCounts += dx;
+
     /// <summary>Wheel units (120 = one notch). Positive is up / right.</summary>
     public void Scroll(double vertical, double horizontal)
     {
@@ -139,26 +143,28 @@ internal sealed class PointerOutput
         _hwheel += horizontal;
     }
 
-    public void Flush(TimeSpan now)
+    public bool Flush(TimeSpan now)
     {
         if (_lastSend is { } last && now - last < MinInterval)
         {
-            return;
+            return false;
         }
 
-        int dx = (int)Math.Truncate(_x);
+        int dx = (int)Math.Truncate(_x + Math.CopySign(1e-9, _x));
         int dy = (int)Math.Truncate(_y);
         int wv = (int)Math.Truncate(_wheel);
         int wh = (int)Math.Truncate(_hwheel);
-        if (dx == 0 && dy == 0 && wv == 0 && wh == 0)
+        int moveX = dx + _horizontalCounts;
+        _horizontalCounts = 0;
+        _x -= dx;
+        if (moveX == 0 && dy == 0 && wv == 0 && wh == 0)
         {
-            return;
+            return true;
         }
 
-        if (dx != 0 || dy != 0)
+        if (moveX != 0 || dy != 0)
         {
-            _injector.MouseMove(dx, dy);
-            _x -= dx;
+            _injector.MouseMove(moveX, dy);
             _y -= dy;
         }
 
@@ -175,11 +181,13 @@ internal sealed class PointerOutput
         }
 
         _lastSend = now;
+        return true;
     }
 
     public void Reset()
     {
         _x = _y = _wheel = _hwheel = 0;
+        _horizontalCounts = 0;
         _lastSend = null;
     }
 }

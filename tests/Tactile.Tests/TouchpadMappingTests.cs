@@ -43,6 +43,23 @@ public class TouchpadMappingTests
     }
 
     [Fact]
+    public void Layer_change_preserves_gyro_toggle_and_the_current_pad_touch()
+    {
+        using var rig = new MapperRig(new MappingConfig
+        {
+            Touchpad = new() { Mode = TouchpadMode.Mouse, Acceleration = 0 },
+            GyroMouse = new() { Mode = GyroMouseMode.Toggle, Button = "r1", Smoothing = 0 },
+        });
+        rig.Press(Buttons.R1).Release(Buttons.R1).Gyro(new Vector3(0, -100, 0)).Touch(P(100, 100));
+        rig.Skip(10);
+        rig.Press(Buttons.PS);
+        Assert.Equal(["move 10,0"], rig.Take());
+        rig.Skip(10);
+        rig.Touch(P(100, 196));
+        Assert.Equal(["move 10,45"], rig.Take());
+    }
+
+    [Fact]
     public void Sensitivity_scales_the_delta()
     {
         using MapperRig rig = Mouse(new TouchpadMapping { Mode = TouchpadMode.Mouse, Acceleration = 0, Sensitivity = 2 });

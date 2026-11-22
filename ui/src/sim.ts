@@ -4,6 +4,7 @@ import { L } from "./i18n";
 
 import type { Action, AppSettings, AudioApp, Binding, ControllerStatus, DriverKind, DriverState, EmulationStatus, HapticStatus, HostMessage, Output, Profile, ProfileBackup, TelemetryConfig, TelemetryRule, TelemetryValues, TriggerConfig, UdpStatus, UpdateStatus } from "./host";
 import {
+  clamp,
   clone,
   defaultBinding,
   defaultProfile,
@@ -13,6 +14,7 @@ import {
   effectColor,
   ledMask,
   newId,
+  normalizeMapping,
   normalizeProfile,
   normalizeSettings,
   processStick,
@@ -26,6 +28,10 @@ function sampleProfiles(): Profile[] {
 
   const ghost = defaultProfile("Ghost of Tsushima", "7a2e91c4d05f4b8e9c3a1d6f2e8b4a57");
   ghost.games = ["GhostOfTsushima.exe"];
+  ghost.mapping = normalizeMapping({
+    layerButton: " L1 ",
+    layer: { cross: { ...defaultBinding(), press: { kind: "key", keys: ["space"] } } },
+  });
   ghost.lightbar = { effect: "breathe", color: "#E8E2D0", color2: "#401010", speed: 0.4, brightness: "medium" };
   ghost.triggers.left = { mode: "feedback", params: { start: 2, strength: 3 }, zones: null, frequency: 0 };
   ghost.triggers.right = { mode: "bow", params: { start: 1, end: 6, strength: 6, snap: 4 }, zones: null, frequency: 0 };
@@ -153,6 +159,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   let tick = 0;
   let uiPaused = false;
   let userPaused = false;
+  let testTurn: { timer: number; profile: Profile; controller: string } | undefined;
   // Virtual controller: usbip-win2 starts missing so the install flow can be tried.
   const drivers: Record<DriverKind, { state: DriverState; version: string | null }> = {
     usbIp: { state: "missing", version: null },
@@ -177,10 +184,18 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     rightTrigger: "off",
   };
 
+  function mappingPauseReason() {
+    const fullscreenPaused = settings.pauseOnFullscreen && previewOptions.get("fullscreen") === "1" && !activeReason.startsWith("game:");
+    return uiPaused ? "ui" : userPaused ? "shortcut" : fullscreenPaused ? "fullscreen" : null;
+  }
+
   function status() {
     const primary = slots[0];
-    const fullscreenPaused = settings.pauseOnFullscreen && previewOptions.get("fullscreen") === "1" && !activeReason.startsWith("game:");
-    const pauseReason = uiPaused ? "ui" : userPaused ? "shortcut" : fullscreenPaused ? "fullscreen" : null;
+    const pauseReason = mappingPauseReason();
+    if (testTurn && (pauseReason || testTurn.controller !== primary?.mac || testTurn.profile !== active())) {
+      window.clearTimeout(testTurn.timer);
+      testTurn = undefined;
+    }
     emit({
       type: "status",
       connected: !!primary,
@@ -598,7 +613,18 @@ export function createSimulator(emit: (m: HostMessage) => void) {
               triple: triple?.kind === "none" ? null : triple, cycle: cycle.length ? cycle : null,
             };
           };
-          for (const map of [p.mapping.buttons, p.mapping.layer]) for (const k of Object.keys(map) as (keyof typeof map)[]) map[k] = stripBinding(map[k]!);
+          for (const map of [p.mapping.buttons, ...p.mapping.layers.map((layer) => layer.buttons)]) {
+            for (const k of Object.keys(map) as (keyof typeof map)[]) map[k] = stripBinding(map[k]!);
+          }
+          p.mapping.layer = p.mapping.layers[0].buttons;
+          p.mapping.chords = p.mapping.chords.filter((chord) => strip(chord.action)?.kind !== "none");
+          for (const side of ["left", "right"] as const) {
+            const trigger = p.mapping.triggers[side];
+            trigger.soft = strip(trigger.soft)!;
+            trigger.full = strip(trigger.full)!;
+            const stick = p.mapping.sticks[side];
+            stick.ringAction = strip(stick.ringAction)!;
+          }
           p.mapping.touchpad.zones = p.mapping.touchpad.zones.map(stripBinding);
           for (const d of ["up", "down", "left", "right"] as const) p.mapping.touchpad.swipes[d] = strip(p.mapping.touchpad.swipes[d])!;
           profiles = [...profiles, p];
@@ -736,6 +762,22 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         userPaused = !userPaused;
         status();
         return;
+      case "mapping.testTurn": {
+        if (timer === undefined || !slots[0] || mappingPauseReason()) return;
+        if (typeof m.counts !== "number" || !Number.isFinite(m.counts)) return;
+        const counts = Math.trunc(clamp(m.counts, 500, 30000));
+        const delay = typeof m.delayMs === "number" && Number.isFinite(m.delayMs) ? m.delayMs : 2000;
+        if (testTurn) window.clearTimeout(testTurn.timer);
+        testTurn = {
+          profile: active(),
+          controller: slots[0].mac,
+          timer: window.setTimeout(() => {
+            testTurn = undefined;
+            emit({ type: "notice", kind: "info", message: L(`Sent 360° test turn (${counts} counts).`, `360° deneme dönüşü gönderildi (${counts} sayım).`) });
+          }, Math.trunc(clamp(delay, 0, 5000))),
+        };
+        return;
+      }
       case "backups.list":
         sendBackups();
         return;

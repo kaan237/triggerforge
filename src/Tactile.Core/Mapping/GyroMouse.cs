@@ -17,14 +17,16 @@ internal sealed class GyroMouse
 
     private readonly GyroMouseConfig _config;
     private readonly PointerOutput _pointer;
+    private readonly double _countsPerDegree;
     private double _sx;
     private double _sy;
     private TimeSpan? _last;
 
-    public GyroMouse(GyroMouseConfig config, PointerOutput pointer)
+    public GyroMouse(GyroMouseConfig config, PointerOutput pointer, int countsPer360 = 3600)
     {
         _config = config;
         _pointer = pointer;
+        _countsPerDegree = config.UseCalibration ? countsPer360 / 360.0 : PixelsPerDegree;
     }
 
     /// <param name="degPerSec">Calibrated, drift removed.</param>
@@ -71,8 +73,8 @@ internal sealed class GyroMouse
 
         double seconds = dt.TotalSeconds;
         _pointer.Move(
-            _sx * seconds * PixelsPerDegree * _config.SensitivityX,
-            _sy * seconds * PixelsPerDegree * _config.SensitivityY);
+            _sx * seconds * _countsPerDegree * _config.SensitivityX,
+            _sy * seconds * _countsPerDegree * _config.SensitivityY);
     }
 
     public void Reset()

@@ -113,7 +113,8 @@ internal sealed class MapperRig : IMappingHost, IDisposable
     private TouchPoint _t2;
     private Vector3 _gyro;
 
-    public MapperRig(MappingConfig mapping, IReadOnlyList<Macro>? macros = null, StickPair? sticks = null)
+    public MapperRig(MappingConfig mapping, IReadOnlyList<Macro>? macros = null, StickPair? sticks = null,
+        bool confirmPulses = false, TriggerResponsePair? triggerResponse = null)
     {
         Mapper = new Mapper(Fake.Platform, this, () => Now, threaded: false);
         Profile = Validation.Normalize(new Profile
@@ -122,6 +123,8 @@ internal sealed class MapperRig : IMappingHost, IDisposable
             Mapping = mapping with { Enabled = true },
             Macros = macros ?? [],
             Sticks = sticks ?? new StickPair(),
+            Haptics = new HapticsConfig { ConfirmPulses = confirmPulses },
+            TriggerResponse = triggerResponse ?? new(),
         });
         Mapper.Configure(Profile);
         Mapper.SetActive(true);

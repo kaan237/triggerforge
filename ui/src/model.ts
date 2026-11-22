@@ -9,6 +9,10 @@ import type {
   Macro,
   MacroStep,
   Mapping,
+  MappingLayer,
+  ButtonChord,
+  TriggerMapping,
+  FlickStickConfig,
   StickMapping,
   TouchpadMapping,
   Curve,
@@ -79,17 +83,47 @@ export const defaultGyroMouse = (): GyroMouse => ({
   invertY: false,
   smoothing: 0.2,
   deadzone: 0.5,
+  useCalibration: false,
 });
-export const defaultStickMapping = (): StickMapping => ({ mode: "off", keys: { up: "w", down: "s", left: "a", right: "d" }, threshold: 0.5, speed: 1 });
-export const defaultMapping = (): Mapping => ({
-  enabled: false,
-  layerButton: "ps",
-  buttons: {},
-  layer: {},
-  touchpad: defaultTouchpad(),
-  gyroMouse: defaultGyroMouse(),
-  sticks: { left: defaultStickMapping(), right: defaultStickMapping() },
+export const defaultStickMapping = (): StickMapping => ({
+  mode: "off", keys: { up: "w", down: "s", left: "a", right: "d" }, threshold: 0.5, speed: 1,
+  ringMode: "off", ringThreshold: 0.9, ringHysteresis: 0.05, ringAction: defaultAction(),
 });
+export const maxLayers = 4;
+export const maxLayerNameLength = 32;
+export const maxChords = 32;
+export const defaultMappingLayer = (index = 0): MappingLayer => ({
+  name: L(`Layer ${index + 1}`, `Katman ${index + 1}`),
+  button: index === 0 ? "ps" : "none", mode: "hold", buttons: {},
+});
+export const defaultTriggerMapping = (): TriggerMapping => ({
+  mode: "off", softThreshold: 0.25, fullThreshold: 0.95, hysteresis: 0.05, hipFireMs: 80,
+  soft: defaultAction(), full: defaultAction(),
+});
+export const defaultFlickStick = (): FlickStickConfig => ({
+  enabled: false, countsPer360: 6545, threshold: 0.9, flickTimeMs: 100,
+  snap: "off", deadzoneAngle: 0, smoothing: 0.2,
+});
+export const withMappingLayers = (mapping: Mapping, layers: MappingLayer[]): Mapping => ({
+  ...mapping, layers, layerButton: layers[0].button, layer: layers[0].buttons,
+});
+export function defaultMapping(): Mapping {
+  const first = defaultMappingLayer();
+  return {
+    enabled: false,
+    layerButton: first.button,
+    buttons: {},
+    layer: first.buttons,
+    layers: [first],
+    chordWindowMs: 50,
+    chords: [],
+    triggers: { left: defaultTriggerMapping(), right: defaultTriggerMapping() },
+    flickStick: defaultFlickStick(),
+    touchpad: defaultTouchpad(),
+    gyroMouse: defaultGyroMouse(),
+    sticks: { left: defaultStickMapping(), right: defaultStickMapping() },
+  };
+}
 export const defaultMacro = (name: string, id = newId()): Macro => ({ id, name, repeat: "once", steps: [] });
 
 export function newId(): string {
@@ -294,16 +328,124 @@ function normalizeGyro(g: Partial<GyroMouse> | undefined, d: GyroMouse): GyroMou
     deadzone: bounded(g?.deadzone, 0, 5, d.deadzone),
     invertX: g?.invertX === true,
     invertY: g?.invertY === true,
+    useCalibration: g?.useCalibration === true,
   };
 }
 
 function normalizeBindings(m?: Partial<Record<ButtonName, Binding>>): Partial<Record<ButtonName, Binding>> {
   const out: Partial<Record<ButtonName, Binding>> = {};
-  for (const [k, v] of Object.entries(m ?? {})) if (v) out[k as ButtonName] = normalizeBinding(v);
+  for (const [key, binding] of Object.entries(m ?? {})) {
+    const button = normalizeButton(key);
+    if (button && binding && typeof binding === "object") out[button] = normalizeBinding(binding);
+  }
   return out;
 }
 
-export function normalizeMapping(m?: Partial<Mapping>): Mapping {
+type MappingInput = Omit<Partial<Mapping>, "layerButton"> & { layerButton?: string };
+
+function normalizeLayers(m: MappingInput): MappingLayer[] {
+  const raw = Array.isArray(m.layers) && m.layers.length
+    ? m.layers : [{ button: m.layerButton, buttons: m.layer, name: undefined, mode: undefined }];
+  const used = new Set<ButtonName>();
+  return raw.slice(0, maxLayers).map((layer, index) => {
+    const d = defaultMappingLayer(index);
+    const value = layer?.button;
+    const name = typeof value === "string" ? value.trim().toLowerCase() : undefined;
+    let button = name === "none" ? "none" : normalizeButton(name) ?? d.button;
+    if (button !== "none") {
+      if (used.has(button)) button = "none";
+      else used.add(button);
+    }
+    return {
+      name: (typeof layer?.name === "string" ? layer.name.trim() : "").slice(0, maxLayerNameLength) || d.name,
+      button, mode: layer?.mode === "toggle" ? "toggle" : "hold", buttons: normalizeBindings(layer?.buttons),
+    };
+  });
+}
+
+function normalizeMappingAction(value?: Action | null): Action {
+  const action = optionalAction(value);
+  switch (action?.kind) {
+    case "key":
+      return { kind: "key", keys: [...new Set(action.keys?.filter(isKey))].slice(0, 4) };
+    case "mouseButton": {
+      const button = action.button;
+      return { kind: "mouseButton", button: button === "right" || button === "middle" || button === "x1" || button === "x2" ? button : "left" };
+    }
+    case "wheel": {
+      const direction = action.direction;
+      return {
+        kind: "wheel", direction: direction === "up" || direction === "left" || direction === "right" ? direction : "down",
+        amount: Math.trunc(bounded(action.amount, 1, 10, 1)),
+      };
+    }
+    case "macro":
+      return { kind: "macro", macroId: action.macroId?.trim() };
+    case "profile":
+      return { kind: "profile", profileId: action.profileId?.trim() };
+    case "run": {
+      const path = action.path?.trim() ?? "";
+      if (path.length > 260 || !/^(?:[a-z]:[\\/]|[\\/]{2})/i.test(path)) return defaultAction();
+      return { kind: "run", path, args: typeof action.args === "string" ? action.args.slice(0, 512) : "" };
+    }
+    case "micMute":
+      return { kind: "micMute" };
+    case "special": {
+      const special = action.special;
+      return { kind: "special", special: special === "gameBar" || special === "taskView" || special === "desktop" || special === "showApp" ? special : "screenshot" };
+    }
+    default:
+      return defaultAction();
+  }
+}
+
+function normalizeChords(raw: Mapping["chords"] | undefined): ButtonChord[] {
+  const chords: ButtonChord[] = [];
+  const seen = new Set<string>();
+  if (!Array.isArray(raw)) return chords;
+  for (const chord of raw) {
+    if (!Array.isArray(chord?.buttons)) continue;
+    const selected = new Set(chord.buttons.map(normalizeButton));
+    const buttons = buttonNames.filter((b) => selected.has(b)).slice(0, 3);
+    const action = normalizeMappingAction(chord.action);
+    const key = buttons.join(",");
+    if (buttons.length < 2 || action.kind === "none" || seen.has(key)) continue;
+    chords.push({ buttons, action });
+    seen.add(key);
+    if (chords.length === maxChords) break;
+  }
+  return chords;
+}
+
+function normalizeTriggerMapping(t?: Partial<TriggerMapping>): TriggerMapping {
+  const d = defaultTriggerMapping();
+  const softThreshold = bounded(t?.softThreshold, 0.05, 0.9, d.softThreshold);
+  const mode = t?.mode;
+  return {
+    mode: mode === "additive" || mode === "exclusive" || mode === "hipFire" ? mode : d.mode,
+    softThreshold,
+    fullThreshold: Math.max(softThreshold + 0.05, bounded(t?.fullThreshold, 0.15, 1, d.fullThreshold)),
+    hysteresis: bounded(t?.hysteresis, 0.01, 0.2, d.hysteresis),
+    hipFireMs: Math.trunc(bounded(t?.hipFireMs, 20, 300, d.hipFireMs)),
+    soft: normalizeMappingAction(t?.soft),
+    full: normalizeMappingAction(t?.full),
+  };
+}
+
+function normalizeFlickStick(f?: Partial<FlickStickConfig>): FlickStickConfig {
+  const d = defaultFlickStick();
+  return {
+    enabled: f?.enabled === true,
+    countsPer360: Math.trunc(bounded(f?.countsPer360, 500, 30000, d.countsPer360)),
+    threshold: bounded(f?.threshold, 0.5, 0.98, d.threshold),
+    flickTimeMs: Math.trunc(bounded(f?.flickTimeMs, 30, 300, d.flickTimeMs)),
+    snap: f?.snap === "four" || f?.snap === "eight" ? f.snap : d.snap,
+    deadzoneAngle: bounded(f?.deadzoneAngle, 0, 45, d.deadzoneAngle),
+    smoothing: bounded(f?.smoothing, 0, 0.9, d.smoothing),
+  };
+}
+
+export function normalizeMapping(m?: MappingInput): Mapping {
   const d = defaultMapping();
   if (!m) return d;
   const t: Partial<TouchpadMapping> = m.touchpad ?? {};
@@ -311,12 +453,25 @@ export function normalizeMapping(m?: Partial<Mapping>): Mapping {
   const count = layout === "quadrants" ? 4 : 2;
   const zones = Array.from({ length: count }, (_, i) => normalizeBinding(t.zones?.[i]));
   const sw: Partial<TouchpadMapping["swipes"]> = t.swipes ?? {};
-  const stick = (s?: Partial<StickMapping>): StickMapping => ({ ...defaultStickMapping(), ...s, keys: { ...defaultStickMapping().keys, ...s?.keys } });
-  return {
+  const stick = (s?: Partial<StickMapping>): StickMapping => {
+    const base = defaultStickMapping();
+    return {
+      ...base, ...s, keys: { ...base.keys, ...s?.keys },
+      ringMode: s?.ringMode === "inner" || s?.ringMode === "outer" ? s.ringMode : base.ringMode,
+      ringThreshold: bounded(s?.ringThreshold, 0.2, 0.98, base.ringThreshold),
+      ringHysteresis: bounded(s?.ringHysteresis, 0.01, 0.2, base.ringHysteresis),
+      ringAction: normalizeMappingAction(s?.ringAction),
+    };
+  };
+  return withMappingLayers({
     ...d,
     ...m,
+    layerButton: d.layerButton,
     buttons: normalizeBindings(m.buttons),
-    layer: normalizeBindings(m.layer),
+    chordWindowMs: Math.trunc(bounded(m.chordWindowMs === 0 ? undefined : m.chordWindowMs, 20, 300, d.chordWindowMs)),
+    chords: normalizeChords(m.chords),
+    triggers: { left: normalizeTriggerMapping(m.triggers?.left), right: normalizeTriggerMapping(m.triggers?.right) },
+    flickStick: normalizeFlickStick(m.flickStick),
     touchpad: {
       ...d.touchpad,
       ...t,
@@ -326,7 +481,7 @@ export function normalizeMapping(m?: Partial<Mapping>): Mapping {
     },
     gyroMouse: normalizeGyro(m.gyroMouse, d.gyroMouse),
     sticks: { left: stick(m.sticks?.left), right: stick(m.sticks?.right) },
-  };
+  }, normalizeLayers(m));
 }
 
 export function normalizeMacro(m: Partial<Macro>): Macro {

@@ -2,9 +2,9 @@ import { L } from "./i18n";
 // Labels, summaries and small helpers for the Tuşlar page.
 
 import { useEffect } from "react";
-import { send, subscribe, type Action, type ActionKind, type Binding, type ButtonName, type Direction, type GyroMouse, type Macro, type Mapping, type MouseButtonName, type Profile, type Special } from "./host";
+import { send, subscribe, type Action, type ActionKind, type Binding, type ButtonName, type Direction, type FlickSnapMode, type GyroMouse, type LayerMode, type Macro, type Mapping, type MouseButtonName, type Profile, type Special, type StickRingMode, type TriggerStageMode } from "./host";
 import { chordLabel } from "./keys";
-import { defaultBinding, defaultMapping } from "./model";
+import { defaultBinding, defaultMapping, defaultMappingLayer, withMappingLayers } from "./model";
 
 export const buttonDefs: { id: ButtonName; label: string; group: string }[] = [
   { id: "cross", get label() { return L("Cross", "Çarpı"); }, get group() { return L("Face", "Yüz"); } },
@@ -57,6 +57,30 @@ export const actionKinds: { id: ActionKind; label: string }[] = [
   { id: "run", get label() { return L("Launch program", "Program çalıştır"); } },
   { id: "micMute", get label() { return L("Toggle microphone mute", "Mikrofonu sustur"); } },
   { id: "special", get label() { return L("System", "Sistem"); } },
+];
+
+export const layerModes: { id: LayerMode; label: string }[] = [
+  { id: "hold", get label() { return L("Hold", "Basılı tut"); } },
+  { id: "toggle", get label() { return L("Toggle", "Aç/kapa"); } },
+];
+
+export const triggerStageModes: { id: TriggerStageMode; label: string }[] = [
+  { id: "off", get label() { return L("Off", "Kapalı"); } },
+  { id: "additive", get label() { return L("Additive", "Birlikte"); } },
+  { id: "exclusive", get label() { return L("Exclusive", "Tek kademe"); } },
+  { id: "hipFire", get label() { return L("Hip fire", "Hızlı tam basış"); } },
+];
+
+export const stickRingModes: { id: StickRingMode; label: string }[] = [
+  { id: "off", get label() { return L("Off", "Kapalı"); } },
+  { id: "outer", get label() { return L("Outer", "Dış"); } },
+  { id: "inner", get label() { return L("Inner", "İç"); } },
+];
+
+export const flickSnapModes: { id: FlickSnapMode; label: string }[] = [
+  { id: "off", get label() { return L("Off", "Kapalı"); } },
+  { id: "four", get label() { return L("Four directions", "Dört yön"); } },
+  { id: "eight", get label() { return L("Eight directions", "Sekiz yön"); } },
 ];
 
 export const mouseButtons: { id: MouseButtonName; label: string }[] = [
@@ -192,10 +216,19 @@ const one = (a: Action): Binding => ({ ...defaultBinding(), press: a });
 
 export function desktopTemplate(current: Mapping): Mapping {
   const d = defaultMapping();
-  return {
+  const layer = {
+    ...defaultMappingLayer(),
+    buttons: {
+      options: one({ kind: "special", special: "showApp" }),
+      create: one({ kind: "special", special: "taskView" }),
+      triangle: one({ kind: "special", special: "desktop" }),
+      l1: key("leftCtrl", "leftShift", "tab"),
+      r1: key("leftCtrl", "tab"),
+    },
+  };
+  return withMappingLayers({
     ...current,
     enabled: true,
-    layerButton: "ps",
     buttons: {
       cross: click("left"),
       circle: click("right"),
@@ -215,17 +248,14 @@ export function desktopTemplate(current: Mapping): Mapping {
       touchpad: click("left"),
       mic: one({ kind: "micMute" }),
     },
-    layer: {
-      options: one({ kind: "special", special: "showApp" }),
-      create: one({ kind: "special", special: "taskView" }),
-      triangle: one({ kind: "special", special: "desktop" }),
-      l1: key("leftCtrl", "leftShift", "tab"),
-      r1: key("leftCtrl", "tab"),
-    },
     touchpad: { ...d.touchpad, mode: "mouse", tapToClick: true, scroll: true },
     sticks: { left: { ...d.sticks.left, mode: "mouse" }, right: { ...d.sticks.right, mode: "scroll" } },
     gyroMouse: { ...current.gyroMouse, mode: "off" },
-  };
+  }, [layer, ...current.layers.slice(1).map((other) => other.button === "ps" ? { ...other, button: "none" as const } : other)]);
 }
 
-export const hasBindings = (m: Mapping) => Object.keys(m.buttons).length > 0 || Object.keys(m.layer).length > 0;
+export const hasBindings = (m: Mapping) =>
+  [m.buttons, ...m.layers.map((layer) => layer.buttons)].some((buttons) => Object.keys(buttons).length > 0)
+  || m.chords.length > 0 || m.flickStick.enabled
+  || Object.values(m.triggers).some((trigger) => trigger.soft.kind !== "none" || trigger.full.kind !== "none")
+  || Object.values(m.sticks).some((stick) => stick.ringAction.kind !== "none");

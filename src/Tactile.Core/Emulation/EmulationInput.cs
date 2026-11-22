@@ -12,7 +12,7 @@ public static class EmulationInput
     /// never presses its remap target. Then remap, then the stick swap.
     /// </summary>
     public static InputState Transform(InputState s, EmulationConfig config, Buttons hidden = Buttons.None,
-        (float X, float Y) gyro = default)
+        (float X, float Y) gyro = default, bool flickStickEnabled = false)
     {
         IReadOnlyDictionary<string, string> remap = config.Remap ?? new Dictionary<string, string>();
         Buttons source = s.Buttons & ~hidden;
@@ -63,7 +63,8 @@ public static class EmulationInput
             }
         }
 
-        Stick right = config.SwapSticks ? s.Left : s.Right;
+        bool swap = config.SwapSticks && !flickStickEnabled;
+        Stick right = flickStickEnabled ? new Stick(128, 128) : swap ? s.Left : s.Right;
         if (gyro != default)
         {
             (float x, float y) = right.Normalized;
@@ -75,7 +76,7 @@ public static class EmulationInput
             Buttons = buttons,
             L2 = outL2,
             R2 = outR2,
-            Left = config.SwapSticks ? s.Right : s.Left,
+            Left = swap ? s.Right : s.Left,
             Right = right,
         };
     }
@@ -91,24 +92,39 @@ public static class EmulationInput
             return Buttons.None;
         }
 
-        Buttons result = Buttons.None;
-        bool anyLayer = false;
-        foreach (IReadOnlyDictionary<string, Binding>? map in new[] { m.Buttons, m.Layer })
+        Buttons result = BoundButtons(m.Buttons);
+        foreach (MappingLayer layer in m.ShiftLayers())
         {
-            foreach ((string name, Binding b) in map ?? new Dictionary<string, Binding>())
+            Buttons bound = BoundButtons(layer?.Buttons);
+            result |= bound;
+            if (bound != Buttons.None && ButtonNames.TryParse(layer?.Button, out Buttons activator))
             {
-                if (IsBound(b) && ButtonNames.TryParse(name, out Buttons button))
+                result |= activator;
+            }
+        }
+
+        foreach (ButtonChord chord in m.Chords ?? [])
+        {
+            if (chord?.Action is { Kind: not ActionKind.None })
+            {
+                foreach (string name in chord.Buttons ?? [])
                 {
-                    result |= button;
-                    anyLayer |= ReferenceEquals(map, m.Layer);
+                    if (ButtonNames.TryParse(name, out Buttons button))
+                    {
+                        result |= button;
+                    }
                 }
             }
         }
 
-        // The layer button only selects the layer, so it is taken once the layer is used.
-        if (anyLayer && ButtonNames.TryParse(m.LayerButton, out Buttons layer))
+        if (HasStages(m.Triggers?.Left))
         {
-            result |= layer;
+            result |= Buttons.L2;
+        }
+
+        if (HasStages(m.Triggers?.Right))
+        {
+            result |= Buttons.R2;
         }
 
         // In zones mode the pad click belongs to the zones.
@@ -119,6 +135,26 @@ public static class EmulationInput
 
         return result;
     }
+
+    private static Buttons BoundButtons(IReadOnlyDictionary<string, Binding>? map)
+    {
+        Buttons result = Buttons.None;
+        if (map is not null)
+        {
+            foreach ((string name, Binding binding) in map)
+            {
+                if (IsBound(binding) && ButtonNames.TryParse(name, out Buttons button))
+                {
+                    result |= button;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static bool HasStages(TriggerMapping? trigger) => trigger is { Mode: not TriggerStageMode.Off } &&
+        (trigger.Soft is { Kind: not ActionKind.None } || trigger.Full is { Kind: not ActionKind.None });
 
     private static bool IsBound(Binding? b) =>
         b is not null && (b.Press?.Kind is not (null or ActionKind.None) || b.Hold is { Kind: not ActionKind.None } || b.Double is { Kind: not ActionKind.None }

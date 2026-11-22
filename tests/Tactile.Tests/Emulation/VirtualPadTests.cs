@@ -81,11 +81,16 @@ public class VirtualPadTests
     [Theory]
     [InlineData(0, -32768, 32767)]
     [InlineData(255, 32767, -32768)]
-    [InlineData(128, 128, -129)]
+    [InlineData(128, 0, 0)]
     public void Xbox360_axes_cover_the_int16_range_with_y_up_positive(byte value, short x, short y)
     {
-        Assert.Equal(x, VirtualXbox360.Axis(value));
-        Assert.Equal(y, VirtualXbox360.AxisInverted(value));
+        var stick = new Stick(value, value);
+        byte[] report = new byte[VirtualXbox360.InputLength];
+        VirtualXbox360.WriteInput(Sample with { Left = stick, Right = stick }, report);
+        Assert.Equal(x, BinaryPrimitives.ReadInt16LittleEndian(report.AsSpan(6)));
+        Assert.Equal(y, BinaryPrimitives.ReadInt16LittleEndian(report.AsSpan(8)));
+        Assert.Equal(x, BinaryPrimitives.ReadInt16LittleEndian(report.AsSpan(10)));
+        Assert.Equal(y, BinaryPrimitives.ReadInt16LittleEndian(report.AsSpan(12)));
     }
 
     [Theory]

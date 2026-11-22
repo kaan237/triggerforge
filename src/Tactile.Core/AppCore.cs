@@ -346,6 +346,17 @@ public sealed class AppCore : IDisposable
     public bool UserMappingPaused => Volatile.Read(ref _userPaused) != 0;
     public bool FullscreenPaused => _fullscreenPaused;
 
+    public void StartTestTurn(int counts, int delayMs)
+    {
+        lock (_mappingLock)
+        {
+            if (GetPauseReason() is null)
+            {
+                _mapper.StartTestTurn(counts, delayMs, Now());
+            }
+        }
+    }
+
     public void ToggleUserPause()
     {
         int previous;
@@ -797,7 +808,6 @@ public sealed class AppCore : IDisposable
         }
 
         _haptics.Observe(s);
-        _emulation?.OnInput(s, gyroDegPerSec: gyro, now: now);
 
         if (firstInput)
         {
@@ -822,6 +832,8 @@ public sealed class AppCore : IDisposable
         {
             ToggleUserPause();
         }
+
+        _emulation?.OnInput(s, gyroDegPerSec: gyro, now: now, mappingActive: _mapper.Active);
 
         if (shortcut is { } action && EdgeShortcuts.Resolve(action, Profiles.All, ActiveProfile.Id) is { } profile)
         {
@@ -995,9 +1007,10 @@ public sealed class AppCore : IDisposable
                 connected = Controllers.Controller is not null || _latestInput is not null;
             }
 
-            active = profile.Mapping.Enabled && GetPauseReason() is null && connected;
+            bool allowTestTurn = GetPauseReason() is null && connected;
+            active = profile.Mapping.Enabled && allowTestTurn;
             _mapper.Configure(profile);
-            _mapper.SetActive(active);
+            _mapper.SetActive(active, allowTestTurn);
         }
 
         // The probe is a few system calls; keep it outside the lock.

@@ -60,7 +60,7 @@ internal sealed class TouchpadMapper
         return layout == ZoneLayout.Quadrants ? (y >= PadHeight / 2 ? 2 : 0) + col : col;
     }
 
-    public void Input(TouchPoint t1, TouchPoint t2, bool click, TimeSpan now)
+    public void Input(TouchPoint t1, TouchPoint t2, bool click, TimeSpan now, bool deferZoneClick = false)
     {
         if (_config.Mode == TouchpadMode.Off)
         {
@@ -84,9 +84,9 @@ internal sealed class TouchpadMapper
 
             MoveOrScroll(t1, t2, fingers, now);
         }
-        else
+        else if (!deferZoneClick)
         {
-            ZoneClick(t1, click, now);
+            ZoneClick(click ? ClickZone(t1.Active ? t1 : t2) : null, click, now);
         }
 
         if (_touching && fingers == 0)
@@ -219,7 +219,11 @@ internal sealed class TouchpadMapper
         _last2 = p2;
     }
 
-    private void ZoneClick(TouchPoint t1, bool click, TimeSpan now)
+    public int ClickZone(TouchPoint touch) => touch.Active
+        ? ZoneAt(_config.ZoneLayout, touch.X, touch.Y)
+        : ZoneAt(_config.ZoneLayout, _endX, _endY);
+
+    public void ZoneClick(int? zone, bool click, TimeSpan now, TimeSpan? pressedAt = null)
     {
         if (click == _clickDown)
         {
@@ -234,9 +238,8 @@ internal sealed class TouchpadMapper
 
         if (click)
         {
-            (double x, double y) = t1.Active ? (t1.X, (double)t1.Y) : (_endX, _endY);
-            _clickZone = Math.Clamp(ZoneAt(_config.ZoneLayout, x, y), 0, _zones.Length - 1);
-            _zones[_clickZone].Down(_config.Zones[_clickZone], now);
+            _clickZone = Math.Clamp(zone ?? ClickZone(default), 0, _zones.Length - 1);
+            _zones[_clickZone].Down(_config.Zones[_clickZone], now, pressedAt: pressedAt);
             _sessionZone = _touching ? _clickZone : -1;
         }
         else if (_clickZone >= 0)

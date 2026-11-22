@@ -12,23 +12,42 @@ public static partial class Validation
     public const int MaxChordKeys = 4;
     public const int MaxRunPath = 260;
     public const int MaxRunArgs = 512;
+    public const int MaxLayers = 4;
+    public const int MaxLayerNameLength = 32;
+    public const int MaxChords = 32;
 
     /// <summary>Replaces every <c>run</c> action with <c>none</c>; used for imported profiles.</summary>
     public static Profile StripRunActions(Profile p, out int removed)
     {
         int count = 0;
-        ActionConfig Strip(ActionConfig a)
+        ActionConfig Strip(ActionConfig? a)
         {
-            if (a.Kind == ActionKind.Run)
+            if (a?.Kind == ActionKind.Run)
             {
                 count++;
                 return ActionConfig.None;
             }
 
-            return a;
+            return a ?? ActionConfig.None;
         }
 
         MappingConfig m = p.Mapping ?? new();
+        TriggerMapping StripTrigger(TriggerMapping? trigger)
+        {
+            trigger ??= new();
+            return trigger with { Soft = Strip(trigger.Soft), Full = Strip(trigger.Full) };
+        }
+
+        StickMapping StripRing(StickMapping? stick)
+        {
+            stick ??= new();
+            return stick with { RingAction = Strip(stick.RingAction) };
+        }
+
+        MappingLayer[] layers = (m.Layers ?? [])
+            .Select(l => (l ?? new()) with { Buttons = MapBindings(l?.Buttons, Strip) }).ToArray();
+        TriggerMappingPair triggers = m.Triggers ?? new();
+        StickMappingPair sticks = m.Sticks ?? new();
         TouchpadMapping pad = m.Touchpad ?? new();
         SwipeActions swipes = pad.Swipes ?? new();
         Profile result = p with
@@ -36,7 +55,14 @@ public static partial class Validation
             Mapping = m with
             {
                 Buttons = MapBindings(m.Buttons, Strip),
-                Layer = MapBindings(m.Layer, Strip),
+                LayerButton = layers.Length == 0 ? m.LayerButton : layers[0].Button,
+                Layer = layers.Length == 0 ? MapBindings(m.Layer, Strip) : layers[0].Buttons,
+                Layers = layers,
+                Chords = (m.Chords ?? []).Where(c => c is not null)
+                    .Select(c => c with { Action = Strip(c.Action) })
+                    .Where(c => c.Action.Kind != ActionKind.None).ToArray(),
+                Triggers = new() { Left = StripTrigger(triggers.Left), Right = StripTrigger(triggers.Right) },
+                Sticks = new() { Left = StripRing(sticks.Left), Right = StripRing(sticks.Right) },
                 Touchpad = pad with
                 {
                     Zones = (pad.Zones ?? []).Select(z => MapBinding(z, Strip)).ToArray(),
@@ -176,20 +202,9 @@ public static partial class Validation
         GyroMouseConfig gyro = m.GyroMouse ?? new();
         StickMappingPair sticks = m.Sticks ?? new();
 
-        string layer = (m.LayerButton ?? "").Trim();
-        if (string.Equals(layer, ButtonNames.None, StringComparison.OrdinalIgnoreCase))
-        {
-            layer = ButtonNames.None;
-        }
-        else if (ButtonNames.TryParse(layer, out Buttons lb))
-        {
-            layer = ButtonNames.Name(lb);
-        }
-        else
-        {
-            issues.Add(Text.Pick($"Unknown layer button ({layer}). Switched to PS.", $"Katman tuşu bilinmiyor ({layer}), PS seçildi."));
-            layer = "ps";
-        }
+        MappingLayer[] layers = NormalizeLayers(m, macroIds, issues);
+        TriggerMappingPair triggers = m.Triggers ?? new();
+        FlickStickConfig flick = m.FlickStick ?? new();
 
         ZoneLayout zoneLayout = Defined(pad.ZoneLayout, ZoneLayout.Halves);
         int zoneCount = zoneLayout == ZoneLayout.Quadrants ? 4 : 2;
@@ -210,9 +225,17 @@ public static partial class Validation
         return new MappingConfig
         {
             Enabled = m.Enabled,
-            LayerButton = layer,
+            LayerButton = layers[0].Button,
             Buttons = ButtonMap(m.Buttons, "", macroIds, issues),
-            Layer = ButtonMap(m.Layer, " (katman)", macroIds, issues),
+            Layer = layers[0].Buttons,
+            Layers = layers,
+            ChordWindowMs = m.ChordWindowMs == 0 ? 50 : Math.Clamp(m.ChordWindowMs, 20, 300),
+            Chords = NormalizeChords(m.Chords, macroIds, issues),
+            Triggers = new()
+            {
+                Left = TriggerOf(triggers.Left, "L2", macroIds, issues),
+                Right = TriggerOf(triggers.Right, "R2", macroIds, issues),
+            },
             Touchpad = new TouchpadMapping
             {
                 Mode = Defined(pad.Mode, TouchpadMode.Off),
@@ -242,12 +265,136 @@ public static partial class Validation
                 InvertY = gyro.InvertY,
                 Smoothing = Clamp(gyro.Smoothing, 0, 0.9, 0.2),
                 Deadzone = Clamp(gyro.Deadzone, 0, 5, 0.5),
+                UseCalibration = gyro.UseCalibration,
             },
             Sticks = new StickMappingPair
             {
-                Left = StickMap(sticks.Left),
-                Right = StickMap(sticks.Right),
+                Left = StickMap(sticks.Left, "L3", macroIds, issues),
+                Right = StickMap(sticks.Right, "R3", macroIds, issues),
             },
+            FlickStick = flick with
+            {
+                CountsPer360 = Math.Clamp(flick.CountsPer360, 500, 30000),
+                Threshold = Clamp(flick.Threshold, 0.50, 0.98, 0.90),
+                FlickTimeMs = Math.Clamp(flick.FlickTimeMs, 30, 300),
+                Snap = Defined(flick.Snap, FlickSnapMode.Off),
+                DeadzoneAngle = Clamp(flick.DeadzoneAngle, 0, 45, 0),
+                Smoothing = Clamp(flick.Smoothing, 0, 0.9, 0.2),
+            },
+        };
+    }
+
+    private static MappingLayer[] NormalizeLayers(MappingConfig m, HashSet<string> macroIds, List<string> issues)
+    {
+        MappingLayer[] layers = m.ShiftLayers().Take(MaxLayers + 1).ToArray();
+        if (layers.Length > MaxLayers)
+        {
+            issues.Add(Text.Pick("Extra shift layers were removed.", "Fazla katmanlar kaldırıldı."));
+            layers = layers[..MaxLayers];
+        }
+
+        var activators = new HashSet<Buttons>();
+        for (int i = 0; i < layers.Length; i++)
+        {
+            MappingLayer layer = layers[i] ?? new();
+            string name = (layer.Name ?? "").Trim();
+            if (name.Length == 0)
+            {
+                name = Text.Pick($"Layer {i + 1}", $"Katman {i + 1}");
+            }
+
+            string button = (layer.Button ?? "").Trim();
+            string fallback = i == 0 ? "ps" : ButtonNames.None;
+            if (button.Length == 0)
+            {
+                button = fallback;
+            }
+            else if (!button.Equals(ButtonNames.None, StringComparison.OrdinalIgnoreCase) && !ButtonNames.TryParse(button, out _))
+            {
+                issues.Add(Text.Pick($"Unknown layer button ({button}). Switched to {fallback}.", $"Katman tuşu bilinmiyor ({button}), {fallback} seçildi."));
+                button = fallback;
+            }
+
+            if (ButtonNames.TryParse(button, out Buttons flag) && !activators.Add(flag))
+            {
+                issues.Add(Text.Pick($"Duplicate layer button ({button}). Cleared.", $"Tekrarlanan katman tuşu ({button}) kaldırıldı."));
+                flag = Buttons.None;
+            }
+
+            layers[i] = new MappingLayer
+            {
+                Name = name[..Math.Min(name.Length, MaxLayerNameLength)],
+                Button = ButtonNames.Name(flag),
+                Mode = Defined(layer.Mode, LayerMode.Hold),
+                Buttons = ButtonMap(layer.Buttons, $" ({name})", macroIds, issues),
+            };
+        }
+
+        return layers;
+    }
+
+    private static IReadOnlyList<ButtonChord> NormalizeChords(IReadOnlyList<ButtonChord>? chords, HashSet<string> macroIds, List<string> issues)
+    {
+        var result = new List<ButtonChord>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (ButtonChord chord in chords ?? [])
+        {
+            if (chord is null)
+            {
+                continue;
+            }
+
+            string[] buttons = (chord.Buttons ?? []).Select(b => ButtonNames.TryParse(b, out Buttons flag) ? flag : Buttons.None)
+                .Where(b => b != Buttons.None).Distinct().Order().Select(ButtonNames.Name).ToArray();
+            if (buttons.Length < 2)
+            {
+                issues.Add(Text.Pick("Chord removed: it needs at least two distinct buttons.", "Akor kaldırıldı: en az iki farklı tuş gerekli."));
+                continue;
+            }
+
+            if (buttons.Length > 3)
+            {
+                issues.Add(Text.Pick("Chord limited to three buttons.", "Akor üç tuşla sınırlandı."));
+                buttons = buttons[..3];
+            }
+
+            ActionConfig action = ActionOf(chord.Action, string.Join(" + ", buttons), macroIds, issues);
+            if (action.Kind == ActionKind.None)
+            {
+                continue;
+            }
+
+            if (!seen.Add(string.Join(",", buttons)))
+            {
+                issues.Add(Text.Pick("Duplicate chord removed.", "Tekrarlanan akor kaldırıldı."));
+                continue;
+            }
+
+            if (result.Count == MaxChords)
+            {
+                issues.Add(Text.Pick("Extra chords were removed.", "Fazla akorlar kaldırıldı."));
+                break;
+            }
+
+            result.Add(new ButtonChord { Buttons = buttons, Action = action });
+        }
+
+        return result;
+    }
+
+    private static TriggerMapping TriggerOf(TriggerMapping? t, string label, HashSet<string> macroIds, List<string> issues)
+    {
+        t ??= new();
+        double soft = Clamp(t.SoftThreshold, 0.05, 0.90, 0.25);
+        return t with
+        {
+            Mode = Defined(t.Mode, TriggerStageMode.Off),
+            SoftThreshold = soft,
+            FullThreshold = Math.Max(soft + 0.05, Clamp(t.FullThreshold, 0.15, 1, 0.95)),
+            Hysteresis = Clamp(t.Hysteresis, 0.01, 0.20, 0.05),
+            HipFireMs = Math.Clamp(t.HipFireMs, 20, 300),
+            Soft = ActionOf(t.Soft, label, macroIds, issues),
+            Full = ActionOf(t.Full, label, macroIds, issues),
         };
     }
 
@@ -418,10 +565,12 @@ public static partial class Validation
         }
     }
 
-    private static StickMapping StickMap(StickMapping? s)
+    private static StickMapping StickMap(StickMapping? s, string label, HashSet<string> macroIds, List<string> issues)
     {
         s ??= new();
         StickKeys keys = s.Keys ?? new();
+        double ringThreshold = Clamp(s.RingThreshold, 0.20, 0.98, 0.90);
+        double ringHysteresis = Clamp(s.RingHysteresis, 0.01, 0.20, 0.05);
         return new StickMapping
         {
             Mode = Defined(s.Mode, StickMappingMode.Off),
@@ -434,6 +583,10 @@ public static partial class Validation
             },
             Threshold = Clamp(s.Threshold, 0.1, 0.9, 0.5),
             Speed = Clamp(s.Speed, 0.1, 5, 1),
+            RingMode = Defined(s.RingMode, StickRingMode.Off),
+            RingThreshold = ringThreshold,
+            RingHysteresis = ringHysteresis < ringThreshold ? ringHysteresis : ringThreshold - 0.01,
+            RingAction = ActionOf(s.RingAction, label, macroIds, issues),
         };
     }
 

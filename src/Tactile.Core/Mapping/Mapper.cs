@@ -27,18 +27,31 @@ internal sealed class Mapper : IDisposable
     private readonly IMappingHost _host;
     private readonly MacroRunner _macros;
     private readonly ActionDispatcher _actions;
+    private readonly Func<TimeSpan> _clock;
     private readonly bool _threaded;
     private readonly Dictionary<Buttons, ButtonMachine> _machines = [];
 
     private Profile? _profile;
     private MappingConfig _config = new();
-    private Buttons _layerButton = Buttons.PS;
+    private (MappingLayer Layer, Buttons Button)[] _layers = [];
+    private Buttons _activators;
+    private int _activeLayers;
     private Buttons _gyroButton = Buttons.R1;
-    private TouchpadMapper _pad;
-    private GyroMouse _gyro;
-    private StickMapper _left;
-    private StickMapper _right;
+    private TouchpadMapper _pad = null!;
+    private GyroMouse _gyro = null!;
+    private StickMapper _left = null!;
+    private StickMapper _right = null!;
+    private ChordMachine _chords = null!;
+    private TriggerMapper _l2 = null!;
+    private TriggerMapper _r2 = null!;
+    private FlickStick _flick = null!;
+    private bool _flickEnabled;
+    private bool _testTurnAllowed;
     private Buttons _prev;
+    private Buttons _suppressedButtons;
+    private bool _padTouched;
+    private bool _suppressPadTouch;
+    private int? _pendingPadZone;
     private bool _gyroLatched;
     private bool _active;
     private bool _disposed;
@@ -47,6 +60,7 @@ internal sealed class Mapper : IDisposable
     public Mapper(InputPlatform platform, IMappingHost host, Func<TimeSpan> clock, bool threaded)
     {
         _threaded = threaded;
+        _clock = clock;
         _host = host;
         _outputs = new HeldOutputs(platform.Injector);
         _pointer = new PointerOutput(platform.Injector);
@@ -58,7 +72,7 @@ internal sealed class Mapper : IDisposable
             _machines[b] = new ButtonMachine(_actions);
         }
 
-        (_pad, _gyro, _left, _right) = Build(new Profile());
+        Build(new Profile());
     }
 
     public bool Active
@@ -93,30 +107,44 @@ internal sealed class Mapper : IDisposable
                 // Only stick shaping or unrelated settings changed; keep what is held.
                 _left.Processor = new StickProcessor(profile.Sticks.Left);
                 _right.Processor = new StickProcessor(profile.Sticks.Right);
+                _l2.Processor = new TriggerResponseProcessor(profile.TriggerResponse.Left);
+                _r2.Processor = new TriggerResponseProcessor(profile.TriggerResponse.Right);
                 return;
             }
 
             ReleaseAllLocked();
             _config = profile.Mapping ?? new();
-            _layerButton = ButtonNames.TryParse(_config.LayerButton, out Buttons lb) ? lb : Buttons.None;
             _gyroButton = ButtonNames.TryParse(_config.GyroMouse?.Button, out Buttons gb) ? gb : Buttons.None;
             _actions.SetMacros(profile.Macros ?? []);
-            (_pad, _gyro, _left, _right) = Build(profile);
+            Build(profile);
         }
     }
 
     /// <summary>False releases everything and ignores input until true again.</summary>
-    public void SetActive(bool active)
+    public void SetActive(bool active, bool? testTurnAllowed = null)
     {
         lock (_gate)
         {
-            if (active == _active || _disposed)
+            bool allowTurn = testTurnAllowed ?? active;
+            if (_disposed || (active == _active && allowTurn == _testTurnAllowed))
             {
                 return;
             }
 
             _active = active;
+            _testTurnAllowed = allowTurn;
             ReleaseAllLocked();
+        }
+    }
+
+    public void StartTestTurn(int counts, int delayMs, TimeSpan now)
+    {
+        lock (_gate)
+        {
+            if (_testTurnAllowed && !_disposed)
+            {
+                _flick.StartTestTurn(counts, delayMs, now);
+            }
         }
     }
 
@@ -124,26 +152,66 @@ internal sealed class Mapper : IDisposable
     {
         lock (_gate)
         {
+            // Use the same serialized clock for live reports and timer decisions.
+            now = _threaded ? _clock() : now;
+            bool touched = s.Touch1.Active || s.Touch2.Active;
             if (!_active || _disposed)
             {
                 // Track buttons anyway, so a button held while inactive does not fire later.
                 _prev = s.Buttons;
+                _suppressedButtons = s.Buttons;
+                _padTouched = _suppressPadTouch = touched;
                 return;
             }
 
-            UpdateTimers(now);
             Buttons changed = _prev ^ s.Buttons;
+            _suppressedButtons &= s.Buttons;
+            UpdateLayers(s.Buttons, changed, suppressLayerPulse);
+            _padTouched = touched;
+            _suppressPadTouch &= touched;
+            TouchPoint firstTouch = _suppressPadTouch ? default : s.Touch1;
+            TouchPoint secondTouch = _suppressPadTouch ? default : s.Touch2;
+            if (_pad.HandlesClick && (_chords.Members & changed & s.Buttons & Buttons.Touchpad) != 0)
+            {
+                _pendingPadZone = _pad.ClickZone(firstTouch.Active ? firstTouch : secondTouch);
+            }
+
+            if (_chords.Members != Buttons.None)
+            {
+                _chords.Input(s.Buttons, changed, now, FlushChordButton);
+            }
+
+            UpdateTimers(now);
             if (changed != Buttons.None)
             {
-                ProcessButtons(s.Buttons, changed, now, suppressLayerPulse);
+                ProcessButtons(s.Buttons, changed, now);
             }
 
             _prev = s.Buttons;
-            _pad.Input(s.Touch1, s.Touch2, s.IsDown(Buttons.Touchpad), now);
-            _gyro.Input(gyroDegPerSec, GyroEnabled(s.Buttons, s.Touch1.Active || s.Touch2.Active), now);
+            bool physicalClick = s.IsDown(Buttons.Touchpad);
+            bool deferZoneClick = (_chords.Members & Buttons.Touchpad) != 0;
+            bool padClick = physicalClick && (!_pad.HandlesClick ||
+                ((_activators | _suppressedButtons) & Buttons.Touchpad) == 0);
+            _pad.Input(firstTouch, secondTouch, padClick, now, deferZoneClick);
+            _gyro.Input(gyroDegPerSec, GyroEnabled(s.Buttons, touched), now);
             _left.Input(s.Left, now);
             _right.Input(s.Right, now);
-            _pointer.Flush(now);
+            if (UsesStages(_l2, Buttons.L2))
+            {
+                _l2.Input(s.L2, now);
+            }
+
+            if (UsesStages(_r2, Buttons.R2))
+            {
+                _r2.Input(s.R2, now);
+            }
+
+            if (_flickEnabled)
+            {
+                _flick.Input(s.Right, now);
+            }
+
+            UpdatePointer(now);
         }
 
         AfterGate(now);
@@ -153,12 +221,29 @@ internal sealed class Mapper : IDisposable
     {
         lock (_gate)
         {
-            if (_active && !_disposed)
+            now = _threaded ? _clock() : now;
+            if (_disposed)
             {
+                return;
+            }
+
+            if (_active)
+            {
+                if (_chords.Members != Buttons.None)
+                {
+                    _chords.Input(_prev, Buttons.None, now, FlushChordButton);
+                }
+
                 UpdateTimers(now);
+                _l2.Update(now);
+                _r2.Update(now);
                 _left.Update(now);
                 _right.Update(now);
-                _pointer.Flush(now);
+            }
+
+            if (_active || _testTurnAllowed)
+            {
+                UpdatePointer(now);
             }
         }
 
@@ -179,7 +264,8 @@ internal sealed class Mapper : IDisposable
         lock (_gate)
         {
             _prev = Buttons.None;
-            ReleaseAllLocked();
+            _testTurnAllowed = false;
+            ReleaseAllLocked(resetAxes: true);
         }
     }
 
@@ -204,15 +290,39 @@ internal sealed class Mapper : IDisposable
         JsonSerializer.Serialize(a.Mapping, TactileJson.Compact) == JsonSerializer.Serialize(b.Mapping, TactileJson.Compact) &&
         JsonSerializer.Serialize(a.Macros, TactileJson.Compact) == JsonSerializer.Serialize(b.Macros, TactileJson.Compact);
 
-    private (TouchpadMapper, GyroMouse, StickMapper, StickMapper) Build(Profile p)
+    private void Build(Profile p)
     {
         MappingConfig m = p.Mapping ?? new();
         StickMappingPair sticks = m.Sticks ?? new();
-        return (
-            new TouchpadMapper(m.Touchpad ?? new(), _actions, _pointer),
-            new GyroMouse(m.GyroMouse ?? new(), _pointer),
-            new StickMapper(sticks.Left ?? new(), new StickProcessor(p.Sticks?.Left), _outputs, _pointer),
-            new StickMapper(sticks.Right ?? new(), new StickProcessor(p.Sticks?.Right), _outputs, _pointer));
+        FlickStickConfig flick = m.FlickStick ?? new();
+        TriggerMappingPair triggers = m.Triggers ?? new();
+        _layers = m.ShiftLayers().Take(Validation.MaxLayers)
+            .Select(l => (l, ButtonNames.TryParse(l.Button, out Buttons button) ? button : Buttons.None)).ToArray();
+        _activators = Buttons.None;
+        foreach (var layer in _layers)
+        {
+            _activators |= layer.Button;
+        }
+
+        _chords = new ChordMachine(m, _activators, _actions);
+        _pad = new TouchpadMapper(m.Touchpad ?? new(), _actions, _pointer);
+        _gyro = new GyroMouse(m.GyroMouse ?? new(), _pointer, flick.CountsPer360);
+        _left = new StickMapper(sticks.Left ?? new(), new StickProcessor(p.Sticks?.Left), _outputs, _pointer, _actions);
+        _right = new StickMapper(sticks.Right ?? new(), new StickProcessor(p.Sticks?.Right), _outputs, _pointer, _actions, flick.Enabled);
+        _l2 = new TriggerMapper(triggers.Left ?? new(), new TriggerResponseProcessor(p.TriggerResponse?.Left), _actions);
+        _r2 = new TriggerMapper(triggers.Right ?? new(), new TriggerResponseProcessor(p.TriggerResponse?.Right), _actions);
+        _flick = new FlickStick(flick, _pointer);
+        _flickEnabled = flick.Enabled;
+    }
+
+    private void UpdatePointer(TimeSpan now)
+    {
+        _flick.Update(now);
+        if (_pointer.Flush(now) && _flick.FinishTestTurn() is { } counts)
+        {
+            _worker.Post(() => _host.Report(new Notice(NoticeKinds.Info,
+                $"Sent 360° test turn ({counts} counts).", $"360° deneme dönüşü gönderildi ({counts} sayım).")));
+        }
     }
 
     private void AfterGate(TimeSpan now)
@@ -228,22 +338,85 @@ internal sealed class Mapper : IDisposable
     private void UpdateTimers(TimeSpan now)
     {
         _actions.Update(now);
-        foreach (ButtonMachine m in _machines.Values)
+        foreach ((Buttons button, ButtonMachine machine) in _machines)
         {
-            m.Update(now);
+            if (!_chords.Pending(button))
+            {
+                machine.Update(now);
+            }
         }
 
         _pad.Update(now);
     }
 
-    private void ProcessButtons(Buttons current, Buttons changed, TimeSpan now, bool suppressLayerPulse)
+    private void UpdateLayers(Buttons current, Buttons changed, bool suppressLayerPulse)
     {
-        bool layerHeld = _layerButton != Buttons.None && (current & _layerButton) != 0;
-        if (!suppressLayerPulse && (changed & _layerButton) != 0)
+        int next = _activeLayers;
+        for (int i = 0; i < _layers.Length; i++)
         {
-            _worker.Post(_host.PulseConfirm);
+            (MappingLayer layer, Buttons button) = _layers[i];
+            int bit = 1 << i;
+            bool down = (current & button) != 0;
+            if (layer.Mode == LayerMode.Toggle)
+            {
+                if (down && (changed & button) != 0)
+                {
+                    next ^= bit;
+                }
+            }
+            else
+            {
+                next = down ? next | bit : next & ~bit;
+            }
         }
 
+        if (next != _activeLayers)
+        {
+            ReleaseAllLocked(resetLayers: false);
+            _suppressedButtons &= current;
+            _activeLayers = next;
+            if (!suppressLayerPulse && (changed & _activators) != 0 && _profile?.Haptics.ConfirmPulses == true)
+            {
+                _worker.Post(_host.PulseConfirm);
+            }
+        }
+    }
+
+    private bool UsesStages(TriggerMapper trigger, Buttons button) =>
+        trigger.Enabled && ((_activators | _chords.Members) & button) == 0;
+
+    private void FlushChordButton(Buttons button, TimeSpan? pressedAt, TimeSpan now, bool down)
+    {
+        if (button == Buttons.Touchpad && _pad.HandlesClick)
+        {
+            if (pressedAt is not null)
+            {
+                _pad.ZoneClick(_pendingPadZone, true, now, pressedAt);
+            }
+
+            if (!down)
+            {
+                _pad.ZoneClick(null, false, now);
+            }
+
+            return;
+        }
+
+        ButtonMachine machine = _machines[button];
+        if (pressedAt is { } pressed)
+        {
+            Binding? binding = Lookup(button, out int layer);
+            machine.Down(binding, now, layer, pressed);
+        }
+
+        if (!down)
+        {
+            machine.Up(now);
+        }
+    }
+
+    private void ProcessButtons(Buttons current, Buttons changed, TimeSpan now)
+    {
         foreach (Buttons b in ButtonNames.All)
         {
             if ((changed & b) == 0)
@@ -252,13 +425,18 @@ internal sealed class Mapper : IDisposable
             }
 
             bool down = (current & b) != 0;
+            if (((_activators | _suppressedButtons) & b) != 0)
+            {
+                continue;
+            }
+
             if (b == _gyroButton && down && _config.GyroMouse?.Mode == GyroMouseMode.Toggle)
             {
                 _gyroLatched = !_gyroLatched;
             }
 
-            // Rule 6: the layer button only selects the layer.
-            if (b == _layerButton || (b == Buttons.Touchpad && _pad.HandlesClick))
+            if ((_chords.Members & b) != 0 || (b == Buttons.Touchpad && _pad.HandlesClick) ||
+                (b == Buttons.L2 && UsesStages(_l2, b)) || (b == Buttons.R2 && UsesStages(_r2, b)))
             {
                 continue;
             }
@@ -266,8 +444,8 @@ internal sealed class Mapper : IDisposable
             ButtonMachine machine = _machines[b];
             if (down)
             {
-                Binding? binding = Lookup(b, layerHeld, out bool layered);
-                machine.Down(binding, now, layered);
+                Binding? binding = Lookup(b, out int layer);
+                machine.Down(binding, now, layer);
             }
             else
             {
@@ -276,16 +454,19 @@ internal sealed class Mapper : IDisposable
         }
     }
 
-    private Binding? Lookup(Buttons b, bool layerHeld, out bool layered)
+    private Binding? Lookup(Buttons b, out int layer)
     {
         string name = ButtonNames.Name(b);
-        if (layerHeld && _config.Layer?.TryGetValue(name, out Binding? binding) == true)
+        for (int i = _layers.Length - 1; i >= 0; i--)
         {
-            layered = true;
-            return binding;
+            if ((_activeLayers & (1 << i)) != 0 && _layers[i].Layer.Buttons?.TryGetValue(name, out Binding? binding) == true)
+            {
+                layer = i + 1;
+                return binding;
+            }
         }
 
-        layered = false;
+        layer = 0;
         return _config.Buttons?.GetValueOrDefault(name);
     }
 
@@ -299,19 +480,40 @@ internal sealed class Mapper : IDisposable
         _ => false,
     };
 
-    private void ReleaseAllLocked()
+    private void ReleaseAllLocked(bool resetLayers = true, bool resetAxes = false)
     {
         foreach (ButtonMachine m in _machines.Values)
         {
-            m.ReleaseAll();
+            m.ReleaseAll(resetCycle: resetLayers);
         }
 
-        _pad.ReleaseAll();
+        if (resetLayers)
+        {
+            _activeLayers = 0;
+            _gyroLatched = false;
+            _gyro.Reset();
+        }
+
+        _suppressedButtons = _prev;
+        _pendingPadZone = null;
+        if (resetLayers || _config.Touchpad?.Mode != TouchpadMode.Mouse)
+        {
+            _suppressPadTouch = !resetAxes && _padTouched;
+            _pad.ReleaseAll();
+        }
+
+        if (resetAxes)
+        {
+            _padTouched = false;
+        }
+
+        _chords.ReleaseAll();
         _actions.ReleaseTaps();
-        _left.ReleaseAll();
-        _right.ReleaseAll();
-        _gyro.Reset();
-        _gyroLatched = false;
+        _l2.ReleaseAll(resetAxes);
+        _r2.ReleaseAll(resetAxes);
+        _left.ReleaseAll(resetAxes, preserveMotion: !resetLayers);
+        _right.ReleaseAll(resetAxes, preserveMotion: !resetLayers);
+        _flick.ReleaseAll(resetAxes);
         _pointer.Reset();
         _macros.StopAll();
         _outputs.ReleaseAll();

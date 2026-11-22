@@ -246,4 +246,219 @@ public class StickMappingTests
         // 30 notches/s × 120 × 0.1 s.
         Assert.InRange(total, 359, 360);
     }
+
+    [Theory]
+    [InlineData(StickMappingMode.Off)]
+    [InlineData(StickMappingMode.Keys)]
+    [InlineData(StickMappingMode.Mouse)]
+    public void Rings_use_shaped_radius_and_separate_entry_and_exit_thresholds(StickMappingMode mode)
+    {
+        StickMapping Outer() => new()
+        {
+            Mode = mode, RingMode = StickRingMode.Outer, RingThreshold = 0.8, RingHysteresis = 0.1,
+            RingAction = Bind.Keys(Key.F5),
+        };
+
+        string[] RingEvents(MapperRig rig) => rig.Take().Where(e => e.StartsWith("F5", StringComparison.Ordinal)).ToArray();
+        var middle = new Stick(225, 128); // shaped radius ~0.77
+        var inner = new Stick(211, 128); // shaped radius ~0.65
+        var outer = new Stick(235, 128); // shaped radius ~0.85
+
+        using MapperRig outside = Rig(Outer());
+        outside.Sticks(left: middle);
+        Assert.Empty(RingEvents(outside));
+        outside.Sticks(left: outer).Sticks(left: middle);
+        Assert.Equal(["F5 down"], RingEvents(outside));
+        outside.Sticks(left: inner);
+        Assert.Equal(["F5 up"], RingEvents(outside));
+
+        using MapperRig inside = Rig(Outer() with { RingMode = StickRingMode.Inner });
+        inside.Sticks(left: middle).Sticks(left: outer).Sticks(left: middle);
+        Assert.Equal(["F5 down", "F5 up"], RingEvents(inside));
+        inside.Sticks(left: inner).Sticks(left: Center);
+        Assert.Equal(["F5 down", "F5 up"], RingEvents(inside));
+    }
+
+    [Fact]
+    public void Layer_change_rearms_each_stick_direction_and_ring_at_its_own_threshold()
+    {
+        using MapperRig rig = Rig(new StickMapping
+        {
+            Mode = StickMappingMode.Keys,
+            Keys = new() { Right = Key.D, Up = Key.W },
+            RingMode = StickRingMode.Outer,
+            RingThreshold = 0.9,
+            RingAction = Bind.Keys(Key.F5),
+        }, StickShape.Square);
+        rig.Sticks(left: new Stick(225, 128)).Press(Buttons.PS);
+        Assert.Equal(["D down", "D up"], rig.Take());
+        rig.Sticks(left: new Stick(255, 25));
+        Assert.Equal(["F5 down", "W down"], rig.Take());
+        rig.Release(Buttons.PS).Sticks(left: new Stick(255, 25));
+        Assert.Equal(["W up", "F5 up"], rig.Take());
+        rig.Sticks(left: new Stick(165, 128));
+        rig.Sticks(left: new Stick(255, 128));
+        Assert.Equal(["F5 down", "D down"], rig.Take());
+    }
+
+    [Fact]
+    public void Stick_mouse_keeps_moving_during_layer_transition()
+    {
+        using MapperRig rig = Rig(new StickMapping { Mode = StickMappingMode.Mouse });
+        rig.Sticks(left: new Stick(255, 128)).Advance(10);
+        int before = rig.Fake.Injector.MovedX;
+        rig.Skip(10);
+        rig.Press(Buttons.PS);
+        Assert.True(rig.Fake.Injector.MovedX > before);
+    }
+
+    [Fact]
+    public void Outer_ring_releases_at_center_when_hysteresis_equals_threshold()
+    {
+        var stick = new StickMapping
+        {
+            RingMode = StickRingMode.Outer, RingThreshold = 0.2, RingHysteresis = 0.2,
+            RingAction = Bind.Keys(Key.F5),
+        };
+        using MapperRig rig = Rig(stick);
+        StickMapping normalized = rig.Profile.Mapping.Sticks.Left;
+        Assert.Equal(0.19, normalized.RingHysteresis);
+        Assert.True(normalized.RingHysteresis < normalized.RingThreshold);
+        rig.Mapper.Configure(rig.Profile with { Mapping = rig.Profile.Mapping with { Sticks = new() { Left = stick } } });
+        rig.Sticks(left: new Stick(255, 128)).Sticks(left: Center);
+        Assert.Equal(["F5 down", "F5 up"], rig.Take());
+    }
+}
+
+public class FlickStickTests
+{
+    private static readonly Stick Center = new(128, 128);
+    private static readonly Stick Right = new(255, 128);
+    private static readonly Stick Forward = new(128, 0);
+
+    private static FlickStickConfig Flick() => new() { Enabled = true, CountsPer360 = 7200 };
+
+    [Theory]
+    [InlineData(255, 128, 1800)]
+    [InlineData(0, 128, -1800)]
+    [InlineData(128, 255, 3600)]
+    public void Initial_flick_finishes_over_time_even_if_the_stick_goes_back_to_center(byte x, byte y, int counts)
+    {
+        using var rig = new MapperRig(new MappingConfig { FlickStick = Flick() });
+        rig.Sticks(right: new Stick(x, y)).Run(50, step: 10);
+        Assert.Equal(counts / 2, rig.Fake.Injector.MovedX);
+        rig.Sticks(right: Center).Run(50, step: 10);
+        Assert.Equal(counts, rig.Fake.Injector.MovedX);
+        Assert.Equal(0, rig.Fake.Injector.MovedY);
+    }
+
+    [Theory]
+    [InlineData(FlickSnapMode.Off, 0)]
+    [InlineData(FlickSnapMode.Four, 1800)]
+    [InlineData(FlickSnapMode.Eight, 900)]
+    public void Initial_angle_uses_deadzone_or_configured_snap(FlickSnapMode snap, int expected)
+    {
+        using var rig = new MapperRig(new MappingConfig
+        {
+            FlickStick = Flick() with { Snap = snap, DeadzoneAngle = snap == FlickSnapMode.Off ? 15 : 0 },
+        });
+        rig.Sticks(right: snap == FlickSnapMode.Off ? new Stick(148, 0) : new Stick(255, 23)).Run(100);
+        Assert.Equal(expected, rig.Fake.Injector.MovedX);
+    }
+
+    [Fact]
+    public void Sweeping_the_rim_wraps_and_eventually_emits_the_whole_angle()
+    {
+        using var rig = new MapperRig(new MappingConfig { FlickStick = Flick() with { Smoothing = 0.8 } });
+        rig.Sticks(right: Forward).Advance(10).Sticks(right: Right);
+        Assert.InRange(rig.Fake.Injector.MovedX, 359, 360);
+        rig.Advance(10);
+        Assert.InRange(rig.Fake.Injector.MovedX, 647, 648);
+        rig.Sticks(right: new Stick(128, 255)).Advance(10).Sticks(right: new Stick(0, 128)).Advance(10).Sticks(right: Forward);
+        rig.Sticks(right: Center).Run(1000, step: 5);
+        Assert.Equal(7200, rig.Fake.Injector.MovedX);
+    }
+
+    [Fact]
+    public void Flick_and_calibrated_gyro_share_the_pointer_during_a_test_turn()
+    {
+        using var rig = new MapperRig(new MappingConfig
+        {
+            FlickStick = Flick(),
+            GyroMouse = new() { Mode = GyroMouseMode.Always, Smoothing = 0, UseCalibration = true },
+        });
+        rig.Mapper.StartTestTurn(7200, 2000, rig.Now);
+        rig.Advance(1999);
+        Assert.Empty(rig.Take());
+        rig.Advance(1).Sticks(right: Right);
+        rig.Advance(50).Gyro(new Vector3(0, 10, 0));
+        rig.Advance(50).Gyro(default);
+        Assert.Equal(5390, rig.Fake.Injector.MovedX); // 3600 test + 1800 flick - 10 gyro
+        Assert.Empty(rig.Reports);
+        rig.Advance(100);
+        Assert.Equal(8990, rig.Fake.Injector.MovedX);
+        Assert.Equal(0, rig.Fake.Injector.MovedY);
+        Assert.Contains("7200", Assert.Single(rig.Reports));
+    }
+
+    [Fact]
+    public void Right_stick_ring_remains_active_while_flick_replaces_the_primary_mapping()
+    {
+        using var rig = new MapperRig(new MappingConfig
+        {
+            FlickStick = Flick(),
+            Sticks = new()
+            {
+                Right = new() { Mode = StickMappingMode.Keys, RingMode = StickRingMode.Outer, RingAction = Bind.Keys(Key.F5) },
+            },
+        });
+        rig.Sticks(right: Right);
+        Assert.Equal(["F5 down"], rig.Take());
+        rig.Press(Buttons.PS);
+        Assert.Equal(["F5 up"], rig.Take());
+        rig.Send().Run(100);
+        Assert.Empty(rig.Take());
+    }
+
+    [Theory]
+    [InlineData("layer")]
+    [InlineData("pause")]
+    [InlineData("profile")]
+    [InlineData("disconnect")]
+    public void Pending_test_turn_is_cancelled_by_mapping_transitions(string reason)
+    {
+        using var rig = new MapperRig(new MappingConfig());
+        rig.Mapper.StartTestTurn(7200, 2000, rig.Now);
+        if (reason == "layer")
+        {
+            rig.Press(Buttons.PS);
+        }
+        else if (reason == "pause")
+        {
+            rig.Mapper.SetActive(false);
+        }
+        else if (reason == "profile")
+        {
+            rig.Mapper.Configure(rig.Profile with { Id = Validation.NewId() });
+        }
+        else
+        {
+            rig.Mapper.ResetController();
+        }
+
+        rig.Advance(2500);
+        Assert.Empty(rig.Take());
+        Assert.Empty(rig.Reports);
+    }
+
+    [Fact]
+    public void Calibration_can_run_with_the_mapping_switch_off()
+    {
+        using var rig = new MapperRig(new MappingConfig());
+        rig.Mapper.SetActive(false, testTurnAllowed: true);
+        rig.Mapper.StartTestTurn(6545, 0, rig.Now);
+        rig.Run(200, step: 7).Advance(4);
+        Assert.Equal(6545, rig.Fake.Injector.MovedX);
+        Assert.Single(rig.Reports);
+    }
 }

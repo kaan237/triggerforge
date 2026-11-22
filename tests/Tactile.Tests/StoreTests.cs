@@ -2,12 +2,93 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
 using Tactile.Core;
+using Tactile.Device.DualSense;
 using Tactile.Input;
 
 namespace Tactile.Tests;
 
 public class StoreTests
 {
+    [Fact]
+    public void Legacy_shift_layer_migrates_executes_and_round_trips_with_its_mirror()
+    {
+        using var dir = new TempDir();
+        Directory.CreateDirectory(dir.Profiles);
+        string id = Validation.NewId();
+        File.WriteAllText(Path.Combine(dir.Profiles, id + ".json"), """
+            {
+              "version": 1, "name": "Legacy",
+              "mapping": {
+                "enabled": true,
+                "layerButton": "l1",
+                "buttons": { "cross": { "press": { "kind": "key", "keys": ["a"] } } },
+                "layer": { "cross": { "press": { "kind": "key", "keys": ["b"] } } }
+              }
+            }
+            """);
+        var store = new ProfileStore(dir.Path);
+        Profile profile = Assert.Single(store.All);
+        MappingLayer layer = Assert.Single(profile.Mapping.Layers);
+        Assert.Equal(LayerMode.Hold, layer.Mode);
+        Assert.Equal("l1", layer.Button);
+        Assert.Equal("l1", profile.Mapping.LayerButton);
+        Assert.Same(layer.Buttons, profile.Mapping.Layer);
+        Assert.Equal([Key.B], layer.Buttons["cross"].Press.Keys!);
+
+        store.Save(profile);
+        Profile reloaded = Assert.Single(new ProfileStore(dir.Path).All);
+        Assert.Equal(store.Export(profile.Id), new ProfileStore(dir.Path).Export(reloaded.Id));
+        Assert.Same(reloaded.Mapping.Layers[0].Buttons, reloaded.Mapping.Layer);
+        using var rig = new MapperRig(reloaded.Mapping);
+        rig.Press(Buttons.L1).Press(Buttons.Cross).Release(Buttons.Cross).Release(Buttons.L1);
+        rig.Press(Buttons.Cross).Release(Buttons.Cross);
+        Assert.Equal(["B down", "B up", "A down", "A up"], rig.Take());
+    }
+
+    [Fact]
+    public void Import_strips_every_phase_11_run_without_counting_the_legacy_mirror_twice()
+    {
+        using var dir = new TempDir();
+        var run = new ActionConfig { Kind = ActionKind.Run, Path = @"C:\Tools\example.exe" };
+        var binding = new Binding { Press = run };
+        var trigger = new TriggerMapping { Mode = TriggerStageMode.Additive, Soft = run, Full = run };
+        var ring = new StickMapping { RingMode = StickRingMode.Outer, RingAction = run };
+        var profile = new Profile
+        {
+            Mapping = new MappingConfig
+            {
+                Buttons = Bind.Map(("circle", binding)),
+                Layer = Bind.Map(("cross", binding)),
+                Layers =
+                [
+                    new() { Button = "l1", Buttons = Bind.Map(("cross", binding)) },
+                    new() { Button = "r1", Buttons = Bind.Map(("cross", binding)) },
+                ],
+                Chords =
+                [
+                    new() { Buttons = ["cross", "square"], Action = run },
+                    new() { Buttons = ["cross", "triangle"], Action = Bind.Keys(Key.B) },
+                ],
+                Triggers = new() { Left = trigger, Right = trigger },
+                Sticks = new() { Left = ring, Right = ring },
+            },
+        };
+        MappingConfig imported = new ProfileStore(dir.Path).Import(JsonSerializer.Serialize(profile, TactileJson.Options), out int removed).Mapping;
+        Assert.Equal(10, removed);
+        Assert.Equal(ActionKind.None, imported.Buttons["circle"].Press.Kind);
+        Assert.All(imported.Layers, l => Assert.Equal(ActionKind.None, l.Buttons["cross"].Press.Kind));
+        Assert.Same(imported.Layers[0].Buttons, imported.Layer);
+        Assert.Equal(ActionKind.Key, Assert.Single(imported.Chords).Action.Kind);
+        foreach (TriggerMapping item in new[] { imported.Triggers.Left, imported.Triggers.Right })
+        {
+            Assert.Equal(ActionKind.None, item.Soft.Kind);
+            Assert.Equal(ActionKind.None, item.Full.Kind);
+        }
+
+        Assert.Equal(ActionKind.None, imported.Sticks.Left.RingAction.Kind);
+        Assert.Equal(ActionKind.None, imported.Sticks.Right.RingAction.Kind);
+    }
+
     [Fact]
     public void Phase_8_files_load_with_phase_10_defaults_and_keep_existing_behavior()
     {

@@ -1,14 +1,15 @@
 import { L } from "../i18n";
 import { useState } from "react";
-import type { Binding, ButtonName, Direction, GyroMouse, Profile, StickMapping, TouchpadMapping } from "../host";
+import type { Binding, ButtonName, Direction, FlickStickConfig, GyroMouse, Profile, StickMapping, TouchpadMapping } from "../host";
 import { ActionEditor, BindingEditor, KeyField } from "../MappingEditors";
-import { bindingSummary, buttonDefs, directions, gyroModes } from "../mapping";
+import { bindingSummary, buttonDefs, directions, flickSnapModes, gyroModes, stickRingModes } from "../mapping";
 import { clamp, defaultBinding, processStick, rawAxis } from "../model";
 import { useApp, useInput } from "../state";
 import { Check, Section, Segmented, Slider, Toggle, fixed, pct } from "../ui";
 import type { EditMapping } from "./Mapping";
 
 type TabProps = { draft: Profile; editMapping: EditMapping };
+type CalibrationProps = TabProps & { countdown: number; onTestTurn: () => void };
 
 const times = (v: number) => `${fixed(1)(v)}×`;
 
@@ -65,7 +66,7 @@ export function TouchpadTab({ draft, editMapping }: TabProps) {
 
   return (
     <div className="tab-grid">
-      <Section title="Touchpad" className="tab-main">
+      <Section title={L("Touchpad", "Touchpad")} className="tab-main">
         <div className="row-field">
           <span className="label">{L("Mode", "Kullanım")}</span>
           <Segmented
@@ -136,7 +137,7 @@ export function TouchpadTab({ draft, editMapping }: TabProps) {
 
 // ---- gyro mouse ----
 
-export function GyroMouseTab({ draft, editMapping }: TabProps) {
+export function GyroMouseTab({ draft, editMapping, countdown, onTestTurn }: CalibrationProps) {
   const g = draft.mapping.gyroMouse;
   const input = useInput();
   const set = (patch: Partial<GyroMouse>) => editMapping((m) => ({ ...m, gyroMouse: { ...m.gyroMouse, ...patch } }));
@@ -179,23 +180,28 @@ export function GyroMouseTab({ draft, editMapping }: TabProps) {
           />
         </div>
         <div className="tab-controls">
+          <Toggle label={L("Use 360° calibration (1× = 1:1 turn)", "360° kalibrasyonunu kullan (1× = 1:1 dönüş)")} checked={g.useCalibration} onChange={(useCalibration) => set({ useCalibration })} />
           <Slider label={L("Horizontal speed", "Yatay hız")} min={0.1} max={10} step={0.1} value={g.sensitivityX} format={times} onChange={(sensitivityX) => set({ sensitivityX })} />
           <Slider label={L("Vertical speed", "Dikey hız")} min={0.1} max={10} step={0.1} value={g.sensitivityY} format={times} onChange={(sensitivityY) => set({ sensitivityY })} />
           <Slider label={L("Smoothing", "Yumuşatma")} min={0} max={0.9} step={0.01} value={g.smoothing} format={pct} onChange={(smoothing) => set({ smoothing })} />
           <Slider label={L("Deadzone", "Ölü bölge")} min={0} max={5} step={0.1} value={g.deadzone} format={(v) => `${fixed(1)(v)}°/s`} onChange={(deadzone) => set({ deadzone })} />
           <div className="row-field">
             <span className="label">{L("Invert", "Ters çevir")}</span>
-            <Check label="X" checked={g.invertX} onChange={(invertX) => set({ invertX })} />
-            <Check label="Y" checked={g.invertY} onChange={(invertY) => set({ invertY })} />
+            <Check label={L("X", "X")} checked={g.invertX} onChange={(invertX) => set({ invertX })} />
+            <Check label={L("Y", "Y")} checked={g.invertY} onChange={(invertY) => set({ invertY })} />
           </div>
         </div>
       </Section>
       <Section title={L("Live", "Canlı")}>
         <dl className="kv compact">
-          <dt>Gyro °/s</dt>
+          <dt>{L("Gyro °/s", "Gyro °/sn")}</dt>
           <dd className="num">{input ? input.gyro.map(f).join("  ") : "—"}</dd>
         </dl>
-        <p className="hint mode-hint">{L("At 1×, each degree moves the pointer 10 pixels. If it drifts, calibrate the gyro on the Sticks page.", "1× hız derece başına 10 piksel. Kayma varsa Analoglar sayfasından gyroyu kalibre et.")}</p>
+        {!g.useCalibration && <p className="hint mode-hint">{L("At 1×, each degree moves the pointer 10 pixels.", "1× hızda her derece imleci 10 piksel hareket ettirir.")}</p>}
+        <p className="hint mode-hint">{L("If it drifts, calibrate the gyro on the Sticks page.", "Kayma varsa Analoglar sayfasından gyroyu kalibre et.")}</p>
+      </Section>
+      <Section title={L("360° calibration", "360° kalibrasyon")} className="tab-wide">
+        <CalibrationControls draft={draft} editMapping={editMapping} countdown={countdown} onTestTurn={onTestTurn} />
       </Section>
     </div>
   );
@@ -204,24 +210,27 @@ export function GyroMouseTab({ draft, editMapping }: TabProps) {
 // ---- sticks ----
 
 const keyPresets: { name: string; keys: Record<Direction, string> }[] = [
-  { name: "WASD", keys: { up: "w", down: "s", left: "a", right: "d" } },
+  { get name() { return L("WASD", "WASD"); }, keys: { up: "w", down: "s", left: "a", right: "d" } },
   { get name() { return L("Arrow keys", "Ok tuşları"); }, keys: { up: "up", down: "down", left: "left", right: "right" } },
-  { name: "Numpad", keys: { up: "numpad8", down: "numpad2", left: "numpad4", right: "numpad6" } },
+  { get name() { return L("Numpad", "Sayısal tuş takımı"); }, keys: { up: "numpad8", down: "numpad2", left: "numpad4", right: "numpad6" } },
 ];
 
-function StickPreview({ side, cfg }: { side: "left" | "right"; cfg: StickMapping }) {
-  const { draft } = useApp();
+function StickPreview({ side, cfg, flickEnabled }: { side: "left" | "right"; cfg: StickMapping; flickEnabled: boolean }) {
+  const { draft, status, dirty, activeId } = useApp();
   const input = useInput();
   const R = 50;
-  const pos = input ? (side === "left" ? input.left : input.right) : ([128, 128] as [number, number]);
+  const pos = status?.connected ? input?.[side] : undefined;
   const hostProcessed = side === "left" ? input?.leftProcessed : input?.rightProcessed;
-  const [x, y] = hostProcessed ?? (draft ? processStick(rawAxis(pos[0]), rawAxis(pos[1]), draft.sticks[side]) : [0, 0]);
+  const [x, y] = pos && draft
+    ? (!dirty && draft.id === activeId && hostProcessed) || processStick(rawAxis(pos[0]), rawAxis(pos[1]), draft.sticks[side])
+    : [0, 0];
   const t = cfg.threshold * R;
-  const keys = cfg.mode === "keys";
+  const keys = cfg.mode === "keys" && !flickEnabled;
   const lit = (d: Direction) => keys && ((d === "up" && y < -cfg.threshold) || (d === "down" && y > cfg.threshold) || (d === "left" && x < -cfg.threshold) || (d === "right" && x > cfg.threshold));
   return (
     <svg viewBox="-60 -60 120 120" className="stick-preview" role="img" aria-label={L("Stick threshold", "Analog eşiği")}>
       <circle r={R} className="rim" />
+      {cfg.ringMode !== "off" && <circle r={cfg.ringThreshold * R} className="thr" />}
       {keys && <rect x={-t} y={-t} width={t * 2} height={t * 2} className="thr" />}
       {keys &&
         (["up", "down", "left", "right"] as Direction[]).map((d) => {
@@ -233,7 +242,7 @@ function StickPreview({ side, cfg }: { side: "left" | "right"; cfg: StickMapping
   );
 }
 
-function StickMappingPanel({ side, cfg, onChange }: { side: "left" | "right"; cfg: StickMapping; onChange: (c: StickMapping) => void }) {
+function StickMappingPanel({ side, cfg, flickEnabled, onChange }: { side: "left" | "right"; cfg: StickMapping; flickEnabled: boolean; onChange: (c: StickMapping) => void }) {
   const set = (patch: Partial<StickMapping>) => onChange({ ...cfg, ...patch });
   const preset = keyPresets.find((p) => directions.every((d) => p.keys[d.id] === cfg.keys[d.id]));
   return (
@@ -252,9 +261,10 @@ function StickMappingPanel({ side, cfg, onChange }: { side: "left" | "right"; cf
         />
       </div>
       <div className="stick-map">
-        <StickPreview side={side} cfg={cfg} />
+        <StickPreview side={side} cfg={cfg} flickEnabled={flickEnabled} />
         <div className="stick-map-controls">
-          {cfg.mode === "off" && <p className="hint">{L("Stick input goes to the game only.", "Analog yalnız oyuna gider.")}</p>}
+          {flickEnabled ? <p className="hint">{L("Flick Stick handles the right stick. Ring actions still work.", "Sağ analoğu Flick Stick yönetir. Halka eylemleri çalışmaya devam eder.")}</p>
+            : cfg.mode === "off" && cfg.ringMode === "off" && <p className="hint">{L("Stick input goes to the game only.", "Analog yalnız oyuna gider.")}</p>}
           {cfg.mode === "keys" && (
             <>
               <div className="row-field">
@@ -290,16 +300,70 @@ function StickMappingPanel({ side, cfg, onChange }: { side: "left" | "right"; cf
           )}
         </div>
       </div>
+      <div className="tab-controls">
+        <h3>{L("Stick ring", "Analog halkası")}</h3>
+        <Segmented label={L("Ring mode", "Halka modu")} value={cfg.ringMode} options={stickRingModes} onChange={(ringMode) => set({ ringMode })} />
+        {cfg.ringMode !== "off" && (
+          <>
+            <Slider label={L("Ring threshold", "Halka eşiği")} min={0.2} max={0.98} step={0.01} value={cfg.ringThreshold} format={pct} onChange={(ringThreshold) => set({ ringThreshold })} />
+            <Slider label={L("Ring hysteresis", "Halka bırakma farkı")} min={0.01} max={0.2} step={0.01} value={cfg.ringHysteresis} format={pct} onChange={(ringHysteresis) => set({ ringHysteresis })} />
+            <div className="bind-row"><span className="label">{L("Ring action", "Halka eylemi")}</span><ActionEditor action={cfg.ringAction} onChange={(ringAction) => set({ ringAction })} /></div>
+          </>
+        )}
+      </div>
     </Section>
   );
 }
 
-export function StickMappingTab({ draft, editMapping }: TabProps) {
+function CalibrationControls({ draft, editMapping, countdown, onTestTurn }: CalibrationProps) {
+  const { countsPer360 } = draft.mapping.flickStick;
+  const setCounts = (counts: number) => editMapping((m) => ({
+    ...m, flickStick: { ...m.flickStick, countsPer360: clamp(counts, 500, 30000) },
+  }));
+  return (
+    <div className="tab-controls">
+      <p className="hint">{L("Pick a landmark in the game. After each test, adjust the count until the view returns to that landmark.", "Oyunda bir referans noktası seç. Her denemeden sonra görüntü aynı noktaya dönene kadar sayımı ayarla.")}</p>
+      <Slider label={L("Mouse counts per 360°", "360° başına fare sayımı")} min={500} max={30000} value={countsPer360} onChange={setCounts} />
+      <div className="button-group">
+        {[-100, -10, 10, 100].map((step) => {
+          const label = step > 0 ? `+${step}` : `${step}`;
+          const next = clamp(countsPer360 + step, 500, 30000);
+          return <button key={step} className="button" disabled={next === countsPer360} onClick={() => setCounts(next)}>{L(label, label)}</button>;
+        })}
+        <button className="button" disabled={countdown > 0} onClick={onTestTurn}>{L("Test 360° turn (2s)", "360° dönüşü dene (2 sn)")}</button>
+        <span role="status" className="small">{countdown > 0 && L(`Focus the game · ${countdown}s`, `Oyuna geç · ${countdown} sn`)}</span>
+      </div>
+    </div>
+  );
+}
+
+export function StickMappingTab({ draft, editMapping, countdown, onTestTurn }: CalibrationProps) {
+  const f = draft.mapping.flickStick;
+  const set = (patch: Partial<FlickStickConfig>) => editMapping((m) => ({ ...m, flickStick: { ...m.flickStick, ...patch } }));
   return (
     <div className="sticks-grid">
-      {(["left", "right"] as const).map((s) => (
-        <StickMappingPanel key={s} side={s} cfg={draft.mapping.sticks[s]} onChange={(c) => editMapping((m) => ({ ...m, sticks: { ...m.sticks, [s]: c } }))} />
-      ))}
+      {(["left", "right"] as const).map((side) => {
+        const panel = <StickMappingPanel side={side} cfg={draft.mapping.sticks[side]} flickEnabled={side === "right" && f.enabled} onChange={(c) => editMapping((m) => ({ ...m, sticks: { ...m.sticks, [side]: c } }))} />;
+        return (
+          <div key={side} className="tab-controls">
+            {panel}
+            {side === "right" && (
+              <Section title={L("Flick Stick and 360° calibration", "Flick Stick ve 360° kalibrasyon")}>
+                <Toggle label={L("Enable Flick Stick", "Flick Stick’i aç")} checked={f.enabled} onChange={(enabled) => set({ enabled })} />
+                <CalibrationControls draft={draft} editMapping={editMapping} countdown={countdown} onTestTurn={onTestTurn} />
+                <Slider label={L("Flick threshold", "Hızlı dönüş eşiği")} min={0.5} max={0.98} step={0.01} value={f.threshold} format={pct} onChange={(threshold) => set({ threshold })} />
+                <Slider label={L("Flick duration", "Hızlı dönüş süresi")} min={30} max={300} value={f.flickTimeMs} format={(ms) => L(`${ms} ms`, `${ms} ms`)} onChange={(flickTimeMs) => set({ flickTimeMs })} />
+                <div className="row-field">
+                  <span className="label">{L("Snap", "Yöne hizala")}</span>
+                  <Segmented label={L("Snap", "Yöne hizala")} value={f.snap} options={flickSnapModes} onChange={(snap) => set({ snap })} />
+                </div>
+                <Slider label={L("Forward deadzone angle", "İleri yön ölü bölge açısı")} min={0} max={45} step={0.5} value={f.deadzoneAngle} format={(v) => `${fixed(1)(v)}°`} onChange={(deadzoneAngle) => set({ deadzoneAngle })} />
+                <Slider label={L("Sweep smoothing", "Çevresel dönüş yumuşatma")} min={0} max={0.9} step={0.01} value={f.smoothing} format={pct} onChange={(smoothing) => set({ smoothing })} />
+              </Section>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -5,6 +5,48 @@ namespace Tactile.Tests.EmulationCore;
 
 public class EmulationInputTests
 {
+    [Fact]
+    public void Mapped_buttons_include_four_layers_activators_chords_and_both_triggers()
+    {
+        Binding binding = Bind.Key(Tactile.Input.Key.A);
+        var trigger = new TriggerMapping { Mode = TriggerStageMode.Additive, Full = binding.Press };
+        var profile = new Profile
+        {
+            Mapping = new MappingConfig
+            {
+                Enabled = true,
+                Layers =
+                [
+                    new() { Button = "fn1", Buttons = Bind.Map(("cross", binding)) },
+                    new() { Button = "fn2", Buttons = Bind.Map(("square", binding)) },
+                    new() { Button = "paddleLeft", Buttons = Bind.Map(("circle", binding)) },
+                    new() { Button = "paddleRight", Buttons = Bind.Map(("triangle", binding)) },
+                ],
+                Chords = [new() { Buttons = ["l1", "r1"], Action = binding.Press }],
+                Triggers = new() { Left = trigger, Right = trigger },
+            },
+        };
+        Assert.Equal(Buttons.Fn1 | Buttons.Fn2 | Buttons.PaddleLeft | Buttons.PaddleRight |
+            Buttons.Cross | Buttons.Square | Buttons.Circle | Buttons.Triangle | Buttons.L1 | Buttons.R1 | Buttons.L2 | Buttons.R2,
+            EmulationInput.MappedButtons(profile));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Flick_centering_keeps_the_gyro_offset_and_reserves_the_physical_right_stick(bool swap)
+    {
+        var config = new EmulationConfig { SwapSticks = swap };
+        InputState input = Inputs.Make(left: new Stick(20, 40), right: new Stick(200, 210));
+        Assert.Equal(swap ? input.Left : input.Right, EmulationInput.Transform(input, config).Right);
+
+        InputState centered = EmulationInput.Transform(input, config, flickStickEnabled: true);
+        Assert.Equal(new Stick(128, 128), centered.Right);
+        Assert.Equal(input.Left, centered.Left);
+        InputState offset = EmulationInput.Transform(input, config, gyro: (0.5f, -0.5f), flickStickEnabled: true);
+        Assert.Equal(new Stick(192, 192), offset.Right);
+    }
+
     private static EmulationConfig Remap(params (string From, string To)[] pairs) =>
         new() { Remap = pairs.ToDictionary(p => p.From, p => p.To) };
 

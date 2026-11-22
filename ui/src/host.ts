@@ -130,13 +130,51 @@ export type GyroMouse = {
   invertY: boolean;
   smoothing: number;
   deadzone: number;
+  useCalibration: boolean;
 };
+
+export type StickRingMode = "off" | "outer" | "inner";
 
 export type StickMapping = {
   mode: "off" | "keys" | "mouse" | "scroll";
   keys: Record<Direction, KeyName>; // "none" allowed
   threshold: number;
   speed: number;
+  ringMode: StickRingMode;
+  ringThreshold: number;
+  ringHysteresis: number;
+  ringAction: Action;
+};
+
+export type LayerMode = "hold" | "toggle";
+export type MappingLayer = {
+  name: string;
+  button: ButtonName | "none";
+  mode: LayerMode;
+  buttons: Partial<Record<ButtonName, Binding>>;
+};
+
+export type ButtonChord = { buttons: ButtonName[]; action: Action };
+export type TriggerStageMode = "off" | "additive" | "exclusive" | "hipFire";
+export type TriggerMapping = {
+  mode: TriggerStageMode;
+  softThreshold: number;
+  fullThreshold: number;
+  hysteresis: number;
+  hipFireMs: number;
+  soft: Action;
+  full: Action;
+};
+
+export type FlickSnapMode = "off" | "four" | "eight";
+export type FlickStickConfig = {
+  enabled: boolean;
+  countsPer360: number;
+  threshold: number;
+  flickTimeMs: number;
+  snap: FlickSnapMode;
+  deadzoneAngle: number;
+  smoothing: number;
 };
 
 export type Mapping = {
@@ -144,6 +182,11 @@ export type Mapping = {
   layerButton: ButtonName | "none";
   buttons: Partial<Record<ButtonName, Binding>>;
   layer: Partial<Record<ButtonName, Binding>>;
+  layers: MappingLayer[];
+  chordWindowMs: number;
+  chords: ButtonChord[];
+  triggers: Pair<TriggerMapping>;
+  flickStick: FlickStickConfig;
   touchpad: TouchpadMapping;
   gyroMouse: GyroMouse;
   sticks: Pair<StickMapping>;
@@ -445,6 +488,7 @@ export type UiMessage =
   | { type: "audio.apps" }
   | { type: "mapping.pause"; paused: boolean }
   | { type: "mapping.togglePause" }
+  | { type: "mapping.testTurn"; counts: number; delayMs?: number }
   | { type: "backups.list" }
   | { type: "backups.restore"; id: string }
   | { type: "run.pick" }
