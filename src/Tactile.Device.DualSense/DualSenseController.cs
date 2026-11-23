@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using Tactile.Device.Hid;
 
 namespace Tactile.Device.DualSense;
@@ -37,13 +38,16 @@ public sealed class DualSenseController : IDisposable
     private int _sequence;
     private bool _sentFirst;
     private volatile bool _hapticsActive;
+    private readonly bool _dongle;
+    private bool _calibrationPending;
 
-    private DualSenseController(HidDevice device, ControllerDetails details, UsbFeatureReports features)
+    private DualSenseController(HidDevice device, ControllerDetails details, UsbFeatureReports features, bool dongle = false)
     {
         _device = device;
         DevicePath = device.Info.Path;
         Details = details;
         Features = features;
+        _dongle = dongle;
         _writeBuffer = new byte[Math.Max(device.Info.OutputReportLength, HapticReport.SpeakerDoubleLength)];
         _reader = new Thread(ReadLoop) { IsBackground = true, Name = "TriggerForge: dualsense-reader", Priority = ThreadPriority.AboveNormal };
     }
@@ -57,7 +61,7 @@ public sealed class DualSenseController : IDisposable
         _writeBuffer = [];
     }
 
-    public ControllerDetails Details { get; }
+    public ControllerDetails Details { get; private set; }
 
     /// <summary>Feature reports read at open, in USB form (what a virtual DualSense answers with).</summary>
     public UsbFeatureReports Features { get; }
@@ -77,6 +81,11 @@ public sealed class DualSenseController : IDisposable
 
     public static DualSenseController Open(ControllerInfo info)
     {
+        if (info.Model == ControllerModel.DualShock4)
+        {
+            return OpenDs4(info);
+        }
+
         HidDevice device = HidDevice.Open(info.Hid);
         try
         {
@@ -107,8 +116,100 @@ public sealed class DualSenseController : IDisposable
         }
     }
 
+    private static DualSenseController OpenDs4(ControllerInfo info)
+    {
+        bool dongle = info.Hid.ProductId == DualSenseIds.DualShock4DongleProductId;
+        bool grouped = info.Link == Link.Bluetooth || dongle;
+        HidDevice device = HidDevice.Open(info.Hid);
+        try
+        {
+            // On Bluetooth the 0x05 read also switches the controller from reduced to full reports.
+            byte[]? calibration = ReadDs4Calibration(device, info.Link, dongle);
+            bool ready = calibration is not null && !ImuCalibration.IsBlank(calibration);
+            string? mac = info.Link == Link.Usb ? ReadDs4UsbMac(device) : MacFromPath(info.Hid.Path);
+
+            var details = new ControllerDetails(
+                info.Model,
+                info.Link,
+                mac,
+                null,
+                ready ? ImuCalibration.ParseDualShock4(calibration, grouped) : ImuCalibration.Identity);
+            var controller = new DualSenseController(device, details, UsbFeatureReports.None, dongle)
+            {
+                _calibrationPending = dongle && !ready,
+            };
+            if (info.Link == Link.Bluetooth)
+            {
+                controller.WriteRaw(Ds4OutputReport.BuildBluetooth(OutputState.Default));
+            }
+
+            controller._reader!.Start();
+            return controller;
+        }
+        catch
+        {
+            device.Dispose();
+            throw;
+        }
+    }
+
+    private static byte[]? ReadDs4Calibration(HidDevice device, Link link, bool dongle)
+    {
+        byte id = link == Link.Bluetooth ? (byte)0x05 : (byte)0x02;
+        byte[]? feature = null;
+        for (int attempt = 0; attempt < (dongle ? 5 : 1); attempt++)
+        {
+            if (attempt > 0)
+            {
+                Thread.Sleep(2);
+            }
+
+            feature = ReadFeature(device, id);
+            if (feature is not null && !ImuCalibration.IsBlank(feature))
+            {
+                break;
+            }
+        }
+
+        return feature;
+    }
+
+    private static string? ReadDs4UsbMac(HidDevice device)
+    {
+        foreach (byte id in new byte[] { 0x12, 0x81 })
+        {
+            if (ReadFeature(device, id) is { } feature && ParseMac(feature, id) is { } mac)
+            {
+                return mac;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? MacFromPath(string path)
+    {
+        Match m = BluetoothAddressInPath.Match(path);
+        return m.Success
+            ? string.Join(':', Enumerable.Range(0, 6).Select(i => m.Groups[1].Value.Substring(i * 2, 2).ToUpperInvariant()))
+            : null;
+    }
+
+    private static readonly Regex BluetoothAddressInPath = new("_([0-9a-fA-F]{12})(?=[&#_]|$)", RegexOptions.Compiled);
+
     public static string? ReadMac(ControllerInfo info)
     {
+        if (info.Model == ControllerModel.DualShock4)
+        {
+            if (info.Link == Link.Bluetooth)
+            {
+                return MacFromPath(info.Hid.Path);
+            }
+
+            using HidDevice usb = HidDevice.Open(info.Hid);
+            return ReadDs4UsbMac(usb);
+        }
+
         using HidDevice device = HidDevice.Open(info.Hid);
         return ReadFeature(device, 0x09) is { } pairing ? ParseMac(pairing) : null;
     }
@@ -123,7 +224,9 @@ public sealed class DualSenseController : IDisposable
     {
         lock (_writeLock)
         {
-            if ((isCurrent is not null && !isCurrent()) || (!force && state.Equals(_lastSent)))
+            bool ds4 = Details.Model == ControllerModel.DualShock4;
+            bool same = ds4 ? Ds4OutputReport.SameEffect(state, _lastSent) : state.Equals(_lastSent);
+            if ((isCurrent is not null && !isCurrent()) || (!force && same))
             {
                 return false;
             }
@@ -137,9 +240,11 @@ public sealed class DualSenseController : IDisposable
 
             OutputOptions options = CurrentOptions();
 
-            byte[] report = Details.Link == Link.Usb
-                ? OutputReport.BuildUsb(state, options)
-                : OutputReport.BuildBluetooth(state, _sequence++, options);
+            byte[] report = ds4
+                ? (Details.Link == Link.Usb ? Ds4OutputReport.BuildUsb(state) : Ds4OutputReport.BuildBluetooth(state))
+                : Details.Link == Link.Usb
+                    ? OutputReport.BuildUsb(state, options)
+                    : OutputReport.BuildBluetooth(state, _sequence++, options);
 
             if (Write(report))
             {
@@ -248,6 +353,10 @@ public sealed class DualSenseController : IDisposable
     {
         HidDevice device = _device!;
         byte[] buffer = new byte[device.Info.InputReportLength];
+        bool ds4 = Details.Model == ControllerModel.DualShock4;
+        var clock = default(Ds4Timestamp);
+        bool wasUnpaired = false;
+        bool calibrationAttempt = _calibrationPending;
         while (_running)
         {
             int read;
@@ -265,7 +374,41 @@ public sealed class DualSenseController : IDisposable
                 continue;
             }
 
-            switch (InputParser.TryParse(buffer.AsSpan(0, read), Details.Link, out InputState? state))
+            InputState? state;
+            ParseResult result;
+            if (ds4)
+            {
+                ReadOnlySpan<byte> report = buffer.AsSpan(0, read);
+                if (_dongle)
+                {
+                    if (Ds4InputParser.DongleUnpaired(report))
+                    {
+                        wasUnpaired = true;
+                        continue;
+                    }
+
+                    if (wasUnpaired)
+                    {
+                        wasUnpaired = false;
+                        clock = default;
+                        calibrationAttempt = _calibrationPending;
+                    }
+
+                    if (calibrationAttempt)
+                    {
+                        calibrationAttempt = false;
+                        ReloadDongleCalibration(device);
+                    }
+                }
+
+                result = Ds4InputParser.TryParse(report, Details.Link, ref clock, out state, _dongle);
+            }
+            else
+            {
+                result = InputParser.TryParse(buffer.AsSpan(0, read), Details.Link, out state);
+            }
+
+            switch (result)
             {
                 case ParseResult.Ok:
                     Stats.Reports++;
@@ -281,6 +424,22 @@ public sealed class DualSenseController : IDisposable
         }
 
         PublishDisconnect();
+    }
+
+    private void ReloadDongleCalibration(HidDevice device)
+    {
+        try
+        {
+            byte[]? feature = ReadDs4Calibration(device, Link.Usb, dongle: true);
+            if (feature is not null && !ImuCalibration.IsBlank(feature))
+            {
+                Details = Details with { Calibration = ImuCalibration.ParseDualShock4(feature, grouped: true) };
+                _calibrationPending = false;
+            }
+        }
+        catch (Exception e) when (e is IOException or ObjectDisposedException)
+        {
+        }
     }
 
     internal void PublishInput(InputState state)
@@ -306,9 +465,14 @@ public sealed class DualSenseController : IDisposable
         return device.TryGetFeature(buffer) ? buffer : null;
     }
 
-    private static string? ParseMac(byte[] pairing)
+    private static string? ParseMac(byte[] pairing, byte id = 0x09)
     {
-        if (pairing.Length < 7 || pairing[0] != 0x09)
+        if (pairing.Length < 7 || pairing[0] != id)
+        {
+            return null;
+        }
+
+        if (id != 0x09 && pairing.AsSpan(1, 6).IndexOfAnyExcept((byte)0) < 0)
         {
             return null;
         }
@@ -340,6 +504,11 @@ public sealed class HapticStreamer : IDisposable
     public HapticStreamer(DualSenseController controller, HapticBlockSource nextBlock, SpeakerFrameSource? nextSpeaker = null,
         byte bufferLength = 64, SpeakerPacket speakerPacket = SpeakerPacket.Single36)
     {
+        if (controller.Details.Model == ControllerModel.DualShock4)
+        {
+            throw new InvalidOperationException("The DualShock 4 has no haptic stream.");
+        }
+
         if (controller.Details.Link != Link.Bluetooth)
         {
             throw new InvalidOperationException("Haptic reports are Bluetooth only; over USB haptics are an audio stream.");
