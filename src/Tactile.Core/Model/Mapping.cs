@@ -9,7 +9,7 @@ public enum ActionKind { None, Key, MouseButton, Wheel, Macro, Profile, Run, Mic
 
 public enum WheelDirection { Up, Down, Left, Right }
 
-public enum SpecialAction { Screenshot, GameBar, TaskView, Desktop, ShowApp }
+public enum SpecialAction { Screenshot, GameBar, TaskView, Desktop, ShowApp, OnScreenKeyboard }
 
 public enum TouchpadMode { Off, Mouse, Zones }
 

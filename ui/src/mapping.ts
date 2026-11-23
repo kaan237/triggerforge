@@ -107,6 +107,7 @@ export const specials: { id: Special; label: string; hint: string }[] = [
   { id: "taskView", get label() { return L("Task View", "Görev görünümü"); }, hint: "Win + Tab" },
   { id: "desktop", get label() { return L("Show desktop", "Masaüstünü göster"); }, hint: "Win + D" },
   { id: "showApp", get label() { return L("Show TriggerForge", "Tactile'ı aç"); }, get hint() { return L("Brings this window to the front", "Bu pencereyi öne getirir"); } },
+  { id: "onScreenKeyboard", get label() { return L("On-screen keyboard", "Ekran klavyesi"); }, get hint() { return L("Opens or closes the controller on-screen keyboard", "Kontrolcüyle kullanılan ekran klavyesini açar ya da kapatır"); } },
 ];
 
 // A fresh action of that kind with its own fields filled.

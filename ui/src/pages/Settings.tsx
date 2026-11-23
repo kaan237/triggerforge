@@ -8,7 +8,7 @@ import { KeyField } from "../MappingEditors";
 import { deepEqual } from "../model";
 import { Outputs } from "../Outputs";
 import { useApp, useInput } from "../state";
-import { PageHead, Segmented, Toggle } from "../ui";
+import { PageHead, Segmented, Slider, Toggle } from "../ui";
 import { Updates } from "./Updates";
 
 function NumberField({ label, value, min, max, step = 1, suffix, onChange, hint }: { label: string; value: number; min: number; max: number; step?: number; suffix?: string; hint?: string; onChange: (v: number) => void }) {
@@ -217,6 +217,7 @@ export function Settings() {
           <ul className="hint">
             <li>{L("FnL + R1 · Next profile", "FnL + R1 · Sonraki profil")}</li>
             <li>{L("FnL + L1 · Previous profile", "FnL + L1 · Önceki profil")}</li>
+            <li>{L("FnL + Triangle · On-screen keyboard", "FnL + Üçgen · Ekran klavyesi")}</li>
             <li>{L("FnR + Triangle / Circle / Cross / Square · Profiles 1 / 2 / 3 / 4", "FnR + Üçgen / Daire / Çarpı / Kare · Profil 1 / 2 / 3 / 4")}</li>
           </ul>
           <p className="hint">{L("Secondary controllers get profiles, lighting, triggers and virtual controllers. Mapping, macros, haptics and telemetry are available on the primary controller only.", "İkincil kontrolcüler profil, ışık, tetik ve sanal kontrolcü desteği alır. Tuş eşleme, makrolar, haptik efektler ve telemetri yalnızca birincil kontrolcüde çalışır.")}</p>
@@ -265,6 +266,45 @@ export function Settings() {
           <NumberField label={L("Idle sleep", "Boşta uyku")} hint={L("Turns off the Bluetooth controller after inactivity. Set to 0 to disable.", "Bluetooth'ta bu süre dokunulmazsa kontrolcü kapanır; 0 kapalı")} value={draft.idleSleepMinutes} min={0} max={120} suffix={L("min", "dk")} onChange={(idleSleepMinutes) => set({ idleSleepMinutes })} />
           <NumberField label={L("First battery warning", "İlk pil uyarısı")} value={warnings[0]} min={1} max={90} suffix="%" onChange={(v) => set({ lowBatteryWarnings: [v, Math.min(warnings[1], v - 1)] })} />
           <NumberField label={L("Second battery warning", "İkinci pil uyarısı")} value={warnings[1]} min={0} max={89} suffix="%" onChange={(v) => set({ lowBatteryWarnings: [Math.max(warnings[0], v + 1), v] })} />
+        </section>
+
+        <section className="settings-group">
+          <h2>{L("On-screen display (OSD)", "Ekran bildirimi (OSD)")}</h2>
+          <Toggle
+            label={L("Show on-screen notifications", "Ekran üstü bildirimleri göster")}
+            hint={L("Shows profile, layer, pause, low battery, and virtual controller changes on a click-through overlay. No game injection is used; notifications appear in windowed and borderless fullscreen games, and may not be visible in exclusive fullscreen games.", "Profil, katman, duraklatma, düşük pil ve sanal kontrolcü değişimlerini tıklanamaz bir üst katmanda gösterir. Oyuna enjeksiyon yapılmaz; pencereli ve penceresiz tam ekran oyunlarda görünür, gerçek özel tam ekran (exclusive fullscreen) oyunlarda görünmeyebilir.")}
+            checked={draft.osd.enabled}
+            onChange={(enabled) => set({ osd: { ...draft.osd, enabled } })}
+          />
+          <div className="setting-row">
+            <span>{L("Screen corner", "Ekran köşesi")}</span>
+            <Segmented
+              label={L("Screen corner", "Ekran köşesi")}
+              value={draft.osd.corner}
+              onChange={(corner) => set({ osd: { ...draft.osd, corner } })}
+              options={[
+                { id: "topLeft", label: L("Top left", "Sol üst") },
+                { id: "topRight", label: L("Top right", "Sağ üst") },
+                { id: "bottomLeft", label: L("Bottom left", "Sol alt") },
+                { id: "bottomRight", label: L("Bottom right", "Sağ alt") },
+              ]}
+            />
+          </div>
+          <NumberField label={L("Display duration", "Görünme süresi")} value={draft.osd.durationSeconds} min={1} max={5} suffix={L("sec", "sn")} onChange={(durationSeconds) => set({ osd: { ...draft.osd, durationSeconds: Math.round(durationSeconds) } })} />
+          <div className="setting-row">
+            <span>{L("Size", "Boyut")}</span>
+            <Segmented
+              label={L("Size", "Boyut")}
+              value={draft.osd.size}
+              onChange={(size) => set({ osd: { ...draft.osd, size } })}
+              options={[
+                { id: "small", label: L("Small", "Küçük") },
+                { id: "medium", label: L("Medium", "Orta") },
+                { id: "large", label: L("Large", "Büyük") },
+              ]}
+            />
+          </div>
+          <Slider label={L("Opacity", "Opaklık")} value={draft.osd.opacity} min={30} max={100} format={(v) => `${v}%`} onChange={(opacity) => set({ osd: { ...draft.osd, opacity } })} />
         </section>
 
         <section className="settings-group">

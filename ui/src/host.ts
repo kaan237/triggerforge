@@ -79,7 +79,7 @@ export type KeyName = string;
 export type ActionKind = "none" | "key" | "mouseButton" | "wheel" | "macro" | "profile" | "run" | "micMute" | "special";
 export type MouseButtonName = "left" | "right" | "middle" | "x1" | "x2";
 export type Direction = "up" | "down" | "left" | "right";
-export type Special = "screenshot" | "gameBar" | "taskView" | "desktop" | "showApp";
+export type Special = "screenshot" | "gameBar" | "taskView" | "desktop" | "showApp" | "onScreenKeyboard";
 
 // Flat: `kind` picks which fields are used; the host drops the rest.
 export type Action = {
@@ -405,8 +405,13 @@ export type AppSettings = {
   emulation: EmulationSettings;
   integration: IntegrationSettings;
   updates: UpdateSettings;
+  osd: OsdSettings;
   firstRunDone: boolean;
 };
+
+export type OsdCorner = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
+export type OsdSize = "small" | "medium" | "large";
+export type OsdSettings = { enabled: boolean; corner: OsdCorner; durationSeconds: number; size: OsdSize; opacity: number };
 
 export type UpdateSettings = { autoCheck: boolean };
 
@@ -428,6 +433,59 @@ export type UpdateStatus = {
   message: string | null;
   lastCheck: string | null;
 };
+
+// ---- community catalog (docs/contract-phase14.md) ----
+
+export type CatalogController = "dualsense" | "edge" | "any";
+export type CatalogError = "network" | "untrustedHost" | "tooLarge" | "badSignature" | "badManifest" | "badFile" | "outdated" | "storage" | "failed";
+export type CatalogProfileSummary = {
+  leftTrigger: TriggerMode;
+  rightTrigger: TriggerMode;
+  emulation: EmulationMode;
+  mappingEnabled: boolean;
+  layerCount: number;
+  chordCount: number;
+  macroCount: number;
+  gyroMouse: GyroMouse["mode"];
+  gyroStick: GyroMouse["mode"];
+  flickStick: boolean;
+  audioHaptics: boolean;
+  telemetryRules: number;
+};
+// Every text field comes from a third party: render as text only.
+export type CatalogEntry = {
+  id: string;
+  name: string;
+  games: string[];
+  controller: CatalogController;
+  tags: string[];
+  author: string;
+  version: string;
+  size: number;
+  description: { en: string; tr: string };
+  summary: CatalogProfileSummary;
+};
+export type CatalogStatus = {
+  type: "catalog.status";
+  state: "idle" | "loading" | "ready" | "importing" | "error";
+  updated: string | null;
+  profiles: CatalogEntry[];
+  importingId: string | null;
+  error: CatalogError | null;
+  message: string | null;
+};
+export type CatalogPreview = {
+  type: "catalog.preview";
+  id: string;
+  summary: CatalogProfileSummary;
+  description: string;
+  games: string[];
+  author: string;
+  version: string;
+  controller: CatalogController;
+  tags: string[];
+};
+export type ExportShare = { type: "exportShare"; id: string; fileName: string; json: string; entryJson: string; removedRunActions: number };
 
 export type ControllerStatus = {
   index: number;
@@ -514,6 +572,9 @@ export type HostMessage =
   | { type: "audioApps"; apps: AudioApp[] }
   | DriverProgress
   | UpdateStatus
+  | CatalogStatus
+  | CatalogPreview
+  | ExportShare
   | { type: "error"; message: string };
 
 // ---- UI → host (Phase 2 additions; Phase 1 test messages stay loose) ----
@@ -531,6 +592,10 @@ export type UiMessage =
   | { type: "controller.setPrimary"; mac: string }
   | { type: "controller.setProfile"; index: number; mac: string; profileId: string }
   | { type: "update.check" | "update.download" | "update.install" | "update.openPage" }
+  | { type: "catalog.list"; refresh?: boolean }
+  | { type: "catalog.preview" | "catalog.import"; id: string }
+  | { type: "catalog.openRepo" }
+  | { type: "profile.exportShare"; id: string }
   | { type: "logs.export" | "logs.open" }
   | { type: "gyro.calibrate" }
   | { type: "foreground.pick" }

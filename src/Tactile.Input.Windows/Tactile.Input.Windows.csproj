@@ -3,4 +3,5 @@
     <TargetFramework>net10.0-windows</TargetFramework>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../Tactile.Input/Tactile.Input.csproj" /></ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="Tactile.Tests" /></ItemGroup>
 </Project>

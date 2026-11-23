@@ -4,4 +4,7 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <AssemblyName>triggerforge-release</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Tactile.Core/Tactile.Core.csproj" />
+  </ItemGroup>
 </Project>

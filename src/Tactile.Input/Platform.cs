@@ -13,6 +13,11 @@ public interface IInputInjector
 
     /// <summary>120 = one notch. Positive is up (vertical) or right (horizontal).</summary>
     void Wheel(int delta, bool horizontal);
+
+    /// <summary>Types text as Unicode characters, independent of the keyboard layout.</summary>
+    void Text(ReadOnlySpan<char> text)
+    {
+    }
 }
 
 /// <summary>The Windows default recording device.</summary>
@@ -63,6 +68,10 @@ public sealed record InputPlatform(IInputInjector Injector, IMicrophone Micropho
         }
 
         public void Wheel(int delta, bool horizontal)
+        {
+        }
+
+        public void Text(ReadOnlySpan<char> text)
         {
         }
 

@@ -488,6 +488,16 @@ Yol haritası `docs/yol-haritasi.md` (Faz 10-15), dayanağı `docs/rakip-analizi
 - Denetim: ilk turda 12 bulgu (katman yarışı, port devri, F1 uzunluk denetimi, boşta uyanma, kapanış yarışı), tekrar denetimde 3 küçük bulgu; hepsi düzeltildi. DSU sel testindeki yarış giderildi.
 - Denenmeyenler (KH listesi `docs/contract-phase13.md` §7): gerçek F1/AC/ACC/BeamNG, `udptest.py` ile donanımda efekt, sanal DS4 gyro yönleri.
 
+### Faz 14 — Paylaşım ve ekran → 1.5.0 (2026-11-23)
+
+**Faz 14 sonucu**
+- Sözleşme `docs/contract-phase14.md`; plan denetiminde 18 bulgu çıktı, kararlar bölüm 9'a yazıldı.
+- Topluluk kataloğu: `kaan237/triggerforge-profiles` (public), ayrı ECDSA P-256 anahtarıyla imzalı `index.json`, revizyon geri alma koruması, yalnız `raw.githubusercontent.com`, boyut ve özet denetimi, program çalıştıran profillerin reddi. Yayın aracında `catalog keygen/pubkey/backup/restore/sign/verify`. Profiller sayfasında Topluluk sekmesi ve paylaşım için dışa aktarma. Başlangıç kataloğu 5 yarış profili.
+- Ekran bildirimi (OSD): tıklanamaz, odak almayan üst pencere; profil, katman, duraklatma, düşük pil, sanal kontrolcü. Varsayılan kapalı.
+- Ekran klavyesi: EN/TR düzen, `special: onScreenKeyboard` ya da Edge `Fn1 + Üçgen`; açıkken eşleme, sanal pad ve DSU nötr.
+- Denetim: ilk incelemede 15 bulgu, hepsi düzeltildi; tekrar denetimi yapıldı.
+- Denenmeyenler (KH listesi `docs/contract-phase14.md` §7B): gerçek masaüstünde OSD ve klavye pencereleri, oyun üstünde görünürlük, canlı katalogdan içe aktarma.
+
 ### Faz 9 — Yedek yol: Pico 2 W köprü (isteğe bağlı)
 
 Faz 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse: Pico 2 W firmware'i ile gerçek USB DualSense görünümü; uygulama aynı UI ve profil motoruyla Pico'yu yönetir. Referans: DS5Dongle (MIT).

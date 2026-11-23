@@ -14,6 +14,11 @@ internal interface IMappingHost
 
     void PulseConfirm() { }
 
+    void ToggleOnScreenKeyboard() { }
+
+    /// <summary>The topmost active shift layer's name; null when none is active.</summary>
+    void LayerChanged(string? name) { }
+
     /// <summary>A runtime failure, shown as a <c>mapping</c> notice.</summary>
     void Report(Notice notice);
 }
@@ -197,6 +202,13 @@ internal sealed class ActionDispatcher
 
     private void Special(SpecialAction special, TimeSpan now)
     {
+        if (special == SpecialAction.OnScreenKeyboard)
+        {
+            // Synchronous: the host only records the request; the input pass that ran this acts on it.
+            _host.ToggleOnScreenKeyboard();
+            return;
+        }
+
         Key? second = special switch
         {
             SpecialAction.Screenshot => Key.PrintScreen,

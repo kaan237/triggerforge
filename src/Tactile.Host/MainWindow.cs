@@ -1,6 +1,7 @@
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Tactile.Core;
+using Tactile.Core.Catalog;
 using Tactile.Core.Logging;
 using Tactile.Core.Updates;
 
@@ -16,10 +17,12 @@ internal sealed class MainWindow : Form
 
     private readonly WebView2 _view = new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Background };
     private readonly AppPaths _paths;
+    private readonly CatalogService _catalog;
 
     public MainWindow(AppCore core, Icon icon, AppPaths paths, UpdateService updates)
     {
         _paths = paths;
+        _catalog = new CatalogService(paths, typeof(MainWindow).Assembly.GetName().Version!);
         Text = "TriggerForge";
         Icon = icon;
         BackColor = Background;
@@ -27,12 +30,23 @@ internal sealed class MainWindow : Form
         Size = new Size(1240, 780);
         StartPosition = FormStartPosition.CenterScreen;
         Controls.Add(_view);
-        Bridge = new Bridge(core, this, PostRaw, paths, updates);
+        Bridge = new Bridge(core, this, PostRaw, paths, updates, _catalog);
         Load += async (_, _) => await InitializeViewAsync();
     }
 
     public Bridge Bridge { get; }
     public event Action? PauseHotkeyPressed;
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Bridge.Dispose();
+            _catalog.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
 
     protected override void WndProc(ref Message message)
     {

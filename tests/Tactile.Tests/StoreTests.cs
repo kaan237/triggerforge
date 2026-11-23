@@ -673,4 +673,84 @@ public class StoreTests
         Assert.Equal(list.Order(StringComparer.Ordinal), list);
         Assert.Equal(list.Order(), AutoEmulationResolver.BuiltInDualSenseGames.Order());
     }
+
+    [Fact]
+    public void Settings_without_osd_load_as_the_defaults_and_round_trip()
+    {
+        using var dir = new TempDir();
+        File.WriteAllText(Path.Combine(dir.Path, "settings.json"), """
+            { "version": 1, "edgeShortcuts": false, "closeToTray": false, "autoProfileDelayMs": 100 }
+            """);
+        AppSettings settings = new SettingsStore(dir.Path).Current;
+        Assert.Equal(new OsdSettings(), settings.Osd);
+        Assert.Equal((false, OsdCorner.TopRight, 2, OsdSize.Medium, 85),
+            (settings.Osd.Enabled, settings.Osd.Corner, settings.Osd.DurationSeconds, settings.Osd.Size, settings.Osd.Opacity));
+        Assert.Equal(1, settings.Version);
+        Assert.Equal(JsonSerializer.Serialize(Validation.Normalize(new AppSettings
+        {
+            EdgeShortcuts = false, CloseToTray = false, AutoProfileDelayMs = 100,
+        }), TactileJson.Options), JsonSerializer.Serialize(settings, TactileJson.Options));
+
+        var custom = Validation.Normalize(new AppSettings
+        {
+            Osd = new OsdSettings { Enabled = true, Corner = OsdCorner.BottomLeft, DurationSeconds = 4, Size = OsdSize.Large, Opacity = 60 },
+        });
+        string json = JsonSerializer.Serialize(custom, TactileJson.Options);
+        Assert.Contains("\"corner\": \"bottomLeft\"", json);
+        Assert.Equal(custom.Osd, Validation.Normalize(JsonSerializer.Deserialize<AppSettings>(json, TactileJson.Options)!).Osd);
+    }
+
+    [Theory]
+    [InlineData(0, 2)]
+    [InlineData(-3, 1)]
+    [InlineData(1, 1)]
+    [InlineData(5, 5)]
+    [InlineData(99, 5)]
+    public void Osd_duration_is_clamped_to_one_to_five_seconds(int value, int expected) =>
+        Assert.Equal(expected, Validation.Normalize(new AppSettings { Osd = new OsdSettings { DurationSeconds = value } }).Osd.DurationSeconds);
+
+    [Theory]
+    [InlineData(0, 85)]
+    [InlineData(-5, 30)]
+    [InlineData(10, 30)]
+    [InlineData(30, 30)]
+    [InlineData(100, 100)]
+    [InlineData(500, 100)]
+    public void Osd_opacity_is_clamped_to_thirty_to_hundred_percent(int value, int expected) =>
+        Assert.Equal(expected, Validation.Normalize(new AppSettings { Osd = new OsdSettings { Opacity = value } }).Osd.Opacity);
+
+    [Fact]
+    public void Osd_undefined_enums_and_a_null_block_fall_back_to_the_defaults()
+    {
+        OsdSettings osd = Validation.Normalize(new AppSettings
+        {
+            Osd = new OsdSettings { Corner = (OsdCorner)99, Size = (OsdSize)42 },
+        }).Osd;
+        Assert.Equal((OsdCorner.TopRight, OsdSize.Medium), (osd.Corner, osd.Size));
+
+        AppSettings fromNull = Validation.Normalize(JsonSerializer.Deserialize<AppSettings>("""{ "osd": null }""", TactileJson.Options)!);
+        Assert.Equal(new OsdSettings(), fromNull.Osd);
+    }
+
+    [Fact]
+    public void On_screen_keyboard_special_action_survives_normalization_and_a_round_trip()
+    {
+        var action = new ActionConfig { Kind = ActionKind.Special, Special = SpecialAction.OnScreenKeyboard };
+        Profile profile = Validation.Normalize(new Profile
+        {
+            Name = "Keys",
+            Mapping = new MappingConfig { Enabled = true, Buttons = Bind.Map(("mic", new Binding { Press = action })) },
+        });
+        Assert.Equal(SpecialAction.OnScreenKeyboard, profile.Mapping.Buttons["mic"].Press.Special);
+        string json = JsonSerializer.Serialize(profile, TactileJson.Options);
+        Assert.Contains("\"special\": \"onScreenKeyboard\"", json);
+        Profile back = Validation.Normalize(JsonSerializer.Deserialize<Profile>(json, TactileJson.Options)!);
+        Assert.Equal(SpecialAction.OnScreenKeyboard, back.Mapping.Buttons["mic"].Press.Special);
+
+        Profile legacy = Validation.Normalize(JsonSerializer.Deserialize<Profile>("""
+            { "version": 1, "name": "Old", "mapping": { "enabled": true,
+              "buttons": { "mic": { "press": { "kind": "special", "special": "gameBar" } } } } }
+            """, TactileJson.Options)!);
+        Assert.Equal(SpecialAction.GameBar, legacy.Mapping.Buttons["mic"].Press.Special);
+    }
 }

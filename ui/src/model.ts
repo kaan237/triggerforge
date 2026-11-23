@@ -188,6 +188,7 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     lowBatteryWarnings: [20, 10],
     runAsAdminHint: false,
     updates: { autoCheck: true },
+    osd: { enabled: false, corner: "topRight", durationSeconds: 2, size: "medium", opacity: 85 },
     firstRunDone: false,
     emulation: { enabled: true, hideController: true, audio: true, keepAudioDefaults: true, hapticBuffer: 64, speakerPacket: "single36", gameModes: {} },
     integration: {
@@ -398,7 +399,7 @@ function normalizeMappingAction(value?: Action | null): Action {
       return { kind: "micMute" };
     case "special": {
       const special = action.special;
-      return { kind: "special", special: special === "gameBar" || special === "taskView" || special === "desktop" || special === "showApp" ? special : "screenshot" };
+      return { kind: "special", special: special === "gameBar" || special === "taskView" || special === "desktop" || special === "showApp" || special === "onScreenKeyboard" ? special : "screenshot" };
     }
     default:
       return defaultAction();
@@ -515,6 +516,20 @@ function normalizeGameModes(value: unknown): EmulationSettings["gameModes"] {
   return out;
 }
 
+function normalizeOsd(o: Partial<AppSettings["osd"]> | undefined, d: AppSettings["osd"]): AppSettings["osd"] {
+  const int = (v: unknown, lo: number, hi: number, fallback: number) =>
+    typeof v === "number" && Number.isFinite(v) && v !== 0 ? Math.min(hi, Math.max(lo, Math.round(v))) : fallback;
+  const corner = o?.corner;
+  const size = o?.size;
+  return {
+    enabled: o?.enabled === true,
+    corner: corner === "topLeft" || corner === "bottomLeft" || corner === "bottomRight" ? corner : d.corner,
+    durationSeconds: int(o?.durationSeconds, 1, 5, d.durationSeconds),
+    size: size === "small" || size === "large" ? size : d.size,
+    opacity: int(o?.opacity, 30, 100, d.opacity),
+  };
+}
+
 export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
   const d = defaultSettings();
   const emulation = { ...d.emulation, ...s.emulation, gameModes: normalizeGameModes(s.emulation?.gameModes) };
@@ -551,6 +566,7 @@ export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
       beamNgEnabled: s.integration?.beamNgEnabled === true, beamNgPort: port(s.integration?.beamNgPort, d.integration.beamNgPort),
     },
     updates: { autoCheck: s.updates?.autoCheck !== false },
+    osd: normalizeOsd(s.osd, d.osd),
     firstRunDone: s.firstRunDone === true,
   };
 }

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using Tactile.Core;
+using Tactile.Core.Catalog;
 using Tactile.Core.Integration;
 using Tactile.Core.Logging;
 using Tactile.Core.Updates;
@@ -16,7 +17,7 @@ namespace Tactile.Host;
 /// Translates UI messages into core calls and core state into UI messages (docs/contract.md).
 /// UI thread only. Nothing is posted until the page says hello, except notices, which wait.
 /// </summary>
-internal sealed class Bridge
+internal sealed class Bridge : IDisposable
 {
     private const int MaxQueued = 50;
 
@@ -25,19 +26,25 @@ internal sealed class Bridge
     private readonly Action<string> _postRaw;
     private readonly AppPaths _paths;
     private readonly UpdateService _updates;
+    private readonly CatalogService _catalog;
+    private readonly bool _ownsCatalog;
     private readonly List<string> _queued = [];
     private OutputState? _lastOutput;
     private HapticStatus? _lastHaptics;
     private UpdateStatus? _lastUpdate;
     private bool _ready;
 
-    public Bridge(AppCore core, Control owner, Action<string> postRaw, AppPaths paths, UpdateService updates)
+    public Bridge(AppCore core, Control owner, Action<string> postRaw, AppPaths paths, UpdateService updates,
+        CatalogService? catalog = null)
     {
         _core = core;
         _owner = owner;
         _postRaw = postRaw;
         _paths = paths;
         _updates = updates;
+        _ownsCatalog = catalog is null;
+        _catalog = catalog ?? new CatalogService(paths, typeof(Bridge).Assembly.GetName().Version!);
+        _catalog.Changed += OnCatalogChanged;
     }
 
     public bool Ready => _ready;
@@ -74,6 +81,12 @@ internal sealed class Bridge
             if (type?.StartsWith("update.", StringComparison.Ordinal) == true && (!appSource || !_ready))
             {
                 Log.Info("Ignored an update message before hello or from outside the application page.");
+                return;
+            }
+
+            if ((type?.StartsWith("catalog.", StringComparison.Ordinal) == true || type == "profile.exportShare") && (!appSource || !_ready))
+            {
+                Log.Info("Ignored a catalog message before hello or from outside the application page.");
                 return;
             }
 
@@ -116,6 +129,7 @@ internal sealed class Bridge
                 PostSettings();
                 PostStatus();
                 PostUpdateStatus(force: true);
+                PostCatalogStatus();
                 _lastOutput = null;
                 PostOutputIfChanged();
                 PostProfiles();
@@ -217,6 +231,56 @@ internal sealed class Bridge
                 Post(new { type = "export", id, json = _core.Profiles.Export(id) });
                 break;
             }
+
+            case "profile.exportShare":
+            {
+                string id = Str(m, "id");
+                Profile profile = _core.Profiles.Get(id) ?? throw new BadMessage(new LocalizedMessage("Profile not found.", "Profil bulunamadı."));
+                CatalogSharePackage package = CatalogShareExporter.BuildSharePackage(profile);
+                Post(new { type = "exportShare", id, package.FileName, package.Json, package.EntryJson, package.RemovedRunActions });
+                break;
+            }
+
+            case "catalog.list":
+            {
+                bool refresh = m.TryGetProperty("refresh", out JsonElement r) && r.ValueKind == JsonValueKind.True;
+                if (_catalog.Status.State == CatalogState.Ready && !refresh)
+                {
+                    PostCatalogStatus();
+                }
+                else
+                {
+                    ObserveCatalogTask(_catalog.FetchAsync(refresh));
+                }
+
+                break;
+            }
+
+            case "catalog.preview":
+            {
+                CatalogEntry entry = FindCatalogEntry(Str(m, "id"));
+                Post(new
+                {
+                    type = "catalog.preview",
+                    id = entry.Id,
+                    summary = entry.Summary,
+                    description = entry.Description.Value,
+                    games = entry.Games,
+                    author = entry.Author,
+                    version = entry.Version,
+                    controller = entry.ControllerName,
+                    tags = entry.Tags,
+                });
+                break;
+            }
+
+            case "catalog.import":
+                ObserveCatalogTask(ImportCatalogProfileAsync(FindCatalogEntry(Str(m, "id")).Id));
+                break;
+
+            case "catalog.openRepo":
+                OpenCatalogRepository();
+                break;
 
             case "trigger.preview":
             {
@@ -661,6 +725,113 @@ internal sealed class Bridge
         {
             Log.Warn($"Could not open the releases page (network, Windows error {e.NativeErrorCode}).");
             PostError(Text.Pick("Could not open the releases page.", "Sürümler sayfası açılamadı."));
+        }
+    }
+
+    private CatalogEntry FindCatalogEntry(string id) =>
+        _catalog.Status.Profiles.FirstOrDefault(p => p.Id == id)
+            ?? throw new BadMessage(new LocalizedMessage("Catalog profile not found.", "Katalog profili bulunamadı."));
+
+    private async Task ImportCatalogProfileAsync(string id)
+    {
+        try
+        {
+            if (await _catalog.ImportAsync(id, _core.Profiles) is { } imported)
+            {
+                PostProfiles();
+                PostNotice(new Notice(NoticeKinds.Info,
+                    $"Imported “{imported.Profile.Name}” from community catalog.",
+                    $"Topluluk kataloğundan “{imported.Profile.Name}” içe aktarıldı."));
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // The service already shows the failure in the tab; this only keeps the list and the buttons live.
+            Log.Warn("Could not save a community profile.", e);
+            PostCatalogStatus();
+        }
+    }
+
+    private static void ObserveCatalogTask(Task task) =>
+        task.ContinueWith(t => Log.Warn("A catalog task failed.", t.Exception!.GetBaseException()),
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+
+    private void OpenCatalogRepository()
+    {
+        try
+        {
+            using Process? browser = Process.Start(new ProcessStartInfo(CatalogKey.RepositoryUrl) { UseShellExecute = true });
+        }
+        catch (Win32Exception e)
+        {
+            Log.Warn($"Could not open the catalog repository (Windows error {e.NativeErrorCode}).");
+            PostError(Text.Pick("Could not open the page.", "Sayfa açılamadı."));
+        }
+    }
+
+    private void OnCatalogChanged()
+    {
+        if (_owner is null)
+        {
+            PostCatalogStatus();
+            return;
+        }
+
+        if (_owner.IsDisposed || !_owner.IsHandleCreated)
+        {
+            return;
+        }
+
+        if (!_owner.InvokeRequired)
+        {
+            PostCatalogStatus();
+            return;
+        }
+
+        try
+        {
+            _owner.BeginInvoke(PostCatalogStatus);
+        }
+        catch (InvalidOperationException e)
+        {
+            Log.Info("The window was gone before the catalog status could be posted.", e);
+        }
+    }
+
+    public void PostCatalogStatus()
+    {
+        CatalogStatus status = _catalog.Status;
+        Post(new
+        {
+            type = "catalog.status",
+            state = status.State,
+            updated = status.Updated,
+            profiles = status.Profiles.Select(p => new
+            {
+                p.Id,
+                p.Name,
+                p.Games,
+                controller = p.ControllerName,
+                p.Tags,
+                p.Author,
+                p.Version,
+                p.Size,
+                description = new { en = p.Description.En, tr = p.Description.Tr },
+                p.Summary,
+            }).ToArray(),
+            importingId = status.ImportingId,
+            error = status.Error,
+            message = status.Message,
+        });
+    }
+
+    public void Dispose()
+    {
+        _ready = false;
+        _catalog.Changed -= OnCatalogChanged;
+        if (_ownsCatalog)
+        {
+            _catalog.Dispose();
         }
     }
 

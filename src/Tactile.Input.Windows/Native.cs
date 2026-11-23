@@ -9,6 +9,7 @@ internal static partial class Native
 
     public const uint KeyeventfExtendedKey = 0x0001;
     public const uint KeyeventfKeyUp = 0x0002;
+    public const uint KeyeventfUnicode = 0x0004;
     public const uint KeyeventfScanCode = 0x0008;
 
     public const uint MouseeventfMove = 0x0001;

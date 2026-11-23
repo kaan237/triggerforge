@@ -35,6 +35,22 @@ public sealed record AppSettings
     public IReadOnlyList<Key> PauseHotkey { get; init; } = [];
     public bool PauseOnFullscreen { get; init; }
     public int BackupCount { get; init; } = 7;
+    public OsdSettings Osd { get; init; } = new();
+}
+
+public enum OsdCorner { TopLeft, TopRight, BottomLeft, BottomRight }
+
+public enum OsdSize { Small, Medium, Large }
+
+public sealed record OsdSettings
+{
+    public bool Enabled { get; init; }
+    public OsdCorner Corner { get; init; } = OsdCorner.TopRight;
+    /// <summary>1..5.</summary>
+    public int DurationSeconds { get; init; } = 2;
+    public OsdSize Size { get; init; } = OsdSize.Medium;
+    /// <summary>30..100 percent.</summary>
+    public int Opacity { get; init; } = 85;
 }
 
 public sealed record UpdateSettings

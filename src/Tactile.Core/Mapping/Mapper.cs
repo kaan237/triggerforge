@@ -49,12 +49,15 @@ internal sealed class Mapper : IDisposable
     private bool _testTurnAllowed;
     private Buttons _prev;
     private Buttons _suppressedButtons;
+    // Held buttons that may not open a layer until let go; set only by SuppressButtons.
+    private Buttons _suppressedLayerButtons;
     private bool _padTouched;
     private bool _suppressPadTouch;
     private int? _pendingPadZone;
     private bool _gyroLatched;
     private bool _active;
     private bool _disposed;
+    private bool _notifyLayers = true;
 
     /// <param name="threaded">False: worker jobs and macros run on the calling thread when pumped (tests).</param>
     public Mapper(InputPlatform platform, IMappingHost host, Func<TimeSpan> clock, bool threaded)
@@ -86,6 +89,18 @@ internal sealed class Mapper : IDisposable
         }
     }
 
+    /// <summary>Name of the highest active shift layer; null when none is active.</summary>
+    public string? ActiveLayerName
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return LayerNameLocked();
+            }
+        }
+    }
+
     /// <summary>
     /// Takes the active profile. A different profile, or the same one saved with a different
     /// mapping or macros, releases everything first (rule 8).
@@ -112,7 +127,8 @@ internal sealed class Mapper : IDisposable
                 return;
             }
 
-            ReleaseAllLocked();
+            // The host announces the layer reset itself, after the profile change.
+            ReleaseAllLocked(notifyLayers: false);
             _config = profile.Mapping ?? new();
             _gyroButton = ButtonNames.TryParse(_config.GyroMouse?.Button, out Buttons gb) ? gb : Buttons.None;
             _actions.SetMacros(profile.Macros ?? []);
@@ -160,12 +176,14 @@ internal sealed class Mapper : IDisposable
                 // Track buttons anyway, so a button held while inactive does not fire later.
                 _prev = s.Buttons;
                 _suppressedButtons = s.Buttons;
+                _suppressedLayerButtons &= s.Buttons;
                 _padTouched = _suppressPadTouch = touched;
                 return;
             }
 
             Buttons changed = _prev ^ s.Buttons;
             _suppressedButtons &= s.Buttons;
+            _suppressedLayerButtons &= s.Buttons;
             UpdateLayers(s.Buttons, changed, suppressLayerPulse);
             _padTouched = touched;
             _suppressPadTouch &= touched;
@@ -250,6 +268,16 @@ internal sealed class Mapper : IDisposable
         AfterGate(now);
     }
 
+    /// <summary>Buttons held right now stay ignored until they are let go.</summary>
+    public void SuppressButtons(Buttons mask)
+    {
+        lock (_gate)
+        {
+            _suppressedButtons |= mask;
+            _suppressedLayerButtons |= mask;
+        }
+    }
+
     /// <summary>Rule 8: all keys, mouse buttons, macros, toggles and turbo let go.</summary>
     public void ReleaseAll()
     {
@@ -264,6 +292,7 @@ internal sealed class Mapper : IDisposable
         lock (_gate)
         {
             _prev = Buttons.None;
+            _suppressedLayerButtons = Buttons.None;
             _testTurnAllowed = false;
             ReleaseAllLocked(resetAxes: true);
         }
@@ -278,6 +307,7 @@ internal sealed class Mapper : IDisposable
                 return;
             }
 
+            _notifyLayers = false;
             ReleaseAllLocked();
             _disposed = true;
         }
@@ -356,10 +386,11 @@ internal sealed class Mapper : IDisposable
         {
             (MappingLayer layer, Buttons button) = _layers[i];
             int bit = 1 << i;
-            bool down = (current & button) != 0;
+            // A suppressed activator cannot open its layer until it is let go; an open layer stays as it is.
+            bool down = (current & button) != 0 && ((_suppressedLayerButtons & button) == 0 || (next & bit) != 0);
             if (layer.Mode == LayerMode.Toggle)
             {
-                if (down && (changed & button) != 0)
+                if (down && (changed & button) != 0 && (_suppressedLayerButtons & button) == 0)
                 {
                     next ^= bit;
                 }
@@ -375,10 +406,33 @@ internal sealed class Mapper : IDisposable
             ReleaseAllLocked(resetLayers: false);
             _suppressedButtons &= current;
             _activeLayers = next;
+            NotifyLayerLocked();
             if (!suppressLayerPulse && (changed & _activators) != 0 && _profile?.Haptics.ConfirmPulses == true)
             {
                 _worker.Post(_host.PulseConfirm);
             }
+        }
+    }
+
+    private string? LayerNameLocked()
+    {
+        for (int i = Math.Min(_layers.Length, 31) - 1; i >= 0; i--)
+        {
+            if ((_activeLayers & (1 << i)) != 0)
+            {
+                return string.IsNullOrWhiteSpace(_layers[i].Layer.Name) ? $"{i + 1}" : _layers[i].Layer.Name;
+            }
+        }
+
+        return null;
+    }
+
+    private void NotifyLayerLocked()
+    {
+        if (_notifyLayers)
+        {
+            string? name = LayerNameLocked();
+            _worker.Post(() => _host.LayerChanged(name));
         }
     }
 
@@ -480,7 +534,7 @@ internal sealed class Mapper : IDisposable
         _ => false,
     };
 
-    private void ReleaseAllLocked(bool resetLayers = true, bool resetAxes = false)
+    private void ReleaseAllLocked(bool resetLayers = true, bool resetAxes = false, bool notifyLayers = true)
     {
         foreach (ButtonMachine m in _machines.Values)
         {
@@ -489,7 +543,13 @@ internal sealed class Mapper : IDisposable
 
         if (resetLayers)
         {
+            bool hadLayers = _activeLayers != 0;
             _activeLayers = 0;
+            if (hadLayers && notifyLayers)
+            {
+                NotifyLayerLocked();
+            }
+
             _gyroLatched = false;
             _gyro.Reset();
         }

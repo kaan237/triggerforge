@@ -77,6 +77,49 @@ public sealed class WindowsInputInjector : IInputInjector
         }
     }
 
+    public void Text(ReadOnlySpan<char> text)
+    {
+        if (text.IsEmpty)
+        {
+            return;
+        }
+
+        InputRecord[] records = BuildTextRecords(text);
+        unsafe
+        {
+            fixed (InputRecord* p = records)
+            {
+                SendInput((uint)records.Length, p, InputSize);
+            }
+        }
+    }
+
+    /// <summary>One key-down and one key-up record per UTF-16 unit, in order.</summary>
+    internal static InputRecord[] BuildTextRecords(ReadOnlySpan<char> text)
+    {
+        var records = new InputRecord[text.Length * 2];
+        for (int i = 0; i < text.Length; i++)
+        {
+            records[i * 2] = UnicodeRecord(text[i], up: false);
+            records[(i * 2) + 1] = UnicodeRecord(text[i], up: true);
+        }
+
+        return records;
+    }
+
+    private static InputRecord UnicodeRecord(char ch, bool up)
+    {
+        var input = new InputRecord { Type = InputKeyboard };
+        input.U.Keyboard = new KeybdInput
+        {
+            Vk = 0,
+            Scan = ch,
+            Flags = KeyeventfUnicode | (up ? KeyeventfKeyUp : 0),
+            ExtraInfo = Signature,
+        };
+        return input;
+    }
+
     private static void SendMouse(int dx, int dy, uint data, uint flags)
     {
         var input = new InputRecord { Type = InputMouse };

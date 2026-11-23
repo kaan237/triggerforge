@@ -41,9 +41,15 @@ internal sealed partial class TactileApp : ApplicationContext
     private sealed record PrimarySample(ControllerSlot Slot, InputState State);
     private Battery? _battery;
     private bool _toldAboutTray;
-    private bool _exiting;
+    private volatile bool _exiting;
+    private bool _detached;
     private nint _hotkeyWindow;
     private IReadOnlyList<Key> _configuredHotkey = [];
+    private readonly OsdOverlayWindow _osdWindow = new();
+    private readonly FormsOsdClock _osdClock = new();
+    private readonly OsdCoordinator _osd;
+    private readonly OnScreenKeyboardWindow _keyboardWindow = new();
+    private readonly CoalescedRender<OnScreenKeyboardState> _keyboardRender;
 
     public TactileApp(bool startHidden, EventWaitHandle showSignal, AppPaths paths)
     {
@@ -66,11 +72,17 @@ internal sealed partial class TactileApp : ApplicationContext
         UpdateTrayStatus();
         UpdatePauseHotkey();
 
+        _osd = new OsdCoordinator(_osdWindow, _osdClock, () => _core.Settings.Current.Osd);
+        _osd.Seed(_core.ActiveProfile.Id, null, _core.Mapping.Paused, _core.Emulation is { } mode ? PrimaryMode(mode.Status) : EmulationMode.Off);
+        _keyboardRender = new CoalescedRender<OnScreenKeyboardState>(post => _window.BeginInvoke(post), RenderKeyboard);
+
         _core.Controllers.PrimaryInput += OnInput;
         _core.Controllers.ConnectionChanged += OnConnection;
         _core.Controllers.SlotConnected += OnSlotConnected;
         _core.Controllers.SlotDisconnected += OnSlotDisconnected;
         _core.ActiveProfileChanged += OnActiveProfile;
+        _core.ActiveLayerChanged += OnActiveLayer;
+        _core.OnScreenKeyboardChanged += OnKeyboardChanged;
         _core.Profiles.Changed += OnProfiles;
         _core.Settings.Changed += OnSettings;
         _core.Notice += OnNotice;
@@ -148,7 +160,18 @@ internal sealed partial class TactileApp : ApplicationContext
         }
     }
 
-    private void OnEmulationChanged() => Ui(_window.Bridge.PostEmulation);
+    private void OnEmulationChanged() => Ui(() =>
+    {
+        _window.Bridge.PostEmulation();
+        if (_core.Emulation is { } emulation)
+        {
+            _osd.OnEmulationMode(PrimaryMode(emulation.Status));
+        }
+    });
+
+    /// <summary>The mode of the primary slot's pad; the overall mode while no slot list is reported.</summary>
+    internal static EmulationMode PrimaryMode(EmulationStatus status) =>
+        status.Slots.FirstOrDefault(s => s.Index == 0)?.Mode ?? status.Mode;
 
     /// <summary>Tray, settings page: same as <c>--restore</c>, in this process, off the UI thread.</summary>
     private void RestoreController()
@@ -264,7 +287,36 @@ internal sealed partial class TactileApp : ApplicationContext
         _window.Bridge.PostStatus();
         _window.Bridge.PostProfiles();
         _tray.SetProfiles(_core.Profiles.All, _core.ActiveProfile.Id);
+        _osd.OnProfile(_core.ActiveProfile.Id, _core.ActiveProfile.Name, _core.ActiveReason);
     });
+
+    private void OnActiveLayer(string? layer) => Ui(() => _osd.OnLayer(layer));
+
+    /// <summary>Input thread: keep the newest state and let the UI thread draw it once.</summary>
+    private void OnKeyboardChanged(OnScreenKeyboardState state)
+    {
+        if (_exiting)
+        {
+            return;
+        }
+
+        try
+        {
+            _keyboardRender.Submit(state);
+        }
+        catch (InvalidOperationException e)
+        {
+            Log.Info("Window handle was unavailable for the keyboard.", e);
+        }
+    }
+
+    private void RenderKeyboard(OnScreenKeyboardState state)
+    {
+        if (!_exiting)
+        {
+            _keyboardWindow.Render(state);
+        }
+    }
 
     private void OnProfiles() => Ui(() =>
     {
@@ -276,6 +328,12 @@ internal sealed partial class TactileApp : ApplicationContext
     {
         _window.Bridge.PostStatus();
         UpdateTrayStatus();
+        MappingStatus mapping = _core.Mapping;
+        _osd.OnMapping(mapping.Paused, mapping.PauseReason);
+        if (mapping.Paused && _core.OnScreenKeyboardOpen)
+        {
+            _core.CloseOnScreenKeyboard();
+        }
     });
 
     private void OnShowAppRequested() => Ui(ShowWindow);
@@ -328,6 +386,7 @@ internal sealed partial class TactileApp : ApplicationContext
         UpdateTrayStatus();
         _window.Bridge.PostEmulation();
         _window.Bridge.PostHapticsIfChanged();
+        _osd.OnSettingsChanged();
         if (_updates.Status.State != UpdateState.Downloading)
         {
             _window.Bridge.PostUpdateStatus();
@@ -337,6 +396,7 @@ internal sealed partial class TactileApp : ApplicationContext
     private void OnNotice(Notice n) => Ui(() =>
     {
         _window.Bridge.PostNotice(n);
+        _osd.OnNotice(n);
         if (!_window.OnScreen && n.Kind is NoticeKinds.LowBattery or NoticeKinds.IdleSleep)
         {
             _tray.Balloon(n.Message, n.Kind == NoticeKinds.LowBattery ? ToolTipIcon.Warning : ToolTipIcon.Info);
@@ -527,6 +587,26 @@ internal sealed partial class TactileApp : ApplicationContext
         }
 
         _exiting = true;
+        Detach();
+
+        // Closing releases held keys; our handler is already unsubscribed, so only the window is touched.
+        _core.CloseOnScreenKeyboard();
+
+        // Puts the controller back to neutral, then the overlays go.
+        _core.Dispose();
+        DisposeOverlays();
+        ExitThread();
+    }
+
+    /// <summary>Unsubscribes from the core and the window; safe to call twice.</summary>
+    private void Detach()
+    {
+        if (_detached)
+        {
+            return;
+        }
+
+        _detached = true;
         UnregisterPauseHotkey();
         _window.PauseHotkeyPressed -= OnPauseHotkeyPressed;
         _window.HandleCreated -= OnHotkeyHandleCreated;
@@ -550,6 +630,8 @@ internal sealed partial class TactileApp : ApplicationContext
         _core.Controllers.SlotConnected -= OnSlotConnected;
         _core.Controllers.SlotDisconnected -= OnSlotDisconnected;
         _core.ActiveProfileChanged -= OnActiveProfile;
+        _core.ActiveLayerChanged -= OnActiveLayer;
+        _core.OnScreenKeyboardChanged -= OnKeyboardChanged;
         _core.Profiles.Changed -= OnProfiles;
         _core.Settings.Changed -= OnSettings;
         _core.Notice -= OnNotice;
@@ -558,16 +640,23 @@ internal sealed partial class TactileApp : ApplicationContext
         _core.ShowAppRequested -= OnShowAppRequested;
         _window.Bridge.RestartElevatedRequested -= RestartElevated;
         _tray.Dispose();
+    }
 
-        // Puts the controller back to neutral.
-        _core.Dispose();
-        ExitThread();
+    /// <summary>Stops the OSD timer and releases both overlay windows; safe to call twice.</summary>
+    private void DisposeOverlays()
+    {
+        _osd.Dispose();
+        _osdClock.Dispose();
+        _osdWindow.Dispose();
+        _keyboardWindow.Dispose();
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            _exiting = true;
+            Detach();
             _inputTimer.Dispose();
             _emulationTimer.Dispose();
             _updates.Dispose();
@@ -575,6 +664,7 @@ internal sealed partial class TactileApp : ApplicationContext
             _restoredSignal.Dispose();
             // No-op after Exit; covers the loop ending some other way (session end).
             _core.Dispose();
+            DisposeOverlays();
             if (!_window.IsDisposed)
             {
                 _window.Dispose();

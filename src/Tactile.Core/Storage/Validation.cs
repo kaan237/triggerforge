@@ -198,6 +198,7 @@ public static partial class Validation
     public static AppSettings Normalize(AppSettings s)
     {
         IntegrationSettings integration = s.Integration ?? new();
+        OsdSettings osd = s.Osd ?? new();
         var defaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach ((string mac, string id) in s.ControllerDefaults ?? new Dictionary<string, string>())
         {
@@ -237,6 +238,13 @@ public static partial class Validation
             PauseHotkey = (s.PauseHotkey ?? []).Where(k => k != Key.None && Enum.IsDefined(k)).Distinct().Take(4).ToArray(),
             PauseOnFullscreen = s.PauseOnFullscreen,
             BackupCount = Math.Clamp(s.BackupCount, 0, 30),
+            Osd = osd with
+            {
+                Corner = Defined(osd.Corner, OsdCorner.TopRight),
+                DurationSeconds = Math.Clamp(osd.DurationSeconds == 0 ? 2 : osd.DurationSeconds, 1, 5),
+                Size = Defined(osd.Size, OsdSize.Medium),
+                Opacity = Math.Clamp(osd.Opacity == 0 ? 85 : osd.Opacity, 30, 100),
+            },
             Integration = integration with
             {
                 UdpPort = Math.Clamp(integration.UdpPort, 1024, 65535),

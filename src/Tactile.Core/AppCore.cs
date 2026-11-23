@@ -64,6 +64,13 @@ public sealed class AppCore : IDisposable
 
     private readonly InputPlatform _platform;
     private readonly Mapper _mapper;
+    private readonly OnScreenKeyboard _osk;
+    // Buttons held when the keyboard closed; withheld from mapping and the virtual pad until let go.
+    private Buttons _oskHoldMask;
+    private readonly OrderedEvents<OnScreenKeyboardState> _oskEvents = new();
+    // Set by a mapped action while the mapper runs; the input pass that ran it consumes it right after.
+    private int _oskToggleRequested;
+    private string? _layerName;
     // Serialises mapper configuration and status, apart from _lock so input never waits on it.
     private readonly Lock _mappingLock = new();
     private readonly HashSet<string> _elevatedNoticed = new(StringComparer.OrdinalIgnoreCase);
@@ -107,6 +114,9 @@ public sealed class AppCore : IDisposable
         _time = time;
         _platform = platform ?? InputPlatform.None;
         _mapper = new Mapper(_platform, new MappingHost(this), Now, threaded: runTimer);
+        _osk = new OnScreenKeyboard(_platform.Injector);
+        _oskEvents.Handler = state => OnScreenKeyboardChanged?.Invoke(state);
+        _osk.Changed += _oskEvents.Enqueue;
         _startTimestamp = time.GetTimestamp();
         Controllers = controllers;
         Settings = new SettingsStore(dataDir, portable);
@@ -392,6 +402,117 @@ public sealed class AppCore : IDisposable
     /// <summary>A <c>special: showApp</c> action asked for the main window.</summary>
     public event Action? ShowAppRequested;
 
+    /// <summary>
+    /// The primary controller's topmost active shift layer name, or null when none. Raised on a
+    /// background thread.
+    /// </summary>
+    public event Action<string?>? ActiveLayerChanged;
+
+    /// <summary>The on-screen keyboard was shown, hidden or moved. Raised on the input thread; marshal before drawing.</summary>
+    public event Action<OnScreenKeyboardState>? OnScreenKeyboardChanged;
+
+    public bool OnScreenKeyboardOpen => _osk.IsOpen;
+
+    public OnScreenKeyboardState OnScreenKeyboardSnapshot => _osk.State;
+
+    /// <summary>Opens the on-screen keyboard, or closes it when open. Needs a controller input and a profile with mapping on.</summary>
+    public void ToggleOnScreenKeyboard()
+    {
+        lock (_primaryInputLock)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            InputState? current;
+            lock (_lock)
+            {
+                current = _latestInput;
+            }
+
+            if (_osk.IsOpen)
+            {
+                CloseKeyboardLocked(current?.Buttons ?? Buttons.None);
+            }
+            else if (current is not null && CanOpenKeyboard)
+            {
+                OpenKeyboardLocked(current, sendNeutral: true);
+            }
+        }
+
+        DrainKeyboardEvents();
+    }
+
+    public void CloseOnScreenKeyboard()
+    {
+        lock (_primaryInputLock)
+        {
+            if (_osk.IsOpen)
+            {
+                InputState? current;
+                lock (_lock)
+                {
+                    current = _latestInput;
+                }
+
+                CloseKeyboardLocked(current?.Buttons ?? Buttons.None);
+            }
+        }
+
+        DrainKeyboardEvents();
+    }
+
+    // Subscribers run outside the input lock and see states in the order they happened.
+    private void DrainKeyboardEvents()
+    {
+        if (!_primaryInputLock.IsHeldByCurrentThread)
+        {
+            _oskEvents.Drain();
+        }
+    }
+
+    private void OpenKeyboardLocked(InputState current, bool sendNeutral)
+    {
+        _oskHoldMask = Buttons.None;
+        _mapper.ReleaseAll();
+        _osk.Open(Settings.Current.Language, current);
+        if (sendNeutral)
+        {
+            // Nothing held on the controller may stay held on the virtual pad or the motion server.
+            if (Controllers.PrimarySlot is { } slot && Controllers.IsCurrent(slot))
+            {
+                _dsu.PublishInput(0, Neutral(current), default, default, slot.Controller.Details.Link, slot.Mac, _dsu.Generation(0));
+            }
+
+            _emulation?.OnInput(Neutral(current), gyroDegPerSec: default, now: Now(), mappingActive: _mapper.Active);
+        }
+    }
+
+    private void CloseKeyboardLocked(Buttons held)
+    {
+        _osk.Close();
+        _oskHoldMask = held;
+        if (held != Buttons.None)
+        {
+            _mapper.SuppressButtons(held);
+        }
+    }
+
+    // What mapping, the virtual pad and the motion server see while the keyboard owns the controller.
+    private static InputState Neutral(InputState s) => s with
+    {
+        Buttons = Buttons.None,
+        AccelRaw = default,
+        Left = new Stick(128, 128),
+        Right = new Stick(128, 128),
+        L2 = 0,
+        R2 = 0,
+        GyroRaw = default,
+        Touch1 = default,
+        Touch2 = default,
+    };
+
     /// <summary>Notices raised before the first handler subscribes are delivered to it on subscribe.</summary>
     public event Action<Notice>? Notice
     {
@@ -492,6 +613,8 @@ public sealed class AppCore : IDisposable
             }
         }
 
+        DrainKeyboardEvents();
+
         _outbox.Enqueue(new Notice(NoticeKinds.GyroCalibration, Text.Pick("Gyro calibration started.", "Gyro kalibrasyonu başladı."), 0));
         Flush();
     }
@@ -536,6 +659,14 @@ public sealed class AppCore : IDisposable
         Controllers.SlotDisconnected -= _dsu.Disconnect;
         Controllers.ConnectionChanged -= OnConnection;
         _mapper.Dispose();
+        lock (_primaryInputLock)
+        {
+            _oskHoldMask = Buttons.None;
+            Volatile.Write(ref _oskToggleRequested, 0);
+            _osk.Close();
+        }
+
+        DrainKeyboardEvents();
         if (_ownsForeground && _foreground is IDisposable d)
         {
             d.Dispose();
@@ -674,7 +805,45 @@ public sealed class AppCore : IDisposable
         }
 
         _mapper.Tick(now);
+        ApplyKeyboardRequest();
         Flush();
+    }
+
+    // A mapped timer action (hold, double tap, chord) asked outside any input frame.
+    private void ApplyKeyboardRequest()
+    {
+        if (Volatile.Read(ref _oskToggleRequested) == 0)
+        {
+            return;
+        }
+
+        lock (_primaryInputLock)
+        {
+            if (_disposed || Interlocked.Exchange(ref _oskToggleRequested, 0) == 0)
+            {
+                return;
+            }
+
+            InputState? current;
+            lock (_lock)
+            {
+                current = _latestInput;
+            }
+
+            if (current is not null)
+            {
+                if (_osk.IsOpen)
+                {
+                    CloseKeyboardLocked(current.Buttons);
+                }
+                else if (CanOpenKeyboard)
+                {
+                    OpenKeyboardLocked(current, sendNeutral: true);
+                }
+            }
+        }
+
+        DrainKeyboardEvents();
     }
 
     /// <summary>A full-screen window of the settled exe counts as a game even when nothing lists it.</summary>
@@ -776,15 +945,22 @@ public sealed class AppCore : IDisposable
         // Taken before anything else, so a disconnect that follows makes this report stale for the DSU server.
         int dsuGeneration = _dsu.Generation(0);
         bool refresh;
-        lock (_primaryInputLock)
+        try
         {
-            if (_disposed || !ReferenceEquals(slot, Controllers.PrimarySlot))
+            lock (_primaryInputLock)
             {
-                return;
-            }
+                if (_disposed || !ReferenceEquals(slot, Controllers.PrimarySlot))
+                {
+                    return;
+                }
 
-            SynchronizePrimary(slot);
-            refresh = ProcessPrimaryInput(slot, s, now, dsuGeneration);
+                SynchronizePrimary(slot);
+                refresh = ProcessPrimaryInput(slot, s, now, dsuGeneration);
+            }
+        }
+        finally
+        {
+            DrainKeyboardEvents();
         }
 
         if (refresh)
@@ -793,6 +969,14 @@ public sealed class AppCore : IDisposable
         }
 
         Flush();
+    }
+
+    private void PublishDsu(ControllerSlot? slot, InputState input, Vector3 gyro, Vector3 accel, int generation)
+    {
+        if (slot is not null && Controllers.IsCurrent(slot))
+        {
+            _dsu.PublishInput(0, input, gyro, accel, slot.Controller.Details.Link, slot.Mac, generation);
+        }
     }
 
     private bool ProcessPrimaryInput(ControllerSlot? slot, InputState s, TimeSpan now, int dsuGeneration)
@@ -836,10 +1020,63 @@ public sealed class AppCore : IDisposable
             return false;
         }
 
-        _haptics.Observe(s);
-        if (slot is not null && Controllers.IsCurrent(slot))
+        // While the keyboard is open it owns the controller: mapping, the virtual pad and motion output see a neutral one.
+        InputState input = s;
+        Vector3 inputGyro = gyro;
+        Vector3 inputAccel = accel;
+        if (_osk.IsOpen && shortcut is not null && shortcut != EdgeShortcut.OnScreenKeyboard)
         {
-            _dsu.PublishInput(0, s, gyro, accel, slot.Controller.Details.Link, slot.Mac, dsuGeneration);
+            shortcut = null;
+        }
+
+        if (shortcut == EdgeShortcut.OnScreenKeyboard)
+        {
+            if (_osk.IsOpen)
+            {
+                CloseKeyboardLocked(s.Buttons);
+            }
+            else if (CanOpenKeyboard)
+            {
+                OpenKeyboardLocked(s, sendNeutral: false);
+            }
+        }
+        else if (_osk.IsOpen)
+        {
+            _osk.HandleInput(s, now);
+            if (!_osk.IsOpen)
+            {
+                CloseKeyboardLocked(s.Buttons);
+            }
+        }
+
+        if (_osk.IsOpen)
+        {
+            input = Neutral(s);
+            inputGyro = default;
+            inputAccel = default;
+        }
+        else if (_oskHoldMask != Buttons.None)
+        {
+            _oskHoldMask &= s.Buttons;
+            if (_oskHoldMask != Buttons.None)
+            {
+                input = s with
+                {
+                    Buttons = s.Buttons & ~_oskHoldMask,
+                    L2 = (_oskHoldMask & Buttons.L2) != 0 ? (byte)0 : s.L2,
+                    R2 = (_oskHoldMask & Buttons.R2) != 0 ? (byte)0 : s.R2,
+                };
+            }
+        }
+
+        _haptics.Observe(s);
+
+        // Published ahead of the slower mapping work unless a keyboard toggle may still change this frame.
+        bool published = false;
+        if (Volatile.Read(ref _oskToggleRequested) == 0)
+        {
+            PublishDsu(slot, input, inputGyro, inputAccel, dsuGeneration);
+            published = true;
         }
 
         if (firstInput)
@@ -853,20 +1090,47 @@ public sealed class AppCore : IDisposable
             return false;
         }
 
-        bool togglePause = _pauseShortcut.Observe(s.Buttons, Settings.Current.PauseCombo);
+        bool togglePause = _pauseShortcut.Observe(input.Buttons, Settings.Current.PauseCombo);
         bool resuming = togglePause && UserMappingPaused;
         if (resuming)
         {
             ToggleUserPause();
         }
 
-        _mapper.OnInput(s, gyro, now, suppressLayerPulse: togglePause);
+        _mapper.OnInput(input, inputGyro, now, suppressLayerPulse: togglePause);
+        bool opened = false;
+        if (Volatile.Read(ref _oskToggleRequested) != 0 && Interlocked.Exchange(ref _oskToggleRequested, 0) != 0)
+        {
+            // A mapped action asked in this very frame; the pad and the motion server must not get the frame that did it.
+            if (_osk.IsOpen)
+            {
+                CloseKeyboardLocked(s.Buttons);
+            }
+            else if (CanOpenKeyboard)
+            {
+                OpenKeyboardLocked(s, sendNeutral: false);
+            }
+
+            if (_osk.IsOpen)
+            {
+                input = Neutral(s);
+                inputGyro = default;
+                inputAccel = default;
+                opened = true;
+            }
+        }
+
         if (togglePause && !resuming)
         {
             ToggleUserPause();
         }
 
-        _emulation?.OnInput(s, gyroDegPerSec: gyro, now: now, mappingActive: _mapper.Active);
+        if (!published || opened)
+        {
+            PublishDsu(slot, input, inputGyro, inputAccel, dsuGeneration);
+        }
+
+        _emulation?.OnInput(input, gyroDegPerSec: inputGyro, now: now, mappingActive: _mapper.Active);
 
         if (shortcut is { } action && EdgeShortcuts.Resolve(action, Profiles.All, ActiveProfile.Id) is { } profile)
         {
@@ -934,6 +1198,8 @@ public sealed class AppCore : IDisposable
     {
         // First, so everything this change produces is already in the new language.
         Text.Current = Settings.Current.Language;
+        _osk.SetLanguage(Settings.Current.Language);
+        DrainKeyboardEvents();
         ConfigureControllers();
         ConfigureIntegration();
         Refresh();
@@ -1053,6 +1319,7 @@ public sealed class AppCore : IDisposable
         }
 
         bool active;
+        bool mappingOff;
         lock (_mappingLock)
         {
             Profile profile;
@@ -1064,9 +1331,15 @@ public sealed class AppCore : IDisposable
             }
 
             bool allowTestTurn = GetPauseReason() is null && connected;
+            mappingOff = !profile.Mapping.Enabled;
             active = profile.Mapping.Enabled && allowTestTurn;
             _mapper.Configure(profile);
             _mapper.SetActive(active, allowTestTurn);
+        }
+
+        if ((mappingOff || GetPauseReason() is not null) && _osk.IsOpen)
+        {
+            CloseOnScreenKeyboard();
         }
 
         // The probe is a few system calls; keep it outside the lock.
@@ -1087,6 +1360,8 @@ public sealed class AppCore : IDisposable
             MappingChanged?.Invoke();
         }
     }
+
+    private bool CanOpenKeyboard => ActiveProfile.Mapping.Enabled && GetPauseReason() is null;
 
     private string? GetPauseReason() => UiMappingPaused ? "ui" :
         UserMappingPaused ? "shortcut" : FullscreenPaused ? "fullscreen" : null;
@@ -1161,6 +1436,14 @@ public sealed class AppCore : IDisposable
 
         public void ShowApp() => core.ShowAppRequested?.Invoke();
 
+        public void ToggleOnScreenKeyboard() => Volatile.Write(ref core._oskToggleRequested, 1);
+
+        public void LayerChanged(string? name)
+        {
+            Volatile.Write(ref core._layerName, name);
+            core.ActiveLayerChanged?.Invoke(name);
+        }
+
         public void PulseConfirm() => core.PulseConfirm(core.Now());
 
         public void Report(Notice notice) => core.Queue(notice);
@@ -1179,6 +1462,7 @@ public sealed class AppCore : IDisposable
             SynchronizePrimary(slot, disconnected: slot is null);
         }
 
+        DrainKeyboardEvents();
         Refresh();
     }
 
@@ -1215,6 +1499,9 @@ public sealed class AppCore : IDisposable
         }
 
         _pauseShortcut.Reset();
+        _oskHoldMask = Buttons.None;
+        Volatile.Write(ref _oskToggleRequested, 0);
+        _osk.Close();
         _mapper.ResetController();
     }
 
@@ -1260,6 +1547,12 @@ public sealed class AppCore : IDisposable
         if (changed)
         {
             ActiveProfileChanged?.Invoke();
+            // The mapper resets layers on a profile change without announcing it; say so after the profile.
+            string? layer = _mapper.ActiveLayerName;
+            if (!string.Equals(Interlocked.Exchange(ref _layerName, layer), layer, StringComparison.Ordinal))
+            {
+                ActiveLayerChanged?.Invoke(layer);
+            }
         }
 
         while (_outbox.TryDequeue(out Notice? n))

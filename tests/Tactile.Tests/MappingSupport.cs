@@ -31,6 +31,18 @@ internal sealed class FakeInjector : IInputInjector
 
     public void Wheel(int delta, bool horizontal) => Add($"wheel {delta} {(horizontal ? "h" : "v")}");
 
+    public List<string> TypedText { get; } = [];
+
+    public void Text(ReadOnlySpan<char> text)
+    {
+        lock (_lock)
+        {
+            TypedText.Add(text.ToString());
+        }
+
+        Add($"text {text}");
+    }
+
     /// <summary>Events since the last call.</summary>
     public string[] Take()
     {
@@ -146,6 +158,10 @@ internal sealed class MapperRig : IMappingHost, IDisposable
 
     public int ShowAppCount { get; private set; }
     public int ConfirmPulses { get; private set; }
+    public int KeyboardToggles { get; private set; }
+
+    /// <summary>Every layer notification, in order; null = no layer.</summary>
+    public List<string?> Layers { get; } = [];
 
     public string[] Take() => Fake.Injector.Take();
 
@@ -215,6 +231,10 @@ internal sealed class MapperRig : IMappingHost, IDisposable
 
     public void ShowApp() => ShowAppCount++;
     public void PulseConfirm() => ConfirmPulses++;
+
+    public void ToggleOnScreenKeyboard() => KeyboardToggles++;
+
+    public void LayerChanged(string? name) => Layers.Add(name);
 
     public void Report(Notice notice) => Reports.Add(notice.Message);
 

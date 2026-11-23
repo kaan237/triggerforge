@@ -2,7 +2,7 @@ using Tactile.Device.DualSense;
 
 namespace Tactile.Core;
 
-internal enum EdgeShortcut { Next, Previous, Profile1, Profile2, Profile3, Profile4 }
+internal enum EdgeShortcut { Next, Previous, Profile1, Profile2, Profile3, Profile4, OnScreenKeyboard }
 
 internal static class EdgeShortcuts
 {
@@ -18,6 +18,7 @@ internal static class EdgeShortcuts
 
         if (PressedWith(Buttons.Fn1, Buttons.R1)) return EdgeShortcut.Next;
         if (PressedWith(Buttons.Fn1, Buttons.L1)) return EdgeShortcut.Previous;
+        if (PressedWith(Buttons.Fn1, Buttons.Triangle)) return EdgeShortcut.OnScreenKeyboard;
         if (PressedWith(Buttons.Fn2, Buttons.Triangle)) return EdgeShortcut.Profile1;
         if (PressedWith(Buttons.Fn2, Buttons.Circle)) return EdgeShortcut.Profile2;
         if (PressedWith(Buttons.Fn2, Buttons.Cross)) return EdgeShortcut.Profile3;
@@ -27,6 +28,11 @@ internal static class EdgeShortcuts
 
     public static Profile? Resolve(EdgeShortcut shortcut, IReadOnlyList<Profile> profiles, string currentId)
     {
+        if (shortcut == EdgeShortcut.OnScreenKeyboard)
+        {
+            return null;
+        }
+
         if (shortcut >= EdgeShortcut.Profile1)
         {
             int index = shortcut - EdgeShortcut.Profile1;

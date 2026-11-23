@@ -2,7 +2,7 @@ import { L } from "./i18n";
 // Browser-only stand-in for the host. Keeps profiles and settings in memory and fakes
 // controller input so every screen can be used without hardware.
 
-import type { Action, ActiveEmulationMode, AppSettings, AudioApp, Binding, ControllerStatus, DriverKind, DriverState, DsuStatus, EmulationMode, EmulationStatus, HapticStatus, HostMessage, Output, Profile, ProfileBackup, TelemetryConfig, TelemetryRule, TelemetrySource, TelemetryValues, TriggerConfig, UdpStatus, UpdateStatus } from "./host";
+import type { Action, ActiveEmulationMode, AppSettings, AudioApp, Binding, CatalogEntry, CatalogStatus, ControllerStatus, DriverKind, DriverState, DsuStatus, EmulationMode, EmulationStatus, HapticStatus, HostMessage, Output, Profile, ProfileBackup, TelemetryConfig, TelemetryRule, TelemetrySource, TelemetryValues, TriggerConfig, UdpStatus, UpdateStatus } from "./host";
 import {
   clamp,
   clone,
@@ -19,6 +19,7 @@ import {
   normalizeSettings,
   processStick,
   rawAxis,
+  withMode,
 } from "./model";
 
 type Msg = { type: string; [key: string]: unknown };
@@ -79,6 +80,46 @@ const nativeDualSenseGames = new Set(["ghostoftsushima.exe", "returnal-win64-shi
 const audioApps: AudioApp[] = [
   { pid: 1001, name: "Spotify.exe", display: "Spotify" },
   { pid: 1002, name: "firefox.exe", display: "Firefox" },
+];
+
+// Example community catalog. The real one is signed and fetched by the host.
+const catalogEntries: CatalogEntry[] = [
+  {
+    id: "ghost-of-tsushima-bow", name: "Ghost of Tsushima — Bow & Gyro", games: ["GhostOfTsushima.exe"],
+    controller: "dualsense", tags: ["action", "gyro", "bow"], author: "kaan237", version: "1.0.0", size: 4120,
+    description: {
+      en: "Bow resistance on R2, feedback on L2, gyro aiming while L2 is held.",
+      tr: "R2'de yay direnci, L2'de direnç, L2 basılıyken gyro nişan.",
+    },
+    summary: {
+      leftTrigger: "feedback", rightTrigger: "bow", emulation: "dualSense", mappingEnabled: true, layerCount: 1, chordCount: 0,
+      macroCount: 1, gyroMouse: "whileHeld", gyroStick: "off", flickStick: false, audioHaptics: false, telemetryRules: 0,
+    },
+  },
+  {
+    id: "ea-sports-f1-telemetry", name: "EA SPORTS F1 — Telemetry", games: ["F1_25.exe", "F1_24.exe"],
+    controller: "any", tags: ["racing", "telemetry", "f1"], author: "apex-lab", version: "1.2.0", size: 9860,
+    description: {
+      en: "Brake pressure on L2, ABS and traction loss pulses, rev lights on the lightbar.",
+      tr: "L2'de fren basıncı, ABS ve çekiş kaybı titreşimleri, ışık çubuğunda devir ışıkları.",
+    },
+    summary: {
+      leftTrigger: "feedback", rightTrigger: "feedback", emulation: "dualSense", mappingEnabled: false, layerCount: 0, chordCount: 0,
+      macroCount: 0, gyroMouse: "off", gyroStick: "off", flickStick: false, audioHaptics: true, telemetryRules: 7,
+    },
+  },
+  {
+    id: "desktop-couch-media", name: "Desktop couch and media", games: [],
+    controller: "edge", tags: ["desktop", "media", "edge"], author: "couch-gamer", version: "0.9.1", size: 6240,
+    description: {
+      en: "Mouse and media keys from the couch. The back paddles switch the layer.",
+      tr: "Kanepeden fare ve medya tuşları. Arka kulakçıklar katmanı değiştirir.",
+    },
+    summary: {
+      leftTrigger: "off", rightTrigger: "off", emulation: "off", mappingEnabled: true, layerCount: 2, chordCount: 2,
+      macroCount: 1, gyroMouse: "off", gyroStick: "off", flickStick: false, audioHaptics: false, telemetryRules: 0,
+    },
+  },
 ];
 
 function forzaTemplate(): TelemetryConfig {
@@ -372,6 +413,72 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     }, 250);
   }
 
+  // Community catalog: nothing happens until the UI asks. ?catalog=error and ?catalog=empty preview those states.
+  const catalogMode = previewOptions.get("catalog");
+  let catalog: CatalogStatus = { type: "catalog.status", state: "idle", updated: null, profiles: [], importingId: null, error: null, message: null };
+  const sendCatalog = () => emit(clone(catalog));
+
+  function listCatalog(refresh: boolean) {
+    if (catalog.state === "loading" || catalog.state === "importing") return;
+    if (catalog.state === "ready" && !refresh) return sendCatalog();
+    catalog = { ...catalog, state: "loading", error: null, message: null };
+    sendCatalog();
+    window.setTimeout(() => {
+      catalog = catalogMode === "error"
+        ? { ...catalog, state: "error", updated: null, profiles: [], error: "network", message: "Network error" }
+        : { ...catalog, state: "ready", updated: "2026-11-22", profiles: catalogMode === "empty" ? [] : clone(catalogEntries) };
+      sendCatalog();
+    }, 700);
+  }
+
+  function importCatalog(id: unknown) {
+    const entry = catalog.profiles.find((e) => e.id === id);
+    if (!entry || catalog.state !== "ready") return;
+    catalog = { ...catalog, state: "importing", importingId: entry.id };
+    sendCatalog();
+    window.setTimeout(() => {
+      const p = defaultProfile(entry.name, newId());
+      p.games = [...entry.games];
+      p.triggers.left = withMode(defaultTrigger(), entry.summary.leftTrigger);
+      p.triggers.right = withMode(defaultTrigger(), entry.summary.rightTrigger);
+      p.emulation = { ...p.emulation, mode: entry.summary.emulation };
+      profiles = [...profiles, p];
+      sendProfiles();
+      emit({ type: "notice", kind: "info", message: L(`Imported “${entry.name}” from community catalog.`, `Topluluk kataloğundan “${entry.name}” içe aktarıldı.`) });
+      catalog = { ...catalog, state: "ready", importingId: null };
+      sendCatalog();
+    }, 900);
+  }
+
+  async function exportShare(p: Profile) {
+    // Shared profiles must not start programs.
+    let removed = 0;
+    const strip = (node: unknown): unknown => {
+      if (Array.isArray(node)) return node.map(strip);
+      if (node && typeof node === "object") {
+        const o = node as Record<string, unknown>;
+        if (typeof o.kind === "string" && o.kind.toLowerCase() === "run") {
+          removed++;
+          return { kind: "none" };
+        }
+        return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, strip(v)]));
+      }
+      return node;
+    };
+    const json = JSON.stringify(strip(p), null, 2);
+    const bytes = new TextEncoder().encode(json);
+    const digest = crypto.subtle ? new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)) : new Uint8Array(32);
+    const sha256 = Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("");
+    const slug = p.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "profile";
+    const id = slug.length >= 3 ? slug : `profile-${slug}`;
+    const entry = {
+      id, name: p.name, games: p.games, controller: "any", tags: [], author: "your-name", version: "1.0.0",
+      path: `profiles/${id}.json`, sha256, size: bytes.length,
+      description: { en: "", tr: "" },
+    };
+    emit({ type: "exportShare", id: p.id, fileName: `${id}.json`, json, entryJson: JSON.stringify(entry, null, 2), removedRunActions: removed });
+  }
+
   function dsuState(): DsuStatus["state"] {
     const s = settings.integration;
     if (!s.dsuEnabled) return "off";
@@ -630,8 +737,27 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         sendIntegration();
         sendHaptics(true);
         sendUpdate();
+        sendCatalog();
         timer ??= window.setInterval(simTick, 33);
         return;
+
+      case "catalog.list":
+        listCatalog(m.refresh === true);
+        return;
+      case "catalog.preview":
+        return;
+      case "catalog.import":
+        importCatalog(m.id);
+        return;
+      case "catalog.openRepo":
+        emit({ type: "notice", kind: "info", message: L("The catalog repository does not open in the browser preview.", "Tarayıcı önizlemesinde katalog deposu açılmaz.") });
+        return;
+      case "profile.exportShare": {
+        const p = profiles.find((x) => x.id === m.id);
+        if (!p) return emit({ type: "error", message: L("Profile not found.", "Profil bulunamadı.") });
+        void exportShare(p);
+        return;
+      }
 
       case "profile.save": {
         const p = normalizeProfile(m.profile as Profile);
