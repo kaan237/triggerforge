@@ -103,7 +103,7 @@ Amaç: donanım aracı gibi hissettiren, kendine has bir arayüz. Hazır şablon
 - Yazı: arayüz için tek bir grotesk font (ör. Geist veya IBM Plex Sans); sayılar ve değerler için eşit genişlikli rakamlar (`tabular-nums`), canlı değerler titremez.
 - Köşeler küçük (4-6 px). Büyük yuvarlak "baloncuk" kartlar yok.
 
-**Kaçınılacaklar (hazır yapay zekâ görüntüsü)**
+**Kaçınılacaklar (hazır şablon görüntüsü)**
 - Mor-mavi gradyanlar, her yerde cam efekti (glassmorphism), neon parlamalar.
 - Her başlığın yanında emoji veya rastgele ikon; "✨ AI" süslemeleri.
 - Aynı boy kartlardan oluşan ızgara panolar; içi boş "istatistik kartları".
@@ -209,7 +209,7 @@ Her faz **çalışan bir ürünle** biter. Bir faz bitmeden sonrakine geçilmez.
 ---
 
 **Faz 2 sonucu (2026-11-18)**
-- Üç alt ajanla yapıldı (çekirdek, arayüz, pencere/köprü). Ortak sözleşme `docs/contract.md`'de; çıktılar ayrıca kontrol edildi ve kod incelemesinden geçti.
+- Üç iş olarak yapıldı (çekirdek, arayüz, pencere/köprü). Ortak sözleşme `docs/contract.md`'de; çıktılar ayrıca kontrol edildi ve kod incelemesinden geçti.
 - Çekirdek: profil ve ayar dosyaları (atomik yazım, bozuk dosyayı kenara alma, bilinmeyen enum değerini varsayılana çevirme), ışık efektleri, oyuncu LED'leri, analog/tetik eğrileri, gyro kalibrasyonu, öndeki oyuna göre profil seçimi, boşta uyku, pil uyarısı.
 - Arayüz: Kontrolcü, Tetikler (10 bölgeli editör ve şablonlar), Işık, Analoglar, Profiller, Ayarlar; Faz 1 test araçları "Geliştirici araçları" altında.
 - Pencere: tray simgesi ve menüsü, kapatınca tray'e küçültme, `--tray` ile gizli başlatma, Windows ile başlatma (HKCU Run, yalnız ayardan), tek kopya çalışma.
@@ -237,7 +237,7 @@ Bu faz sanal kontrolcü **gerektirmez**; klavye ve fare `SendInput` ile gönderi
 **Risk:** `SendInput` yükseltilmiş (admin) pencerelere ulaşmaz → uygulamaya "yönetici olarak çalıştır" seçeneği. Anti-cheat'li oyunlar sentetik girdiyi engelleyebilir. **Geri alma:** profili kapatmak.
 
 **Faz 3 sonucu (2026-11-18)**
-- Üç alt ajanla yapıldı (çekirdek motoru, Windows katmanı + pencere, arayüz), aynı anda. Sözleşme `docs/contract-phase3.md`; ortak tuş listesi ve arayüzler `src/Tactile.Input`'ta, Windows kodu `src/Tactile.Input.Windows`'ta.
+- Üç iş olarak yapıldı (çekirdek motoru, Windows katmanı + pencere, arayüz), aynı anda. Sözleşme `docs/contract-phase3.md`; ortak tuş listesi ve arayüzler `src/Tactile.Input`'ta, Windows kodu `src/Tactile.Input.Windows`'ta.
 - Çekirdek: kısa/uzun/çift basma, turbo, aç/kapa, PS katmanı, referans sayımlı tuşlar, her geçişte "hepsini bırak" (profil değişimi, kapatma, duraklatma, kopma); touchpad fare/kaydırma/dokunarak tık/bölgeler/kaydırma hareketleri; gyro fare; analog → tuş/fare/tekerlek; makro çalıştırıcı (bir kez / basılıyken / aç-kapa); program çalıştır, profil değiştir, mikrofon sustur (LED'i izler), Win kısayolları.
 - İçe aktarılan profillerdeki "program çalıştır" eylemleri silinir.
 - Windows: `SendInput` (tarama kodu, medya tuşları sanal tuş), Core Audio ile mikrofon, yükseltilmiş pencere tespiti, "yönetici olarak yeniden başlat".
@@ -279,7 +279,7 @@ Bu faz sanal kontrolcü **gerektirmez**; klavye ve fare `SendInput` ile gönderi
 **Geri alma:** sürücüleri kendi kaldırıcılarıyla kaldırmak; uygulama içinde "emülasyonu tamamen kapat" anahtarı.
 
 **Faz 4 sonucu (2026-11-19, kod tamam, donanımda denenmedi)**
-- Üç alt ajanla yapıldı (sanal cihaz, sürücüler, çekirdek + arayüz), aynı anda. Sözleşme `docs/contract-phase4.md`; protokol bilgisi `docs/protocol-emulation.md` (kendi cümlelerimizle, kaynaklı).
+- Üç iş olarak yapıldı (sanal cihaz, sürücüler, çekirdek + arayüz), aynı anda. Sözleşme `docs/contract-phase4.md`; protokol bilgisi `docs/protocol-emulation.md` (kendi cümlelerimizle, kaynaklı).
 - `src/Tactile.Emulation`: 127.0.0.1'de USB/IP sunucusu (kontrol + interrupt), sanal Xbox 360 ve sanal DualSense (yalnız HID, ses yok). Her çalıştırmada yeni port.
 - `src/Tactile.Drivers`: usbip-win2 (yalnız 0.9.8.1; yapı düzeni sürüme göre değişiyor) ve HidHide durumu, VHCI takma/çıkarma, HidHide gizleme. Her değişiklik önce `recovery.json`'a yazılıyor; çökme sonrası açılışta, `Tactile.exe --restore` ile ve Başlat menüsündeki "Kontrolcüyü geri getir" kısayoluyla geri alınıyor. Yalnız bizim eklediklerimiz geri alınıyor.
 - Dağıtım: sürücüler pakete gömülmüyor. Uygulama resmi GitHub sürümünü indiriyor, boyut + SHA-256 + Authenticode imzacısını kontrol ediyor (usbip-win2: Cloudyne Systems, HidHide: Nefarius Software Solutions e.U.; 19 Kasım'da doğrulandı), kullanıcı UAC'ye onay veriyor. İkisi de yeniden başlatma istiyor. Lisanslar (BSD-2, MIT) faz 7'de `licenses.txt`'e girecek.
@@ -344,7 +344,7 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 - `Tactile.Emulation`: USB/IP izokron aktarım (uç nokta başına ms'de bir paket, catch-up, UNLINK), sanal DualSense'in ses sürümü (full speed, gerçek pad'in 227 baytlık yapılandırması, mikrofon paketi 192, HID arayüz 3, UAC1 ses/sessiz denetimleri, sessiz mikrofon). Ayar kapalıysa Faz 4'ün HID-only pad'i.
 - Çekirdek: oyun sesi kanal 3-4 → Bluetooth haptik (16'lık ortalama, /256 × güç), kanal 1-2 → hoparlör (5a Opus hattı). Oyun haptiği gelirken sesten haptik geri planda. Windows'un cihaz ses düzeyi/sessiz ayarı uygulanıyor. Akış yalnız son 3 sn'de gerçek ses geldiyse açık. Ayarlar: ses arayüzü, haptik tamponu, varsayılan ses cihazlarını koru; profil: oyun haptiği kipi, şiddet, yumuşatma; hoparlör paketi (tek kare `0x36` varsayılan, çift kare `0x39` deneysel).
 - Donanım testi (KH, Bluetooth, test programıyla 4 kanallı ses): Windows "Hoparlör (DualSense Wireless Controller)" ve mikrofonu gösteriyor; 4 kanal 48 kHz açılıyor. Kanal 3-4 → titreşim iki tarafta, ses yok; kanal 1-2 → hoparlörden melodi, titreşim yok. Bulunanlar: Windows sanal pad'i varsayılan hoparlör ve mikrofon yapıyordu → takmadan önceki varsayılanlar 15 sn içinde geri alınıyor (doğrulandı, Realtek kaldı). Hoparlör cızırtısı → 2 bloklu titreşim tamponu (SpeakerFeed, AudioHaptics, GameAudio), çok azaldı; 12 sn'de yaklaşık 1 kopma kalıyor (Bluetooth takılması). `0x39` çift kare paketi bu controller'da hiç ses vermedi (neden açık: Windows'un BT rapor boyu ya da firmware), deneysel bırakıldı.
-- Testler 421/421. Code-review high: 4 bulgu, 3'ü düzeltildi (Windows ses düzeyi, izokron kuyruk sınırı, akışın gereksiz açık kalması), 1'i (sessiz mikrofonun varsayılan olması) varsayılanları koruma özelliğiyle çözüldü.
+- Testler 421/421. Kod incelemesi: 4 bulgu, 3'ü düzeltildi (Windows ses düzeyi, izokron kuyruk sınırı, akışın gereksiz açık kalması), 1'i (sessiz mikrofonun varsayılan olması) varsayılanları koruma özelliğiyle çözüldü.
 - Kalan: haptik destekli gerçek oyunda deneme ve kablolu ile karşılaştırma notu, 30 dk koşu, oyun içi gecikme ölçümü, kalan seyrek hoparlör kopması (`0x39` neden çalışmıyor; BT kuyruk yönetimi), Bluetooth'tan mikrofon (ertelendi).
 
 ---
@@ -376,7 +376,7 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 - Forza telemetrisi (varsayılan 5555; FH6 5200-5300'ü kendisi kullanıyor): 232/311/323/324/331 baytlık paketler (Sled, FM7, FM 2023, FH4-6). Sinyaller: hız, devir, gaz, fren, debriyaj, el freni, vites, direksiyon, ön/arka kayma, yol titreşimi, kasis, turbo, ABS, patinaj.
 - Kural motoru: profil başına en çok 32 kural, "sinyal aralığı → tetik parametresi / ışık rengi (yanıp sönme) / oyuncu LED çubuğu / titreşim", hedef başına son etkin kural kazanır. Forza şablonu: frenle L2 direnci, ABS'de L2 titreşimi, devirle R2 direnci, patinajda R2 titreşimi, devirle ışık yeşil → kırmızı, devir LED çubuğu, kasiste titreşim.
 - Arayüz: **Entegrasyonlar** sayfası (UDP ve Forza kartları, canlı durum ve değerler, kural düzenleyici, "Forza şablonunu uygula", "Efektleri bırak"); tarayıcıda simülasyonla denendi. Test göndericisi `tools/integration-test/udptest.py` (native, dsx, garbage, forza).
-- Testler 536/536. Code-review high: 7 bulgu; 5'i düzeltildi (controller'a yazma ve profil seçimi dinleyici kilidi dışında, sıra numaralı katman yayını; bozuk DSX komutları sayılıyor; boşta 10 ms'de uyanma kalktı; arayüzdeki sıfırlama UDP durumunu da bırakıyor; gerçek DSX için port dosyası uyarısı), 1'i yanlış alarm, 1'i (iki dinleyicide ortak bağlanma kodu) bırakıldı.
+- Testler 536/536. Kod incelemesi: 7 bulgu; 5'i düzeltildi (controller'a yazma ve profil seçimi dinleyici kilidi dışında, sıra numaralı katman yayını; bozuk DSX komutları sayılıyor; boşta 10 ms'de uyanma kalktı; arayüzdeki sıfırlama UDP durumunu da bırakıyor; gerçek DSX için port dosyası uyarısı), 1'i yanlış alarm, 1'i (iki dinleyicide ortak bağlanma kodu) bırakıldı.
 - Donanım testi (2026-11-19, KH, Bluetooth, `udptest.py` ile): kendi biçimimiz (R2 silah direnci, kırmızı ışık, oyuncu LED'leri, cevapta pil ve bağlantı, 5 sn sonra profile dönüş), DSX biçimi (L2 direnç, R2 dörtnala, mavi ışık, oyuncu 3 düzeni, mikrofon LED'i açık ve yanıp sönme, DSX cevabı, sıfırlama), bozuk paketler (10 bozuk paket atlandı, uygulama açık kaldı, sonraki iyi pakete cevap geldi) ve sahte Forza Horizon verisi (durum "Veri geliyor (FH)", canlı değerler, Forza şablonuyla devirle R2 direnci, ışık yeşil → kırmızı ve en üst devirde yanıp sönme, devir LED çubuğu, frenle artan L2 direnci, ABS'de L2 titreşimi, veri kesilince profile dönüş) çalıştı.
 - Kalan: gerçek Forza (KH'de yok) ve gerçek bir DSX modu (KH'de yok) ile deneme; DSX v3 (Steam) modlarının yeni alanları bilinmiyor; AC/ACC, F1, eklenti sistemi ve profil paylaşımı sonraki adım.
 
@@ -404,20 +404,20 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 - **Bölme:** 7a = ad, iki dil, log ve "logları dışa aktar", installer + kaldırıcı, portable, `licenses.txt`, imzalama. 7b = public repo, imzalı güncelleme, ilk açılış sihirbazı, açık kaynak geçişi.
 
 **Faz 7a sonucu (2026-11-19, kod tamam, installer derlendi; kurulum denemesi KH'de)**
-- Sözleşme `docs/contract-phase7a.md`, 3 iş: 1. iş tek başına, 2. ve 3. iş aynı anda (dosyaları ayrı) Codex'te; her biri incelendi.
+- Sözleşme `docs/contract-phase7a.md`, 3 iş: 1. iş tek başına, 2. ve 3. iş aynı anda (dosyaları ayrı); her biri incelendi.
 - Ad **TriggerForge** 0.7.0: `TriggerForge.exe`, pencere, tepsi, Başlat menüsü, Run değeri, adlandırılmış nesneler. Veri `%APPDATA%\TriggerForge`; eski `%APPDATA%\Tactile` ilk açılışta bir kez kopyalanır, eskisi silinmez. Portable: exe yanında `portable.txt` → veri `data\`, Windows ile başlatma ve Başlat menüsü yok, emülasyon kapalı başlar.
 - `--restore --quiet`: pencere göstermez, 0/1 döner; yeni klasör yoksa eski Tactile kaydını geri alır, veri taşımaz.
 - Log: `%LOCALAPPDATA%\TriggerForge\logs`, 1 MB × 3 dosya, kullanıcı yolu/adı ve MAC maskeli; yakalanmayan hatalar, sürücü kurulumu, emülasyon bildirimleri. Ayarlar'da "Logları dışa aktar" (log + maskeli `settings.json` + `system.txt` zip) ve "Log klasörünü aç". Telemetri yok.
 - İki dil: arayüz, çekirdek bildirimleri, tepsi, MessageBox, sürücü durumları; varsayılan İngilizce, mevcut ayar korunur. Çeviri yardımcısı ayrı `Tactile.Localization` projesinde (alt katmanlar da kullanıyor). Dili ayar dosyası değil AppCore ve `--restore` belirler. Tarayıcıda iki dilde bütün sayfalar gezildi, kalıntı yok.
 - Paket: `build/publish.ps1` (arayüz build, self-contained publish, Wiaus imzası + DigiCert zaman damgası, portable zip, Inno Setup varsa installer). Installer: Program Files, İngilizce/Türkçe kurulum dili, masaüstü kısayolu isteğe bağlı, WebView2 kontrolü, sürücü kurmaz (uygulamadaki buton kurar). Kaldırıcı: önce `--restore --quiet`, başarısızsa sorar; ayarları ve sürücüleri silmeyi ayrı ayrı sorar (varsayılan Hayır). `tools/uninstall-check.ps1` kalıntıları salt okunur raporlar. `THIRD-PARTY-NOTICES.txt` (.NET, WebView2, Opus, React), README İngilizce + Türkçe.
 - İncelemede düzeltilenler: dışa aktarılan `settings.json` MAC'i açık veriyordu; zip yolları `\` ile yazılıyordu (7-Zip klasörsüz açar); `TriggerForge.dll` imzalanmıyordu; geri getirme başarısızsa kaldırma tamamen duruyordu; `.iss` BOM'suzdu; kurulu kopya ikinci bir geri getirme kısayolu açıyordu.
-- Code-review high: 5 bulgu, 5'i düzeltildi (dili değiştiren testler paralel koşuyordu → dil AppCore'a taşındı; kaldırıcı eski Tactile klasörünü bırakıyordu; installer'ın "Windows ile başlat" seçeneği yönetici hesabına yazabiliyordu → kaldırıldı, uygulamadaki ayar kalıyor; imza kontrolü her zincir hatasını kabul ediyordu → yalnız "güvenilmeyen kök").
+- Kod incelemesi: 5 bulgu, 5'i düzeltildi (dili değiştiren testler paralel koşuyordu → dil AppCore'a taşındı; kaldırıcı eski Tactile klasörünü bırakıyordu; installer'ın "Windows ile başlat" seçeneği yönetici hesabına yazabiliyordu → kaldırıldı, uygulamadaki ayar kalıyor; imza kontrolü her zincir hatasını kabul ediyordu → yalnız "güvenilmeyen kök").
 - Testler 549/549 (üç kez arka arkaya). Çıktılar: `artifacts/TriggerForge-0.7.0-setup.exe` (40,9 MB) ve `-portable.zip` (49 MB), imzalayan `CN=Wiaus`. Windows imzayı "güvenilmeyen kök" diye gösterir (kendinden imzalı); SmartScreen uyarısı sürer.
 - Kalan: installer'ı kurup kaldırma denemesi ve `uninstall-check.ps1` (KH), tepsi metinlerinin dil değişince değişmesi (uygulama açıkken), simge dosyası (exe'nin kendi simgesi yok; tepsi simgesi çalışırken çiziliyor).
 
 
 **Faz 7b sonucu (2026-11-19, 0.8.0)**
-- Sözleşme `docs/contract-phase7b.md`: A (C# güncelleyici) ve B (arayüz) aynı anda Codex'te; C (yayın aracı, installer, betikler) elle.
+- Sözleşme `docs/contract-phase7b.md`: A (C# güncelleyici) ve B (arayüz) aynı anda; C (yayın aracı, installer, betikler) ayrı.
 - Güncelleme: `github.com/kaan237/triggerforge/releases/latest/download/manifest.json` + `.sig`. ECDSA P-256 imzası, public anahtar uygulamada sabit (`UpdateKey.cs`); özel anahtar KH'nin Windows anahtar deposunda ("TriggerForge update signing"). Yönlendirmeler elle izleniyor, her adımda yalnız `github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com` ve https/443. Boyut sınırları, sürüm yalnız ileri, varlık adresi ve adı sürüme bağlı, indirmede boyut + SHA-256 + Wiaus imzacı kontrolü. Kurulu kopya installer'ı `/SILENT … /RELAUNCH` ile yönetici izniyle başlatıp kapanır; installer uygulamanın kapanmasını 30 sn bekler ve bitince uygulamayı normal kullanıcı olarak açar. Portable kopya yalnız sürümler sayfasını açar. Açılıştan 60 sn sonra ve 24 saatte bir otomatik denetim (Ayarlar'dan kapatılabilir).
 - İlk açılış sihirbazı: Hoş geldin + dil, controller bağlama, isteğe bağlı sürücüler, test (canlı giriş, ışık, titreşim, R2), bitiş. Atlanabilir, Ayarlar'dan yeniden başlatılabilir.
 - Yayın: `tools/Tactile.Tools.Release` (keygen, pubkey, backup, manifest, verify) ve `build/release.ps1` (paket, manifest imzası, uygulamanın anahtarıyla doğrulama, GitHub sürümü; var olan sürümün üstüne yazmaz).
@@ -432,7 +432,7 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 - Aynı anda 2-4 controller: her biri ayrı profil, ayrı sanal cihaz, ayrı oyuncu LED'i.
 
 **Faz 8 sonucu (2026-11-19, 0.9.0 kodu; donanımda denenmedi, yayınlanmadı)**
-- Sözleşme `docs/contract-phase8.md` (plan-audit: ilk karar REVİZYON GEREKLİ, düzeltildi → ONAYLANABİLİR). 1. iş (çekirdek) ve 2. iş (arayüz) aynı anda, 3. iş (yuva başına sanal controller) ardından; yanında iki salt okunur Codex denetimi.
+- Sözleşme `docs/contract-phase8.md` (plan denetimi: ilk karar REVİZYON GEREKLİ, düzeltildi → ONAYLANABİLİR). 1. iş (çekirdek) ve 2. iş (arayüz) aynı anda, 3. iş (yuva başına sanal controller) ardından; yanında iki salt okunur denetim.
 - En çok 4 controller. Yuva 0 = birincil: bugünkü her özellik. Yuva 1-3 = ikincil: kendi profili (controller'a göre varsayılan ya da birincilin profili, oturumluk seçim), ışık, tetikler, oyuncu LED'i, mikrofon LED'i, UDP komutları ve kendi sanal controller'ı (Xbox 360 / DualSense, yalnız HID, ses yok). Tuş atama, makro, haptik, hoparlör, telemetri yalnız birincilde.
 - Birincil seçimi (`primaryController`, "Birincil yap"), otomatik oyuncu LED'leri (konsol desenleri `0x04/0x0A/0x15/0x1B`, profilde açık seçim kazanır), `maxControllers` (1 = eski davranış, ikincil kod hiç çalışmaz; geri alma anahtarı). Hiç controller yokken bağlanan her controller birincil olur.
 - UDP: DSX'in controller indeksi ve kendi biçimimizde `controller` alanı yuvayı seçer; durum yuva başına ve yuvadaki controller'a bağlı.
@@ -449,34 +449,34 @@ Faz 1'deki `0x32` builder'ının üstüne kurulur; Faz 4'ü beklemez, Faz 2-3 il
 - Logo: KH'nin verdiği gümüş ouroboros (`assets/icon/source.ico`, NexoGameST'in kendi simgesi). Açık zeminde (beyaz görev çubuğu) küçük boyutlarda kaybolduğu için çevresine ince, yarı saydam koyu kontur eklendi; 16, 20, 24, 32, 40, 48, 64, 128, 256 piksel `assets/icon/triggerforge.ico`.
 - Kullanıldığı yerler: exe simgesi (Gezgin, görev çubuğu, Başlat menüsü, Uygulamalar listesi), pencere ve tepsi simgesi (kodla çizilen eski mavi controller simgesi kaldırıldı; boyut Windows'un istediğine göre ico'dan seçiliyor), installer simgesi ve kurulum sihirbazının sağ üst logosu, kaldırıcı, arayüzde yan menü, ilk açılış sihirbazı ve Ayarlar → Güncellemeler → Hakkında satırı, sekme simgesi, README.
 - README: TriggerForge adı ve logosu GPL kapsamında değil; resmî sürümün değiştirilmemiş kopyaları bu adla paylaşılabilir, değiştirilmiş sürüm kendi adını ve logosunu kullanmalı.
-- Denetim (salt okunur Codex): 4 bulgu (logo dosyaları git'te izlenmiyordu, alışılmadık kapanışta tepsi simgesi erken bırakılıyordu, önizlemede "Sürüm notları" sessizdi, README'de ad/logo cümlesi çelişkiliydi), hepsi düzeltildi. Testler 620/620.
+- Denetim (salt okunur): 4 bulgu (logo dosyaları git'te izlenmiyordu, alışılmadık kapanışta tepsi simgesi erken bırakılıyordu, önizlemede "Sürüm notları" sessizdi, README'de ad/logo cümlesi çelişkiliydi), hepsi düzeltildi. Testler 620/620.
 
 ### Faz 10 — Hızlı kazançlar → 1.1.0 (2026-11-22)
 
-Yol haritası `docs/yol-haritasi.md` (Faz 10-15), dayanağı `docs/rakip-analizi.md`. Çalışma düzeni bu fazdan itibaren: Claude kod yazmıyor; Gemini (agy, Argon) araştırma, kod haritası, sözleşme taslağı ve denetim; Codex kod ve bütün düzeltmeler; Claude plan-audit, doğrulama ve karar. `claude-orkestra` bu repoya kuruldu (git dışı).
+Yol haritası `docs/yol-haritasi.md` (Faz 10-15), dayanağı `docs/rakip-analizi.md`.
 
 **Faz 10 sonucu**
-- Sözleşme `docs/contract-phase10.md` (plan-audit: REVİZYON GEREKLİ → 3 düzeltme: tam ekran duraklatma yalnız oyun kuralıyla seçilmemiş profilde; geri yükleme öncesi `pre-restore-*` kopyası, atomik yazım, yol geçişi koruması; hotkey kayıt hatası bildirimi → ONAYLANABİLİR). İş A (`src/`+`tests/`) ve İş B (`ui/`) aynı anda Codex'te.
+- Sözleşme `docs/contract-phase10.md` (plan denetimi: REVİZYON GEREKLİ → 3 düzeltme: tam ekran duraklatma yalnız oyun kuralıyla seçilmemiş profilde; geri yükleme öncesi `pre-restore-*` kopyası, atomik yazım, yol geçişi koruması; hotkey kayıt hatası bildirimi → ONAYLANABİLİR). İş A (`src/`+`tests/`) ve İş B (`ui/`) aynı anda.
 - Özellikler: kontrolcü kombinasyonu (2-3 tuş) ve global klavye kısayoluyla eşlemeyi duraklat/sürdür, tepside durum; tam ekran uygulamada otomatik duraklatma (çerçevesiz, monitörle birebir pencere; kabuk pencereleri hariç; öndeki exe bir oyun kuralına uyuyorsa duraklatmaz). Gyro fare `whileReleased` (ratchet) ve `whileTouchpad` kipleri. Gyro → sanal sağ stick (Xbox 360 / DualSense, yalnız birincil; ölü bölge, anti-deadzone, yumuşatma, eksen, kipler; fiziksel stick aynen geçer, gyro üstüne eklenir; yatay yön gyro fareyle aynı). Üçlü basış ve döngü (A→B→C, 8 eyleme kadar; katman başına ayrı indeks). Onay darbeleri (profil, katman, makro, duraklatma; BT akışında haptik, değilse 60 ms rumble). Günlük profil yedeği (varsayılan 7 gün), Profiller sayfasında geri yükleme; yedek alınamazsa silme yapılmıyor. Bluetooth RSSI kapsam dışı: Windows klasik BT HID için kullanıcı katmanında RSSI vermiyor.
-- Denetim: code-review high 2 bulgu, Codex salt okunur 6, Gemini 12; birleşince 16 ayrı madde, hepsi Codex'e düzelttirildi (öne çıkanlar: büyütülmüş pencerelerin tam ekran sayılması, yedek alınamazken silmenin sürmesi, geri yüklemeden sonra eski taslağın kaydı ezmesi, sayısal hotkey değerinin ayar yüklemeyi kesmesi, tuş yakalarken global kısayolun araya girmesi, gyro stick açılınca fiziksel stiğin şekil değiştirmesi). Gemini tekrar denetimi: hepsi tamam, yeni bulgu yok.
+- Denetim: üç incelemede 16 ayrı madde, hepsi düzeltildi (öne çıkanlar: büyütülmüş pencerelerin tam ekran sayılması, yedek alınamazken silmenin sürmesi, geri yüklemeden sonra eski taslağın kaydı ezmesi, sayısal hotkey değerinin ayar yüklemeyi kesmesi, tuş yakalarken global kısayolun araya girmesi, gyro stick açılınca fiziksel stiğin şekil değiştirmesi). Tekrar denetim: hepsi tamam, yeni bulgu yok.
 - Testler 710/710, `dotnet build` 0 uyarı, `npm run build` temiz; arayüz tarayıcı önizlemesinde (Profiller → günlük yedekler, Ayarlar → duraklatma kısayolu) denendi.
 - Denenmeyenler (KH donanım listesi `docs/contract-phase10.md` §7): gerçek global hotkey, tam ekran oyunda duraklatma, gyro ratchet ve gyro stick yönleri, BT/USB onay darbeleri, gerçek yedek/geri yükleme.
 
 ### Faz 11 — Tuş motoru v2 → 1.2.0 (2026-11-22)
 
 **Faz 11 sonucu**
-- Davranış araştırması Gemini'de (Steam Input, JoyShockMapper, reWASD belgeleri; yalnız davranış, kod alınmadı). Sözleşme `docs/contract-phase11.md` (Gemini taslağı; plan-audit 2 düzeltme: `layers` tek gerçek kaynak, eski `layerButton`/`layer` yalnız ayna; flick stick açıkken sanal pad sağ stiği ortada). İş A (`src/`+`tests/`) ve İş B (`ui/`) aynı anda Codex'te.
+- Davranış araştırması (Steam Input, JoyShockMapper, reWASD belgeleri; yalnız davranış, kod alınmadı). Sözleşme `docs/contract-phase11.md` (plan denetimi 2 düzeltme: `layers` tek gerçek kaynak, eski `layerButton`/`layer` yalnız ayna; flick stick açıkken sanal pad sağ stiği ortada). İş A (`src/`+`tests/`) ve İş B (`ui/`) aynı anda.
 - Özellikler: chord (2-3 tuş, pencere 20-300 ms, bileşen bastırma, 3'lü öncelik, chord'a girmeyen tuşlarda gecikme yok); 4'e kadar shift katmanı (hold/toggle, aktivatör herhangi bir tuş ya da Edge Fn/kol, alttaki katmana düşme, geçişte basılı her şey bırakılır; eski profiller otomatik göç); L2/R2 yumuşak/tam çekiş (additive, exclusive, hipFire; histerezis); stick dış/iç halka eylemleri; flick stick (sağ stick → fare, snap, ölü açı, yumuşatma, 360° kalibrasyon ve gecikmeli test dönüşü; gyro fare aynı kalibrasyonu kullanabilir).
-- Denetim: code-review high 1 (iki chord tuşu aynı anda bırakılınca TimeSpan taşması → çökme), Codex 8, Gemini 5; birleşince 12 madde. Sürüm numarası elle, kalan 11'i Codex düzeltti (öne çıkanlar: flick merkezlemesi ana şalteri yok sayıyordu, touchpad chord'u fazladan tık üretiyordu, hipFire sonucu işlem sırasına bağlıydı, katman geçişinde stick tamamen kilitleniyordu, gyro toggle sıfırlanıyordu, Xbox raporunda Y merkezi -129'du). Gemini tekrar denetimi: hepsi tamam, yeni bulgu yok.
+- Denetim: öne çıkan hata (iki chord tuşu aynı anda bırakılınca TimeSpan taşması → çökme); birleşince 12 madde, hepsi düzeltildi (öne çıkanlar: flick merkezlemesi ana şalteri yok sayıyordu, touchpad chord'u fazladan tık üretiyordu, hipFire sonucu işlem sırasına bağlıydı, katman geçişinde stick tamamen kilitleniyordu, gyro toggle sıfırlanıyordu, Xbox raporunda Y merkezi -129'du). Tekrar denetim: hepsi tamam, yeni bulgu yok.
 - Testler 774/774, build 0 uyarı, arayüz önizlemede açıldı (Tuşlar → Akorlar, Tetikler, katman seçici).
 - Denenmeyenler (KH donanım listesi `docs/contract-phase11.md` §7): gerçek chord zamanlaması, Edge kolu ile katman, tetik kademeleri hissi, flick stick oyunda 360° kalibrasyon.
 
 ### Faz 12 — Oyun uyumu → 1.3.0 (2026-11-22)
 
 **Faz 12 sonucu**
-- Araştırma (DS4 USB descriptor/raporları, DSU protokolü, oyun listesi kaynakları) Gemini'de; sözleşme `docs/contract-phase12.md` (Gemini taslağı; plan-audit: gömülü oyun exe listesi yalnız doğrulanmış adlar, kanonik biçim testi). İş A (sanal DS4) Codex, İş C (arayüz) agy Claude Sonnet, İş B (DSU + otomatik seçim) agy Sonnet'te başladı ve kotaya takıldı; kalan üç paket Codex'te. Codex 5 saatlik kotası %7'ye, Gemini Argon haftalık kotası bitince düzeltmeler KH'nin onayıyla Claude Sonnet alt ajanlarına verildi; denetimler Gemini Neon'da.
+- Araştırma (DS4 USB descriptor/raporları, DSU protokolü, oyun listesi kaynakları); sözleşme `docs/contract-phase12.md` (plan denetimi: gömülü oyun exe listesi yalnız doğrulanmış adlar, kanonik biçim testi). Üç iş: sanal DS4, DSU + otomatik seçim, arayüz.
 - Özellikler: sanal DualShock 4 (USB v2 `054C:09CC`, HID; giriş, rumble + ışık geri bildirimi, kalibrasyon DS4 USB düzeninde, 14 feature raporu; ikincil yuvalarda da). DSU/cemuhook hareket sunucusu (`127.0.0.1`, varsayılan 26760, kapalı başlar; 4 yuva, CRC, istemci başına hız sınırı ve çoklu abonelik, 5 sn zaman aşımı, yeniden bağlanmada ve 32-bit sarmada tekdüze zaman damgası, kopma sonrası eski raporu yok sayan nesil sayacı). Profil `emulation.mode: auto`: kullanıcı exe seçimi > gömülü DualSense oyun listesi > Xbox 360; yalnız bilinen oyun (liste, seçim, profil oyun kuralı ya da tam ekran exe) değişince çözülür, Discord/tarayıcıya Alt+Tab pad'i değiştirmez; geçişte nötr giriş ve basılı tuşların bırakılması. USB'de DualSense çözülünce sanal pad takılmaz, durum "dualSense, takılı değil".
-- Denetim: code-review high 2 bulgu (Alt+Tab'da pad değişimi, DSU küresel hız sınırı), Gemini Neon 11; birleşince 12 madde + 4 eksik test. İki tekrar denetimde 5 + 2 kalan sorun daha (DSU zaman damgası uç durumları, kopma yarışı, kilitsiz otomatik çözüm, oyun seçimi okuma, liste testi) bulundu ve düzeltildi; son kontrol temiz.
+- Denetim: iki incelemede (Alt+Tab'da pad değişimi, DSU küresel hız sınırı ve diğerleri) birleşince 12 madde + 4 eksik test. İki tekrar denetimde 5 + 2 kalan sorun daha (DSU zaman damgası uç durumları, kopma yarışı, kilitsiz otomatik çözüm, oyun seçimi okuma, liste testi) bulundu ve düzeltildi; son kontrol temiz.
 - Testler 805/805 (iki kez), build 0 uyarı, `npm run build` temiz; Sanal kontrolcü sayfası önizlemede açıldı.
 - Denenmeyenler (KH donanım listesi `docs/contract-phase12.md` §7): joy.cpl'de sanal DS4 ve bir DS4 oyunu, Steam/SDL'nin 507 baytlık v2 descriptor beklentisi (tam tablo doğrulanmadı), Cemu/Dolphin'de DSU gyro yönleri, otomatik kip geçişleri gerçek oyunlarda.
 
@@ -531,7 +531,7 @@ Faz 0 → Faz 1 ─┬→ Faz 2 → Faz 3 ─┐
 - Faz 6'nın UDP API kısmı Faz 2'den sonra başlayabilir; DSX modlarının oyun içi testi Faz 4'ü bekler (Xbox modu gerekli).
 - Tahmini toplam: tek kişiyle **4-6 ay** (Faz 9 hariç).
 
-## 7. Plan denetimi (plan-audit, 2026-11-18)
+## 7. Plan denetimi (2026-11-18)
 
 İlk karar: **REVİZYON GEREKLİ**. Aşağıdaki düzeltmeler plana işlendi.
 

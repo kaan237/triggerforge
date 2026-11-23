@@ -13,7 +13,7 @@ drivers and a short test.
 |---|---|---|
 | A | Updater (check, verify, download, install), settings fields, bridge messages, tests | `src/Tactile.Core/Updates/**` (`UpdateKey.cs` exists, do not change its values), `src/Tactile.Core/Model/AppSettings.cs`, `src/Tactile.Core/Storage/Validation.cs`, `src/Tactile.Core/AppCore.cs` (only if needed), `src/Tactile.Host/**`; tests in `tests/Tactile.Tests/Updates/**` |
 | B | Wizard UI, Settings "Updates" section, `host.ts` types, `sim.ts` answers | `ui/src/**` only |
-| C | Release tool, manifest signing, installer relaunch, publish/release scripts (done outside Codex) | `tools/Tactile.Tools.Release/**`, `build/**`, `installer/**` |
+| C | Release tool, manifest signing, installer relaunch, publish/release scripts | `tools/Tactile.Tools.Release/**`, `build/**`, `installer/**` |
 
 ## Safety rules (every job)
 
@@ -152,7 +152,7 @@ başlat" which saves `firstRunDone: false`. `sim.ts` starts with `firstRunDone: 
 answers all update messages (fake states with a short fake download) and keeps working as
 today.
 
-## Job C: release (outside Codex)
+## Job C: release
 
 - `tools/Tactile.Tools.Release`: `keygen` (done, key in the current user's Windows key store),
   `pubkey`, `backup <file> <password>`, `manifest <version> <dir> <notes-en> <notes-tr>`.

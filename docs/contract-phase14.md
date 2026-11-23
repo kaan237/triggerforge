@@ -494,11 +494,10 @@ Dosya kümeleri tamamen ayrık olduğu için **İş A** ve **İş B** paralel ç
 ## 6. Güvenlik Kuralları (Safety Rules — Every Job)
 
 - **Testlerde gerçek ağ erişimi YOK**: Birim testleri hiçbir zaman gerçek GitHub veya internet adreslerine bağlanmaz. Tüm katalog testleri sahte `HttpMessageHandler` ve bellek içi geçici ECDSA P-256 anahtarları kullanır.
-- **Testlerde gerçek pencere veya `SendInput` YOK**: Ajanlar hiçbir zaman gerçek bir kontrolcüye çıktı gönderen, işletim sistemine klavye/fare girdisi (`SendInput`) enjekte eden, ekranda gerçek WinForms/OSD/Ekran klavyesi penceresi açan (`Form.Show`), genel kısayol tuşu (`RegisterHotKey`) kaydeden veya sürücü kuran kod çalıştırmaz. Uygulama yürütülebilir dosyası (`TriggerForge.exe`) ajanlar tarafından başlatılmaz. Tüm testler `FakePlatform`, `FakeForeground`, `FakeOsdView`, `FakeOnScreenKeyboardView` ve `ManualTime` kullanır.
+- **Testlerde gerçek pencere veya `SendInput` YOK**: Hiçbir zaman gerçek bir kontrolcüye çıktı gönderen, işletim sistemine klavye/fare girdisi (`SendInput`) enjekte eden, ekranda gerçek WinForms/OSD/Ekran klavyesi penceresi açan (`Form.Show`), genel kısayol tuşu (`RegisterHotKey`) kaydeden veya sürücü kuran kod çalıştırmaz. Uygulama yürütülebilir dosyası (`TriggerForge.exe`) geliştirme sırasında başlatılmaz. Tüm testler `FakePlatform`, `FakeForeground`, `FakeOsdView`, `FakeOnScreenKeyboardView` ve `ManualTime` kullanır.
 - **Oyuna enjeksiyon YOK**: OSD ve ekran klavyesi yalnızca TriggerForge sürecinin kendi Win32 katmanlı pencereleridir; başka hiçbir sürece bellek/DLL/grafik müdahalesi yapılmaz.
 - **İzin verilen komutlar**: Yalnızca `dotnet build`, `dotnet test` ve (`ui/` dizininde) `npm run build`.
 - **Commit YOK**: `git commit`, `git push` veya git geçmişini değiştiren hiçbir komut çalıştırılmaz.
-- **Yapay zekâ adı YOK**: Kodda, yorumlarda, testlerde veya belgelerde hiçbir model, asistan veya araç adı geçmez.
 - **Takılı tuş önleme (Stuck-key prevention)**: Ekran klavyesinin açılması/kapanması, duraklatma geçişleri (`ui`, `shortcut`, `fullscreen`), katman değişimi, profil değişimi veya kontrolcü bağlantısının kopması durumunda basılı tüm sanal tuşlar, fare tuşları, makrolar, kilitli tuşlar (toggle) ve turbo çıktıları anında bırakılmalıdır.
 
 ---

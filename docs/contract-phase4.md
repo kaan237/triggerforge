@@ -12,20 +12,20 @@ and isochronous transfers are **not** in this phase (phase 5b).
 
 | Project | Content | Owner |
 |---|---|---|
-| `src/Tactile.Emulation` | `Contracts.cs` (fixed), USB/IP server, virtual USB devices, Xbox 360 and DualSense (HID only) device models | emulation agent |
-| `src/Tactile.Drivers` | `Contracts.cs` (fixed), driver detection, install, VHCI attach/detach, HidHide control, recovery journal, `RecoveryRunner` | drivers agent |
-| `src/Tactile.Core/Emulation/` + small edits in `Tactile.Core`, `Tactile.Device.DualSense`, `Tactile.Host`, `ui/` | orchestration, profile model, remap, output merge, bridge, UI pages, `--restore` | core agent |
+| `src/Tactile.Emulation` | `Contracts.cs` (fixed), USB/IP server, virtual USB devices, Xbox 360 and DualSense (HID only) device models | emulation job |
+| `src/Tactile.Drivers` | `Contracts.cs` (fixed), driver detection, install, VHCI attach/detach, HidHide control, recovery journal, `RecoveryRunner` | drivers job |
+| `src/Tactile.Core/Emulation/` + small edits in `Tactile.Core`, `Tactile.Device.DualSense`, `Tactile.Host`, `ui/` | orchestration, profile model, remap, output merge, bridge, UI pages, `--restore` | core job |
 
 References: `Tactile.Emulation` → `Tactile.Device.DualSense`. `Tactile.Drivers` → nothing
 from the app (only BCL + Win32). `Tactile.Core` → both. `Tactile.Host` → all.
 Tests: `tests/Tactile.Tests/Emulation/`, `tests/Tactile.Tests/Drivers/`,
-`tests/Tactile.Tests/EmulationCore/` (one folder per agent). The tests project gets project
-references to both new projects (added once by the lead before agents start).
+`tests/Tactile.Tests/EmulationCore/` (one folder per job). The tests project gets project
+references to both new projects (added once before the jobs start).
 
-The `Contracts.cs` files are fixed: no agent edits them. If an agent needs a change, it writes
+The `Contracts.cs` files are fixed: no job edits them. If a job needs a change, it writes
 the reason in its final report and works around it.
 
-## Safety rules (all agents)
+## Safety rules (all jobs)
 
 - No code is **run** that attaches a virtual device, hides a device, installs a driver,
   sends output to the controller or input to the PC. Unit tests use fakes and loopback
@@ -72,7 +72,7 @@ public interface IUsbIpServer : IDisposable
 
 public static class UsbIpServerFactory
 {
-    public static IUsbIpServer Start(int port = 0);   // implemented by the emulation agent
+    public static IUsbIpServer Start(int port = 0);   // implemented by the emulation job
 }
 ```
 
@@ -133,7 +133,7 @@ public interface IDeviceTree
 
 public sealed record DriverPlatform(IDriverManager Drivers, IVhci Vhci, IDeviceHider Hider, IRecovery Recovery, IDeviceTree Tree)
 {
-    public static DriverPlatform CreateWindows(string dataDir);   // implemented by the drivers agent
+    public static DriverPlatform CreateWindows(string dataDir);   // implemented by the drivers job
 }
 ```
 

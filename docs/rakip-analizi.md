@@ -1,6 +1,6 @@
 # Rakip analizi — 19 Kasım 2026
 
-Kaynaklar: web araması, Gemini 4 Argon ve Codex (web aramalı) araştırmaları. Her iddianın
+Kaynaklar: web araştırması. Her iddianın
 kaynağı aşağıdaki bağlantılarda; kapalı kaynak uygulamaların belgelenmemiş ayarları ve
 donanımdaki davranışları doğrulanmadı. "Bizde var mı" sütunu kodla kontrol edildi.
 

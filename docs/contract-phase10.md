@@ -258,10 +258,9 @@ Job A and Job B run in parallel with **strictly disjoint file sets**.
 
 ## 6. Safety Rules (Every Job)
 
-- **No hardware or OS injection**: Agents must NEVER run code that sends output to a controller, injects keyboard/mouse input (`SendInput`), registers real global hotkeys during tests, attaches/hides devices, installs drivers, or touches the network. The application executable is never started by agents. All tests use fake `InputPlatform`, fake `IForegroundSource`, and `ManualTime`.
+- **No hardware or OS injection**: Never run code that sends output to a controller, injects keyboard/mouse input (`SendInput`), registers real global hotkeys during tests, attaches/hides devices, installs drivers, or touches the network. The application executable is never started during development. All tests use fake `InputPlatform`, fake `IForegroundSource`, and `ManualTime`.
 - **Allowed commands**: Only `dotnet build`, `dotnet test`, and `npm run build` (in `ui/`).
 - **No commits**: Do not run `git commit`, `git push`, or modify git history.
-- **No AI attribution**: No model, assistant, or tool names anywhere in code, comments, or documentation.
 - **Stuck-key prevention**: Any pause transition (`ui`, `shortcut`, `fullscreen`), profile switch, or controller disconnect must release all held virtual keys, mouse buttons, macros, toggles, and turbo outputs.
 
 ---

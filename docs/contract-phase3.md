@@ -9,8 +9,8 @@ mouse input (controller-to-controller remapping is phase 4).
 | Project | Content | Owner |
 |---|---|---|
 | `src/Tactile.Input` | `Key` (scan-code enum), `MouseButton`, `KeyInfo`, `IInputInjector`, `IMicrophone`, `ILauncher`, `IElevationProbe`, `InputPlatform` (+ `InputPlatform.None`) | fixed: nobody edits it in this phase |
-| `src/Tactile.Input.Windows` | Windows implementations of those interfaces | platform agent |
-| `src/Tactile.Core/Mapping/` | mapping model, validation, engine, macros | core agent |
+| `src/Tactile.Input.Windows` | Windows implementations of those interfaces | platform job |
+| `src/Tactile.Core/Mapping/` | mapping model, validation, engine, macros | core job |
 
 `Tactile.Core` references `Tactile.Input`. `Tactile.Host` references both. The core never
 touches Windows input APIs directly; tests use fakes of the interfaces.

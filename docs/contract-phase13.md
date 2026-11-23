@@ -375,10 +375,9 @@ Job A, Job B, and Job C have **strictly disjoint file sets**. All shared C# file
 
 - **No external network access**: Every UDP listener (`Forza`, `F1`, `BeamNg`) must bind exclusively to `IPAddress.Loopback` (`127.0.0.1`), never `IPAddress.Any` (`0.0.0.0`) or `IPAddress.IPv6Any` (`::`), and must drop any packet whose `RemoteEndPoint` is not a loopback address.
 - **No writing to game memory**: `AccSharedMemory` / `AcSharedMemory` must open Windows memory-mapped files strictly with `MemoryMappedFileRights.Read` and `MemoryMappedFileAccess.Read`. Never call `CreateOrOpen` or open with write permissions.
-- **No hardware or OS injection**: Agents must NEVER run code that sends output to a real controller, injects keyboard/mouse input, attaches/hides devices, or opens real OS shared memory in tests. The application executable and `udptest.py` are never started by agents. All unit tests use ephemeral loopback ports (`127.0.0.1:0`), `FakeSharedMemorySource`, and `ManualTime`.
+- **No hardware or OS injection**: Never run code that sends output to a real controller, injects keyboard/mouse input, attaches/hides devices, or opens real OS shared memory in tests. The application executable and `udptest.py` are never started during development. All unit tests use ephemeral loopback ports (`127.0.0.1:0`), `FakeSharedMemorySource`, and `ManualTime`.
 - **Allowed commands**: Only `dotnet build`, `dotnet test`, and `npm run build` (in `ui/`).
 - **No commits**: Do not run `git commit`, `git push`, or modify git history.
-- **No AI attribution**: No model, assistant, or tool names anywhere in code, comments, or documentation.
 
 ---
 

@@ -159,7 +159,7 @@ Goal: deliver three game-compatibility features — a virtual wired DualShock 4 
 
 ### Embedded native DualSense games resource (`src/Tactile.Core/Emulation/dualsense-games.json`)
 
-> Plan-audit note: the executable names below are a starting draft and some are unverified. The loader trims and lower-cases every entry, drops duplicates and blanks, and a unit test asserts the shipped file is already in that canonical form (no leading spaces, all lower-case, sorted). Only add a name when its exe file name is confirmed (store page, PCGamingWiki "Executable" field or user report); a wrong or missing name only falls back to `xbox360`, and users fix it through `gameModes` overrides.
+> Plan review note: the executable names below are a starting draft and some are unverified. The loader trims and lower-cases every entry, drops duplicates and blanks, and a unit test asserts the shipped file is already in that canonical form (no leading spaces, all lower-case, sorted). Only add a name when its exe file name is confirmed (store page, PCGamingWiki "Executable" field or user report); a wrong or missing name only falls back to `xbox360`, and users fix it through `gameModes` overrides.
 
 ```jsonc
 {
@@ -373,11 +373,10 @@ Job A, Job B, and Job C have **strictly disjoint file sets**. Shared core/host m
 
 ## 6. Safety Rules (Every Job)
 
-- **No hardware or OS injection**: Agents must NEVER run code that sends output to a real controller, injects keyboard/mouse input (`SendInput`), attaches/hides real devices via `usbip-win2` or `HidHide`, or installs drivers. The application executable is never started by agents. All tests use fake `DriverPlatform`, fake `InputPlatform`, fake `IForegroundSource`, `ManualTime`, and ephemeral loopback ports (`127.0.0.1:0`).
+- **No hardware or OS injection**: Never run code that sends output to a real controller, injects keyboard/mouse input (`SendInput`), attaches/hides real devices via `usbip-win2` or `HidHide`, or installs drivers. The application executable is never started during development. All tests use fake `DriverPlatform`, fake `InputPlatform`, fake `IForegroundSource`, `ManualTime`, and ephemeral loopback ports (`127.0.0.1:0`).
 - **Loopback only**: Both `UsbIpServer` and `DsuServer` must bind exclusively to `IPAddress.Loopback` (`127.0.0.1`), never `IPAddress.Any` (`0.0.0.0`) or `IPAddress.IPv6Any` (`::`), and `DsuServer` must reject any packet whose `RemoteEndPoint` is not a loopback address.
 - **Allowed commands**: Only `dotnet build`, `dotnet test`, and `npm run build` (in `ui/`).
 - **No commits**: Do not run `git commit`, `git push`, or modify git history.
-- **No AI attribution**: No model, assistant, or tool names anywhere in code, comments, or documentation.
 - **Stuck-input prevention**: Any virtual pad mode switch (`Xbox360` ↔ `DualSense` ↔ `DualShock4` ↔ `Off`), detach, profile switch, or controller disconnect must submit a neutral virtual pad state before removal and release all held mapped keys, mouse buttons, macros, toggles, and turbo outputs.
 
 ---
