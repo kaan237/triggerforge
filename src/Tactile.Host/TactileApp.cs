@@ -428,10 +428,17 @@ internal sealed partial class TactileApp : ApplicationContext
         _window.Bridge.PostHapticsIfChanged();
     }
 
+    private static string ModelName(ControllerModel model) => model switch
+    {
+        ControllerModel.DualShock4 => "DualShock 4",
+        ControllerModel.DualSenseEdge => "DualSense Edge",
+        _ => "DualSense",
+    };
+
     private void UpdateTrayStatus()
     {
         DualSenseController? c = _core.Controllers.Controller;
-        string? name = c is null ? null : $"{c.Details.Model} · {c.Details.Link}";
+        string? name = c is null ? null : $"{ModelName(c.Details.Model)} · {c.Details.Link}";
         _tray.SetStatus(name, _battery?.Percent, _battery is { Charge: not ChargeState.Discharging },
             _core.Mapping.Paused, _core.UserMappingPaused);
     }

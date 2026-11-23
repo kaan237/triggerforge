@@ -58,16 +58,17 @@ internal sealed class HapticEngine : IDisposable
     internal IReadOnlyList<AudioApp> ListApps() => _audio.ListApps();
 
     // Called by the core's serialized configuration path, independently of WASAPI startup.
-    internal void Configure(HapticsConfig config, Link? link, IVirtualAudio? virtualAudio = null)
+    internal void Configure(HapticsConfig config, Link? link, IVirtualAudio? virtualAudio = null,
+        bool supported = true)
     {
-        bool gameEnabled = virtualAudio is not null && config.GameAudio != GameAudioMode.Off;
+        bool gameEnabled = supported && virtualAudio is not null && config.GameAudio != GameAudioMode.Off;
         // Windows can keep the speaker interface selected long after a game stops; only recent sound
         // holds the Bluetooth stream (and with it the loss of motor rumble) open.
         bool gameActive = gameEnabled && virtualAudio!.SpeakerActive &&
             _state.Game is { } running && running.Source == virtualAudio && running.HasRecentSound;
-        bool needed = config.Audio != AudioHapticSource.Off || config.Speaker != AudioHapticSource.Off
-            || config.Clicks || config.RumbleToHaptics || gameActive;
-        bool bluetooth = link == Link.Bluetooth;
+        bool needed = supported && (config.Audio != AudioHapticSource.Off || config.Speaker != AudioHapticSource.Off
+            || config.Clicks || config.RumbleToHaptics || gameActive);
+        bool bluetooth = supported && link == Link.Bluetooth;
         State previous = _state;
         GameInput? game = bluetooth && gameEnabled ? previous.Game : null;
         if (bluetooth && gameEnabled && (game?.Source != virtualAudio || game?.Mode != config.GameAudio))
@@ -94,7 +95,7 @@ internal sealed class HapticEngine : IDisposable
 
         SpeakerPlayback? playback = speaker is null ? null
             : speaker == previous.Speaker ? previous.Playback : OpenSpeaker();
-        string source = config.Audio == AudioHapticSource.Off
+        string source = !supported ? "off" : config.Audio == AudioHapticSource.Off
             ? SourceName(config.Speaker, config.SpeakerApp) : SourceName(config.Audio, config.App);
         _config = config;
         LocalizedMessage? problem = !needed ? null : link switch

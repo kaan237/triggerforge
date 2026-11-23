@@ -142,6 +142,8 @@ public sealed class AppCore : IDisposable
             // Restores a crashed session's leftovers before the controller is used.
             _emulation = new EmulationService(drivers, server, new EmulationHost(this), Now, threaded: runTimer, steamRunning,
                 audioDefaults: audioDefaults);
+            EmulationService emulation = _emulation;
+            Controllers.VirtualPadMayBeActive = () => emulation.MayHavePad;
         }
 
         if (foreground is null)
@@ -749,7 +751,7 @@ public sealed class AppCore : IDisposable
             HapticsConfig haptics = activeProfile.Haptics;
             bool gameSpeaker = haptics.GameAudio is GameAudioMode.Both or GameAudioMode.Speaker &&
                 _emulation?.VirtualAudio?.SpeakerActive == true;
-            byte? speakerVolume = controller is { Connected: true, Details.Link: Link.Bluetooth } &&
+            byte? speakerVolume = controller is { Connected: true, Details.Link: Link.Bluetooth, Details.Model: not ControllerModel.DualShock4 } &&
                 (haptics.Speaker != AudioHapticSource.Off || gameSpeaker)
                 ? (byte)Math.Round(haptics.SpeakerVolume * 100)
                 : null;
@@ -776,7 +778,8 @@ public sealed class AppCore : IDisposable
             if (!_disposed)
             {
                 Link? link = Controllers.Controller is { Connected: true } connected ? connected.Details.Link : null;
-                _haptics.Configure(ActiveProfile.Haptics, link, _emulation?.VirtualAudio);
+                bool supported = Controllers.Controller?.Details.Model != ControllerModel.DualShock4;
+                _haptics.Configure(ActiveProfile.Haptics, link, _emulation?.VirtualAudio, supported);
             }
         }
 
@@ -932,7 +935,7 @@ public sealed class AppCore : IDisposable
 
         UsbFeatureReports f = c.Features;
         DualSenseIdentity? identity = f is { Calibration: { } cal, Pairing: { } pair, Firmware: { } fw } ? new DualSenseIdentity(cal, pair, fw) : null;
-        var real = new RealController(c.DevicePath, c.Details.Link, identity);
+        var real = new RealController(c.DevicePath, c.Details.Link, identity, Model: c.Details.Model);
         _real = (c, real);
         return real;
     }
@@ -1382,7 +1385,7 @@ public sealed class AppCore : IDisposable
                     return;
                 }
 
-                if (slot?.Controller.Details.Link == Link.Bluetooth && _haptics.PulseConfirm())
+                if (slot?.Controller.Details is { Link: Link.Bluetooth, Model: not ControllerModel.DualShock4 } && _haptics.PulseConfirm())
                 {
                     return;
                 }

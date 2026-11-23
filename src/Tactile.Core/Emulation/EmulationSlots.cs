@@ -133,7 +133,7 @@ public sealed partial class EmulationService
                     DualSenseIdentity? identity = features is { Calibration: { } cal, Pairing: { } pair, Firmware: { } fw }
                         ? new(cal, pair, fw) : null;
                     real = new RealController(slot.Controller.DevicePath, slot.Controller.Details.Link, identity,
-                        new SecondaryEmulationConnection(source.Controllers, source.Pipeline, slot));
+                        new SecondaryEmulationConnection(source.Controllers, source.Pipeline, slot), slot.Controller.Details.Model);
                 }
             }
 

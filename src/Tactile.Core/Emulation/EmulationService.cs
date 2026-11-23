@@ -41,7 +41,8 @@ public sealed record EmulationStatus(
 }
 
 /// <summary>The real controller as the emulation needs it.</summary>
-internal sealed record RealController(string Path, Link Link, DualSenseIdentity? Identity, SecondaryEmulationConnection? Secondary = null);
+internal sealed record RealController(string Path, Link Link, DualSenseIdentity? Identity, SecondaryEmulationConnection? Secondary = null,
+    ControllerModel Model = ControllerModel.DualSense);
 
 internal interface IEmulationHost
 {
@@ -187,6 +188,24 @@ public sealed partial class EmulationService : IDisposable
 
     /// <summary>Raised when the status (apart from latency) changes. Any thread.</summary>
     public event Action? Changed;
+
+    /// <summary>True when a virtual pad is attached or wanted in any slot; errs on the side of yes.</summary>
+    internal bool MayHavePad
+    {
+        get
+        {
+            lock (_stateLock)
+            {
+                if (_pad is not null || _hiddenPath is not null ||
+                    _wanted is { Settings.Enabled: true, ConfiguredMode: not EmulationMode.Off })
+                {
+                    return true;
+                }
+            }
+
+            return SecondarySlots().Any(slot => slot.MayHavePad);
+        }
+    }
 
     internal IVirtualAudio? VirtualAudio => _route is { IsCurrent: true } route && ReferenceEquals(route.Pad, _pad)
         ? route.Pad as IVirtualAudio : null;
@@ -511,7 +530,7 @@ public sealed partial class EmulationService : IDisposable
     private void StopObsolete(Wanted? w, VirtualKind? kind)
     {
         if (_pad is not null && (kind != _kind || w?.Controller?.Path != _padPath ||
-            _kind == VirtualKind.DualSense && w?.Settings.Audio != _padAudioEnabled ||
+            _kind == VirtualKind.DualSense && w?.Audio != _padAudioEnabled ||
             w?.Controller?.Secondary != _route?.Secondary || _route?.IsCurrent == false))
         {
             StopLocked();
@@ -557,7 +576,8 @@ public sealed partial class EmulationService : IDisposable
         }
 
         // The primary already exposes a wired DualSense on USB. Secondary modes follow their own profiles.
-        if (_slotIndex == 0 && w.Mode == EmulationMode.DualSense && w.Controller.Link == Link.Usb)
+        if (_slotIndex == 0 && w.Mode == EmulationMode.DualSense && w.Controller.Link == Link.Usb &&
+            w.Controller.Model != ControllerModel.DualShock4)
         {
             return null;
         }
@@ -587,7 +607,7 @@ public sealed partial class EmulationService : IDisposable
         {
             pad = _slotIndex > 0 ? server.CreateSecondaryPad(_slotIndex, kind, controller.Identity)
                 : kind == VirtualKind.DualSense
-                ? server.CreateDualSense(controller.Identity, w.Settings.Audio)
+                ? server.CreateDualSense(controller.Identity, w.Audio)
                 : server.Create(kind, kind == VirtualKind.DualShock4 ? controller.Identity : null);
         }
         catch (Exception e)
@@ -599,7 +619,7 @@ public sealed partial class EmulationService : IDisposable
         var route = new PadRoute(pad, controller.Secondary, primaryCurrent);
         Action<PadFeedback> handler = f => OnFeedback(route, f);
         pad.Feedback += handler;
-        var defaults = kind == VirtualKind.DualSense && w.Settings.Audio && w.Settings.KeepAudioDefaults
+        var defaults = kind == VirtualKind.DualSense && w.Audio && w.Settings.KeepAudioDefaults
             ? SnapshotAudioDefaults() : null;
         int port;
         try
@@ -635,7 +655,7 @@ public sealed partial class EmulationService : IDisposable
 
         _latency.Clear();
         _kind = kind;
-        _padAudioEnabled = w.Settings.Audio;
+        _padAudioEnabled = w.Audio;
         _hubPort = port;
         _padPath = controller.Path;
         _padHandler = handler;
@@ -1044,7 +1064,7 @@ public sealed partial class EmulationService : IDisposable
     {
         IVirtualPad? pad = _pad;
         EmulationMode mode = pad is null ? EmulationMode.Off : ModeOf(_kind);
-        if (pad is null && _slotIndex == 0 && _wanted is { Mode: EmulationMode.DualSense, Controller.Link: Link.Usb, Settings.Enabled: true })
+        if (pad is null && _slotIndex == 0 && _wanted is { Mode: EmulationMode.DualSense, Controller: { Link: Link.Usb, Model: not ControllerModel.DualShock4 }, Settings.Enabled: true })
         {
             // The wired DualSense itself is the pad; nothing of ours is attached.
             mode = EmulationMode.DualSense;
@@ -1121,7 +1141,10 @@ public sealed partial class EmulationService : IDisposable
         EmulationMode ConfiguredMode, string? ForegroundExe)
     {
         public (string ProfileId, EmulationMode Mode, bool Audio, SecondaryEmulationConnection? Secondary) FailureKey =>
-            (ProfileId, Mode, Mode == EmulationMode.DualSense && Settings.Audio, Controller?.Secondary);
+            (ProfileId, Mode, Mode == EmulationMode.DualSense && Audio, Controller?.Secondary);
+
+        // A DualShock 4 has no audio interface to mirror.
+        public bool Audio => Settings.Audio && Controller?.Model != ControllerModel.DualShock4;
     }
 
     private sealed record AutoResolution(IReadOnlyDictionary<string, EmulationMode>? Modes, string? Exe, EmulationMode Mode);

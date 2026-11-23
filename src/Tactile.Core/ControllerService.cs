@@ -36,6 +36,8 @@ public sealed class ControllerService : IDisposable
     private volatile HapticBlockSource? _tone;
     private volatile bool _disposed;
     private readonly Func<string, bool>? _isVirtual;
+    /// <summary>True while one of our virtual pads is, or may be, attached.</summary>
+    internal Func<bool>? VirtualPadMayBeActive { get; set; }
     private volatile OutputState _output = OutputState.Default;
 
     public ControllerService()
@@ -138,6 +140,11 @@ public sealed class ControllerService : IDisposable
                 return Text.Pick("No controller connected.", "Kontrolcü bağlı değil.");
             }
 
+            if (c.Details.Model == ControllerModel.DualShock4)
+            {
+                return Text.Pick("This controller has no haptic actuators.", "Bu kontrolcüde haptik motor yok.");
+            }
+
             if (c.Details.Link != Link.Bluetooth)
             {
                 return Text.Pick("The haptics test currently requires Bluetooth.", "Haptik test şimdilik yalnız Bluetooth'ta.");
@@ -227,6 +234,7 @@ public sealed class ControllerService : IDisposable
     private bool ReconcileHapticsLocked()
     {
         if (_disposed || _controller is not { Connected: true, Details.Link: Link.Bluetooth } controller ||
+            controller.Details.Model == ControllerModel.DualShock4 ||
             (_hapticSource is null && _tone is null))
         {
             StopHapticsLocked();
@@ -582,8 +590,15 @@ public sealed class ControllerService : IDisposable
         }
         catch (Exception)
         {
-            // A device-tree query that fails says nothing; treat the pad as real.
-            return false;
+            // A failed query says nothing: with a virtual pad around, skip the candidate and retry next scan.
+            try
+            {
+                return VirtualPadMayBeActive?.Invoke() == true;
+            }
+            catch (Exception)
+            {
+                return true;
+            }
         }
     }
 
