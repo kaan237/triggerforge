@@ -71,7 +71,9 @@ internal sealed class DsuServer(Func<TimeSpan> now, Action<Notice> report) : IDi
     {
         lock (_lock)
         {
-            bool conflict = settings.DsuPort == settings.UdpPort || settings.DsuPort == settings.ForzaPort;
+            bool conflict = settings.DsuPort == settings.UdpPort || settings.DsuPort == settings.ForzaPort ||
+                TelemetryListener.SamePort(settings.DsuPort, settings.F1Port) ||
+                TelemetryListener.SamePort(settings.DsuPort, settings.BeamNgPort);
             if (Stopping || (_enabled == settings.DsuEnabled && _configuredPort == settings.DsuPort &&
                 (!_enabled || _conflict == conflict)))
             {

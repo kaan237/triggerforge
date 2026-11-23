@@ -7,7 +7,8 @@ public enum ForzaFormat { Sled, Fm7, Fm, Fh }
 public sealed record TelemetryValues(
     int RaceOn, double SpeedKmh, double Rpm, double Gas, double Brake, double Clutch,
     double Handbrake, int Gear, double Steer, double SlipFront, double SlipRear,
-    double Surface, int RumbleStrip, double Boost, int Abs, int Traction)
+    double Surface, int RumbleStrip, double Boost, int Abs, int Traction,
+    double RevLights = 0, int Drs = 0)
 {
     internal double Get(TelemetrySignal signal) => signal switch
     {
@@ -27,6 +28,8 @@ public sealed record TelemetryValues(
         TelemetrySignal.Boost => Boost,
         TelemetrySignal.Abs => Abs,
         TelemetrySignal.Traction => Traction,
+        TelemetrySignal.RevLights => RevLights,
+        TelemetrySignal.Drs => Drs,
         _ => double.NaN,
     };
 }
@@ -92,7 +95,8 @@ internal static class ForzaPacket
             IntAt(packet, 0) == 1 ? 1 : 0, speed, rpm, gas, brake, clutch, handbrake,
             gear, steer, slipFront, slipRear, surface, rumbleStrip, boost,
             brake > 0.1 && slipFront > 1 && speed > 5 ? 1 : 0,
-            gas > 0.1 && slipRear > 1 && speed > 5 ? 1 : 0));
+            gas > 0.1 && slipRear > 1 && speed > 5 ? 1 : 0,
+            rpm, 0));
         return true;
     }
 

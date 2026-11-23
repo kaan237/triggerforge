@@ -277,13 +277,19 @@ export type IntegrationSettings = {
   releaseAfterSeconds: number;
   forzaEnabled: boolean;
   forzaPort: number;
+  f1Enabled: boolean;
+  f1Port: number;
+  acEnabled: boolean;
+  beamNgEnabled: boolean;
+  beamNgPort: number;
   dsuEnabled: boolean;
   dsuPort: number;
 };
 
 export type TelemetrySignal =
   | "raceOn" | "speedKmh" | "rpm" | "gas" | "brake" | "clutch" | "handbrake" | "gear"
-  | "steer" | "slipFront" | "slipRear" | "surface" | "rumbleStrip" | "boost" | "abs" | "traction";
+  | "steer" | "slipFront" | "slipRear" | "surface" | "rumbleStrip" | "boost" | "abs" | "traction"
+  | "revLights" | "drs";
 export type TelemetryTarget = "leftTrigger" | "rightTrigger" | "lightbar" | "playerLeds" | "rumbleLeft" | "rumbleRight";
 export type TelemetryColor = { r: number; g: number; b: number };
 export type TelemetryValues = Record<TelemetrySignal, number>;
@@ -321,6 +327,30 @@ export type ForzaStatus = {
   rejected: number;
   values: TelemetryValues | null;
 };
+export type TelemetrySource = "forza" | "f1" | "acc" | "ac" | "beamNg";
+export type TelemetryTemplate = TelemetrySource;
+export type F1Status = {
+  state: "off" | "listening" | "receiving" | "portBusy" | "portConflict";
+  port: number;
+  format: number | null;
+  packets: number;
+  rejected: number;
+  unsupported: number;
+  values: TelemetryValues | null;
+};
+export type AcStatus = {
+  state: "off" | "listening" | "receiving";
+  game: "ac" | "acc" | null;
+  packets: number;
+  values: TelemetryValues | null;
+};
+export type BeamNgStatus = {
+  state: "off" | "listening" | "receiving" | "portBusy" | "portConflict";
+  port: number;
+  packets: number;
+  rejected: number;
+  values: TelemetryValues | null;
+};
 export type DsuStatus = {
   state: "off" | "listening" | "portBusy" | "portConflict";
   port: number;
@@ -328,7 +358,9 @@ export type DsuStatus = {
   packets: number;
   rejected: number;
 };
-export type IntegrationStatus = { type: "integration"; udp: UdpStatus; forza: ForzaStatus; dsu?: DsuStatus };
+export type IntegrationStatus = { type: "integration"; udp: UdpStatus; forza: ForzaStatus; dsu?: DsuStatus;
+  f1?: F1Status; ac?: AcStatus; beamNg?: BeamNgStatus; activeSource?: TelemetrySource | null;
+};
 
 export type Profile = {
   version: number;
@@ -512,7 +544,7 @@ export type UiMessage =
   | { type: "app.restartElevated" }
   | { type: "emulation.status" }
   | { type: "integration.status" | "integration.release" }
-  | { type: "telemetry.applyTemplate"; profileId: string; template: "forza" }
+  | { type: "telemetry.applyTemplate"; profileId: string; template: TelemetryTemplate }
   | { type: "driver.install"; kind: DriverKind }
   | { type: "emulation.retry" }
   | { type: "emulation.restore" };

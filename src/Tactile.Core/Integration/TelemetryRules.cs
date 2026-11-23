@@ -7,7 +7,7 @@ namespace Tactile.Core.Integration;
 public enum TelemetrySignal
 {
     Unknown, RaceOn, SpeedKmh, Rpm, Gas, Brake, Clutch, Handbrake, Gear, Steer,
-    SlipFront, SlipRear, Surface, RumbleStrip, Boost, Abs, Traction,
+    SlipFront, SlipRear, Surface, RumbleStrip, Boost, Abs, Traction, RevLights, Drs,
 }
 
 public enum TelemetryTarget { Unknown, LeftTrigger, RightTrigger, Lightbar, PlayerLeds, RumbleLeft, RumbleRight }

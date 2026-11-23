@@ -55,7 +55,8 @@ internal sealed class VirtualDualShock4 : VirtualUsbDevice
 
         byte[] calibration = identity?.Calibration is { Length: >= 35 } suppliedCalibration
             ? suppliedCalibration : VirtualDualSense.DefaultCalibration();
-        ConvertCalibration(calibration, _features[0x02]);
+        // Over USB the DS4 0x02 gyro ranges are axis-paired like DualSense 0x05, so the bytes copy straight.
+        calibration.AsSpan(1, 34).CopyTo(_features[0x02].AsSpan(1));
 
         byte[] pairing = identity?.Pairing is { Length: >= 7 } suppliedPairing
             ? suppliedPairing : VirtualDualSense.DefaultPairing(slot);
@@ -74,18 +75,6 @@ internal sealed class VirtualDualShock4 : VirtualUsbDevice
         "12:00:00"u8.CopyTo(version.AsSpan(17));
         BinaryPrimitives.WriteUInt16LittleEndian(version.AsSpan(35), 0x0100);
         BinaryPrimitives.WriteUInt32LittleEndian(version.AsSpan(41), 0x00000100);
-    }
-
-    /// <summary>Copies a DualSense 0x05 report into a DS4 USB 0x02 report. Only the gyro range pairs move:
-    /// pitch+, pitch-, yaw+, yaw-, roll+, roll- becomes pitch+, yaw+, roll+, pitch-, yaw-, roll-.</summary>
-    internal static void ConvertCalibration(ReadOnlySpan<byte> dualSense, Span<byte> dualShock4)
-    {
-        dualSense.Slice(1, 34).CopyTo(dualShock4[1..]);
-        ReadOnlySpan<int> source = [0, 2, 4, 1, 3, 5];
-        for (int i = 0; i < source.Length; i++)
-        {
-            dualSense.Slice(7 + source[i] * 2, 2).CopyTo(dualShock4[(7 + i * 2)..]);
-        }
     }
 
     public override VirtualKind Kind => VirtualKind.DualShock4;

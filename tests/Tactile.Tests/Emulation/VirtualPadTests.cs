@@ -287,8 +287,8 @@ public class VirtualPadTests
         byte[] calibration = GetFeature(pad, 0x02);
         for (int axis = 0; axis < 3; axis++)
         {
-            short plus = BinaryPrimitives.ReadInt16LittleEndian(calibration.AsSpan(7 + axis * 2));
-            short minus = BinaryPrimitives.ReadInt16LittleEndian(calibration.AsSpan(13 + axis * 2));
+            short plus = BinaryPrimitives.ReadInt16LittleEndian(calibration.AsSpan(7 + axis * 4));
+            short minus = BinaryPrimitives.ReadInt16LittleEndian(calibration.AsSpan(9 + axis * 4));
             Assert.True(plus > minus);
         }
 
@@ -309,7 +309,7 @@ public class VirtualPadTests
         var real = Assert.IsType<VirtualDualShock4>(server.Create(VirtualKind.DualShock4, new(realCalibration, pairing, [])));
         byte[] expectedReal = new byte[37];
         expectedReal[0] = 0x02;
-        VirtualDualShock4.ConvertCalibration(realCalibration, expectedReal);
+        realCalibration.AsSpan(1, 34).CopyTo(expectedReal.AsSpan(1));
         Assert.Equal(expectedReal, GetFeature(real, 0x02));
         Assert.Equal([0x12, 6, 5, 4, 3, 2, 1, 8, 0x25, 0, 7, 8, 9, 10, 11, 12], GetFeature(real, 0x12));
         Assert.Equal([0x81, 6, 5, 4, 3, 2, 1], GetFeature(real, 0x81));
@@ -322,21 +322,22 @@ public class VirtualPadTests
     }
 
     [Fact]
-    public void DualShock4_calibration_reorders_gyro_ranges_to_usb_layout()
+    public void DualShock4_calibration_keeps_axis_paired_gyro_ranges_over_usb()
     {
-        byte[] dualSense = new byte[41];
-        dualSense[0] = 0x05;
-        for (int i = 1; i < 35; i++)
+        using IUsbIpServer server = UsbIpServerFactory.Start();
+        byte[] dualSense = VirtualDualSense.DefaultCalibration();
+        var pad = Assert.IsType<VirtualDualShock4>(server.Create(VirtualKind.DualShock4, new(dualSense, VirtualDualSense.DefaultPairing(0), [])));
+
+        byte[] ds4 = GetFeature(pad, 0x02);
+        Assert.Equal(dualSense[1..35], ds4[1..35]);
+        for (int axis = 0; axis < 3; axis++)
         {
-            dualSense[i] = (byte)i;
+            short plus = BinaryPrimitives.ReadInt16LittleEndian(ds4.AsSpan(7 + axis * 4));
+            short minus = BinaryPrimitives.ReadInt16LittleEndian(ds4.AsSpan(9 + axis * 4));
+            Assert.NotEqual(0, plus);
+            Assert.NotEqual(0, minus);
+            Assert.NotEqual(plus, minus);
         }
-
-        byte[] ds4 = new byte[37];
-        VirtualDualShock4.ConvertCalibration(dualSense, ds4);
-
-        Assert.Equal(dualSense[1..7], ds4[1..7]);
-        Assert.Equal([7, 8, 11, 12, 15, 16, 9, 10, 13, 14, 17, 18], ds4[7..19]);
-        Assert.Equal(dualSense[19..35], ds4[19..35]);
     }
 
     [Fact]

@@ -480,6 +480,14 @@ Yol haritası `docs/yol-haritasi.md` (Faz 10-15), dayanağı `docs/rakip-analizi
 - Testler 805/805 (iki kez), build 0 uyarı, `npm run build` temiz; Sanal kontrolcü sayfası önizlemede açıldı.
 - Denenmeyenler (KH donanım listesi `docs/contract-phase12.md` §7): joy.cpl'de sanal DS4 ve bir DS4 oyunu, Steam/SDL'nin 507 baytlık v2 descriptor beklentisi (tam tablo doğrulanmadı), Cemu/Dolphin'de DSU gyro yönleri, otomatik kip geçişleri gerçek oyunlarda.
 
+### Faz 13 — Yarış telemetrisi → 1.4.0 (2026-11-23)
+
+**Faz 13 sonucu**
+- Sözleşme `docs/contract-phase13.md`. Kaynaklar: EA SPORTS F1 UDP (2024/2025/2026 biçimleri), Assetto Corsa ve ACC paylaşımlı bellek (salt okunur), BeamNG OutGauge; hepsi varsayılan kapalı ve yalnız yerel. Yeni sinyaller `revLights` ve `drs`, beş oyun şablonu, "son etkin kare kazanır" hakemliği, `udptest.py` için `f1` ve `beamng` kipleri.
+- Sanal DS4 düzeltmesi: USB `0x02` kalibrasyonu artık eksen çiftli sırada. 1.3.0'da Bluetooth sırası kullanılıyordu; USB sırasını bekleyen oyun ve sürücülerde gyro bozuktu.
+- Denetim: ilk turda 12 bulgu (katman yarışı, port devri, F1 uzunluk denetimi, boşta uyanma, kapanış yarışı), tekrar denetimde 3 küçük bulgu; hepsi düzeltildi. DSU sel testindeki yarış giderildi.
+- Denenmeyenler (KH listesi `docs/contract-phase13.md` §7): gerçek F1/AC/ACC/BeamNG, `udptest.py` ile donanımda efekt, sanal DS4 gyro yönleri.
+
 ### Faz 9 — Yedek yol: Pico 2 W köprü (isteğe bağlı)
 
 Faz 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse: Pico 2 W firmware'i ile gerçek USB DualSense görünümü; uygulama aynı UI ve profil motoruyla Pico'yu yönetir. Referans: DS5Dongle (MIT).

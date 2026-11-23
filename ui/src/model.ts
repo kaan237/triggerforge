@@ -193,6 +193,7 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     integration: {
       udpEnabled: false, udpPort: 6969, dsx: true, dsxPortFile: true,
       releaseAfterSeconds: 0, forzaEnabled: false, forzaPort: 5555,
+      f1Enabled: false, f1Port: 20777, acEnabled: false, beamNgEnabled: false, beamNgPort: 4444,
       dsuEnabled: false, dsuPort: 26760,
     },
   };
@@ -520,6 +521,8 @@ export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
   if (emulation.speakerPacket !== "single36") emulation.speakerPacket = d.emulation.speakerPacket;
   const dsuPort = typeof s.integration?.dsuPort === "number" && Number.isFinite(s.integration.dsuPort) && s.integration.dsuPort > 0
     ? Math.min(65535, Math.max(1024, Math.trunc(s.integration.dsuPort))) : d.integration.dsuPort;
+  const port = (value: unknown, fallback: number) =>
+    typeof value === "number" && Number.isFinite(value) ? Math.min(65535, Math.max(1024, Math.trunc(value))) : fallback;
   const primaryController = s.primaryController?.trim().replaceAll("-", ":").toUpperCase();
   const combo = Array.isArray(s.pauseCombo)
     ? [...new Set(s.pauseCombo.map(normalizeButton).filter((button) => button !== undefined))].slice(0, 3)
@@ -542,7 +545,11 @@ export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
       ? Math.min(4, Math.max(1, Math.trunc(s.maxControllers)))
       : d.maxControllers,
     emulation,
-    integration: { ...d.integration, ...s.integration, dsuEnabled: s.integration?.dsuEnabled === true, dsuPort },
+    integration: { ...d.integration, ...s.integration, dsuEnabled: s.integration?.dsuEnabled === true, dsuPort,
+      f1Enabled: s.integration?.f1Enabled === true, f1Port: port(s.integration?.f1Port, d.integration.f1Port),
+      acEnabled: s.integration?.acEnabled === true,
+      beamNgEnabled: s.integration?.beamNgEnabled === true, beamNgPort: port(s.integration?.beamNgPort, d.integration.beamNgPort),
+    },
     updates: { autoCheck: s.updates?.autoCheck !== false },
     firstRunDone: s.firstRunDone === true,
   };

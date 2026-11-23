@@ -334,12 +334,12 @@ internal sealed class Bridge
             case "telemetry.applyTemplate":
             {
                 Profile profile = _core.Profiles.Get(Str(m, "profileId")) ?? throw new BadMessage(new LocalizedMessage("Profile not found.", "Profil bulunamadı."));
-                if (Str(m, "template") != "forza")
+                if (!TelemetryTemplates.TryGet(Str(m, "template"), out TelemetryConfig template))
                 {
                     throw new BadMessage(new LocalizedMessage("Telemetry template not found.", "Telemetri şablonu bulunamadı."));
                 }
 
-                _core.Profiles.Save(profile with { Telemetry = TelemetryTemplates.Forza });
+                _core.Profiles.Save(profile with { Telemetry = template });
                 break;
             }
 
@@ -535,7 +535,7 @@ internal sealed class Bridge
     public void PostIntegration()
     {
         IntegrationStatus status = _core.Integration;
-        Post(new { type = "integration", status.Udp, status.Forza, status.Dsu });
+        Post(new { type = "integration", status.Udp, status.Forza, status.Dsu, status.F1, status.Ac, status.BeamNg, status.ActiveSource });
     }
 
     private void PickRun()

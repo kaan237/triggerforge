@@ -11,7 +11,7 @@ available in English and Turkish, with English selected for new installations.
 - Tune stick and trigger response, calibrate the gyro and create mappings and macros.
 - Save profiles and switch between them automatically by game.
 - Use Bluetooth audio haptics, send sound to the controller speaker or create a virtual controller.
-- Control effects from compatible UDP integrations, including DSX commands and Forza telemetry.
+- Control effects from compatible integrations: DSX commands over UDP and telemetry from Forza, EA SPORTS F1, Assetto Corsa, ACC, and BeamNG.drive.
 
 ### Requirements
 
@@ -70,7 +70,7 @@ ve Türkçe kullanılabilir. Yeni kurulumlar İngilizce başlar.
 - Analog çubuk ve tetik tepkisini ayarlayın, jiroskobu kalibre edin, tuş eşlemeleri ve makrolar oluşturun.
 - Profilleri kaydedin ve oyuna göre otomatik geçiş yapın.
 - Bluetooth üzerinden ses tabanlı dokunsal geri bildirim kullanın, kontrolcü hoparlörüne ses gönderin veya sanal kontrolcü oluşturun.
-- DSX komutları ve Forza telemetrisi dahil uyumlu UDP entegrasyonlarıyla efektleri yönetin.
+- DSX komutları ve Forza, EA SPORTS F1, Assetto Corsa, ACC ve BeamNG.drive telemetrisiyle efektleri yönetin.
 
 ### Gereksinimler
 

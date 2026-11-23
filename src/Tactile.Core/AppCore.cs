@@ -235,7 +235,8 @@ public sealed class AppCore : IDisposable
 
     public SettingsStore Settings { get; }
 
-    public IntegrationStatus Integration => new(_udpApi.Status, _telemetry.Status, _dsu.Status);
+    public IntegrationStatus Integration => new(_udpApi.Status, _telemetry.Status, _dsu.Status,
+        _telemetry.F1Status, _telemetry.AcStatus, _telemetry.BeamNgStatus, _telemetry.ActiveSource);
 
     public void ReleaseIntegration() => _udpApi.Release();
 
@@ -963,16 +964,17 @@ public sealed class AppCore : IDisposable
         IntegrationSettings settings = Settings.Current.Integration;
         if (_dsu.Status is { State: DsuListenerState.Listening } dsu &&
             ((settings.UdpEnabled && dsu.Port == settings.UdpPort) ||
-             (settings.ForzaEnabled && dsu.Port == settings.ForzaPort)))
+             (settings.ForzaEnabled && dsu.Port == settings.ForzaPort) ||
+             (settings.F1Enabled && dsu.Port == settings.F1Port) ||
+             (settings.BeamNgEnabled && dsu.Port == settings.BeamNgPort)))
         {
             _dsu.Configure(settings with { DsuEnabled = false });
         }
 
-        if (settings.UdpEnabled && _telemetry.Status is
-            { State: ForzaListenerState.Listening or ForzaListenerState.Receiving } forza && forza.Port == settings.UdpPort)
+        if (settings.UdpEnabled)
         {
-            // Release Forza's old port before handing it to the UDP API.
-            _telemetry.Configure(settings with { ForzaEnabled = false });
+            // Release a telemetry port before handing it to the UDP API; the Configure below rebinds what still fits.
+            _telemetry.Release(settings.UdpPort);
         }
 
         _udpApi.Configure(settings);

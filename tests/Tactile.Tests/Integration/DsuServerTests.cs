@@ -225,16 +225,19 @@ public sealed class DsuServerTests
         using UdpClient other = fixture.Connect();
         await Send(both, Request(Data, [1, 0, 0, 0, 0, 0, 0, 0]));
         await Send(both, Request(Data, [1, 1, 0, 0, 0, 0, 0, 0]));
-        await Until(() => fixture.Server.Status.Clients == 1);
+        byte[] valid = Request(Version);
+        // The reply to this request proves both subscriptions before it have been handled.
+        await Send(both, valid);
+        await Receive(both, Version, 22);
+        Assert.Equal(1, fixture.Server.Status.Clients);
 
         fixture.Server.PublishInput(0, Input, default, default, Link.Usb, Mac);
         fixture.Server.PublishInput(1, Input, default, default, Link.Bluetooth, null);
         Assert.Equal((byte)0, (await Receive(both, Data, 100))[0]);
         Assert.Equal((byte)1, (await Receive(both, Data, 100))[0]);
 
-        byte[] valid = Request(Version);
-        // The two subscriptions above already used two of the 500 arrivals.
-        for (int i = 0; i < 498; i++)
+        // The two subscriptions and the request above already used three of the 500 arrivals.
+        for (int i = 0; i < 497; i++)
         {
             await Send(both, valid);
             await Receive(both, Version, 22);

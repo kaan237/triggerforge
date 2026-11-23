@@ -243,6 +243,8 @@ public static partial class Validation
                 ReleaseAfterSeconds = Math.Clamp(integration.ReleaseAfterSeconds, 0, 3600),
                 ForzaPort = Math.Clamp(integration.ForzaPort, 1024, 65535),
                 DsuPort = Math.Clamp(integration.DsuPort <= 0 ? 26760 : integration.DsuPort, 1024, 65535),
+                F1Port = Math.Clamp(integration.F1Port, 1024, 65535),
+                BeamNgPort = Math.Clamp(integration.BeamNgPort, 1024, 65535),
             },
             Emulation = new EmulationSettings
             {

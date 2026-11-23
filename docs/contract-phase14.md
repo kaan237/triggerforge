@@ -572,3 +572,41 @@ Kod birleştirildikten sonra katalog anahtarını üretmek, açık anahtarı uyg
   - `AppSettings.Osd.Enabled` varsayılan olarak `false` olduğundan kullanıcı açmadıkça OSD penceresi hiç gösterilmez.
   - Topluluk kataloğu açılışta hiçbir ağ isteği yapmaz; yalnız kullanıcı Profiller → "Topluluk" sekmesini açtığında çalışır.
   - Bir profilde `SpecialAction.OnScreenKeyboard` atanmadığında ve ekran klavyesi açılmadığında `Mapper` ve `AppCore` girdi yolu Faz 13 ile bire bir aynı şekilde çalışır.
+
+---
+
+## 9. Denetim kararları (bağlayıcı — yukarıdaki metinle çelişirse bu bölüm geçerlidir)
+
+Yukarıdaki satır numaraları eski kod içindir; yerleri adla bulun.
+
+**İş bölümü**
+- K1. Sıra: **A ‖ B1 ‖ C**, sonra **B2**. B1 = çekirdek (Core/Input/Input.Windows/Mapping/Storage/AppCore ve testleri). B2 = `src/Tactile.Host/**` pencereleri, `TactileApp.cs` ve `Phase14HostTests.cs`. `OnScreenKeyboardModel` (ızgara, seçim, harf kipi, girdi durum makinesi) saf mantıktır: `src/Tactile.Core/Mapping/OnScreenKeyboard.cs`, B1'e aittir.
+- K2. `tools/Tactile.Tools.Release/Tactile.Tools.Release.csproj` İş A'nındır ve `Tactile.Core` referansı alır. İmzalama ve doğrulama mantığı `src/Tactile.Core/Catalog/CatalogSigner.cs` içindedir (anahtar nesnesi parametre); CLI yalnız çağırır, testler doğrudan bu sınıfı dener.
+- K3. `FakeInjector`/`FakePlatform` `tests/Tactile.Tests/MappingSupport.cs` içindedir (B1). `Directory.Build.props` sürümünü (1.5.0) B2 yazar.
+
+**Katalog**
+- K4. `catalog sign`/`verify`: önce her `path` §2 deseniyle, `Path.GetFullPath` kök sınırıyla ve reparse point reddiyle denetlenir. Ham profil JSON'unda herhangi bir yerde `kind` değeri `run` olan (büyük/küçük harf fark etmez) düğüm varsa reddedilir; bu denetim `Normalize`'dan önce ham JSON üzerinde yapılır. İstemci de içe aktarmadan önce aynı ham denetimi yapar ve `BadFile` döner; `StripRunActions` yine çalışır.
+- K5. `index.json` köküne `revision` (pozitif tam sayı) eklenir. `catalog sign` her çalışmada 1 artırır. İstemci en son gördüğü imzalı revizyonu veri klasöründe saklar (`AppPaths` altında küçük bir dosya; bozuksa 0 sayılır); daha küçük revizyon `CatalogError.Outdated` ile reddedilir. Hata listesine `outdated` eklenir (UI dahil). Aynı revizyon kabul edilir.
+- K6. Host allowlist yalnız `raw.githubusercontent.com`. Yönlendirme sınırı aşılırsa `Network`. İndirilen uzunluk `entry.Size`'a tam eşit olmalıdır.
+- K7. `summary` zorunludur; `catalog.preview` hiç ağa çıkmaz (UI önizlemeyi doğrudan listedeki girdiden çizebilir, mesaj yine de vardır).
+- K8. `CatalogPublicKey` boş veya geçersizse kurucular hata fırlatmaz; istekte ağa çıkılmadan `BadSignature` döner.
+- K9. Tel biçimi (`catalog.status.profiles[]`): `{ id, name, games, controller, tags, author, version, size, description: { en, tr }, summary }`. `sha256`, `path` UI'ya gitmez. Dil seçimini UI yapar. Enum'lar camelCase (`dualsense` ve `edge`, `any` aynen).
+- K10. `catalog.openRepo` (UI → Host, yüksüz): sabit `CatalogKey.RepositoryUrl` varsayılan tarayıcıda açılır. UI'da düz dış bağlantı kullanılmaz.
+- K11. `profile.exportShare` sade kalır: temiz JSON, dosya adı, girdi taslağı, silinen `run` sayısı.
+- K12. Katalog hatası `PostError`/balon üretmez. `CatalogService` ömrü `MainWindow`/`Bridge` kapanışında biter; süren istek iptal edilir. Aynı anda tek işlem.
+
+**Ekran klavyesi**
+- K13. `EdgeShortcuts.Resolve` `OnScreenKeyboard` için `null` döner; ikincil kontrolcüde bu kısayol hiçbir şey yapmaz. Enum değeri profil hesabını bozmaz (5+ profilli test).
+- K14. Klavye açıkken `_mapper`'a ve `EmulationService`'e **hiçbir** kullanıcı girdisi gitmez: ikisine de nötr durum (tuşsuz, stickler ortada, tetikler 0, dokunma yok, gyro 0; pil ve benzeri alanlar korunur) verilir, `_pauseShortcut` atlanır. Gyro/hareket sunucusu (DSU) çıktısı da nötr olur. Açılışta `_mapper.ReleaseAll()`. `InputState` değişmezdir (`s with { ... }`).
+- K15. Kapanışta o an basılı tuşlar `_oskHoldMask`'e alınır; her karede `_oskHoldMask &= s.Buttons`, maskeli tuşlar hem mapper'a hem emülasyona gitmez.
+- K16. Kapatma yolları: `PS`, Edge `Fn1 + Triangle`, kontrolcünün kopması ya da birincilin değişmesi, eşlemenin ayarlardan kapatılması, uygulama çıkışı. Klavyeyi açan eylem tuşu açıkken çalışmaz.
+- K17. `Backspace`/`Space`/`Enter` tek çağrıda bas + bırak (0 ms); takılı tuş olmaz. `Circle` basılı tutulursa 400 ms sonra 60 ms aralıkla tekrarlar.
+- K18. Durum makinesi kilitlidir, HID okuma iş parçacığında çalışır; görünüm yalnız durum değişince UI iş parçacığına birleştirilmiş (`coalesced`) olarak gönderilir. Kapalıyken kare başına ayırma ve kilit yoktur.
+
+**OSD ve pencere**
+- K19. Bütün OSD olayları ve gizleme zamanlayıcısı UI iş parçacığında çalışır (`TactileApp.Ui`). `OsdCoordinator` ilk değerleri sessizce kaydeder; yalnız gerçek `Profile.Id`, katman, `Paused` ve birincil `EmulationMode` geçişinde bildirir. `ReleaseAllLocked` katmanları sıfırladığında önceki değer 0 değilse katman bildirimi gider; profil değişimiyle aynı anda gelen katman bildirimi bastırılır.
+- K20. `SWP_NOZORDER` kullanılmaz (`HWND_TOPMOST` ile çelişir). Alfa `SetLayeredWindowAttributes(LWA_ALPHA)` ile her zaman açıkça verilir (%100'de de). Yuvarlak köşe `Region` ya da DWM ile.
+- K21. Monitör: ön plandaki pencerenin monitörü (bulunamazsa birincil). Ölçüler o monitörün DPI'ı ile ölçeklenir; yazı boyutu da piksel olarak aynı oranla hesaplanır.
+- K22. `Exit()`/`Dispose` içinde olay abonelikleri kaldırılır, pencere, zamanlayıcı ve GDI+ nesneleri bırakılır.
+
+**Ek zorunlu testler**: `Bridge` katalog mesajları ve `!_ready` reddi; imzalama `run` reddi ve yol kaçışı reddi; revizyon düşürme reddi; klavye açıkken emülasyon çıkışı nötr; `KEYEVENTF_UNICODE` kayıt üretimi (saf fonksiyon olarak); OSD süre sıfırlama, köşe/DPI yerleşimi (saf fonksiyon); kopmada klavyenin kapanması; `WM_MOUSEACTIVATE` sonucu.

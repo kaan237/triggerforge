@@ -2,7 +2,7 @@ import { L } from "./i18n";
 // Browser-only stand-in for the host. Keeps profiles and settings in memory and fakes
 // controller input so every screen can be used without hardware.
 
-import type { Action, ActiveEmulationMode, AppSettings, AudioApp, Binding, ControllerStatus, DriverKind, DriverState, DsuStatus, EmulationMode, EmulationStatus, HapticStatus, HostMessage, Output, Profile, ProfileBackup, TelemetryConfig, TelemetryRule, TelemetryValues, TriggerConfig, UdpStatus, UpdateStatus } from "./host";
+import type { Action, ActiveEmulationMode, AppSettings, AudioApp, Binding, ControllerStatus, DriverKind, DriverState, DsuStatus, EmulationMode, EmulationStatus, HapticStatus, HostMessage, Output, Profile, ProfileBackup, TelemetryConfig, TelemetryRule, TelemetrySource, TelemetryValues, TriggerConfig, UdpStatus, UpdateStatus } from "./host";
 import {
   clamp,
   clone,
@@ -98,6 +98,32 @@ function forzaTemplate(): TelemetryConfig {
   ] };
 }
 
+// Mirrors TelemetryTemplates.cs: seven rules per source, only the numbers differ.
+function racingTemplate(source: TelemetrySource): TelemetryConfig {
+  const rule = (signal: TelemetryRule["signal"], target: TelemetryRule["target"], patch: Partial<TelemetryRule>): TelemetryRule =>
+    ({ ...defaultTelemetryRule(), trigger: null, signal, target, ...patch });
+  const trigger = (mode: "feedback" | "vibration", params: Record<string, number>): TriggerConfig => ({ ...defaultTrigger(), mode, params });
+  const table: Record<string, {
+    brakeMin: number; brakeMax: number; abs: number; traction: number;
+    lightbar: TelemetryRule["signal"]; blinkAt: number; leds: TelemetryRule["signal"]; ledsFrom: number; rumble: number;
+  }> = {
+    f1: { brakeMin: 2, brakeMax: 6, abs: 40, traction: 45, lightbar: "revLights", blinkAt: 0.9, leds: "revLights", ledsFrom: 0.2, rumble: 140 },
+    acc: { brakeMin: 2, brakeMax: 6, abs: 38, traction: 42, lightbar: "rpm", blinkAt: 0.95, leds: "rpm", ledsFrom: 0.4, rumble: 130 },
+    ac: { brakeMin: 1, brakeMax: 5, abs: 35, traction: 40, lightbar: "rpm", blinkAt: 0.95, leds: "rpm", ledsFrom: 0.4, rumble: 120 },
+    beamNg: { brakeMin: 1, brakeMax: 5, abs: 32, traction: 36, lightbar: "revLights", blinkAt: 0.95, leds: "rpm", ledsFrom: 0.4, rumble: 120 },
+  };
+  const t = table[source] ?? table.ac;
+  return { rules: [
+    rule("brake", "leftTrigger", { trigger: trigger("feedback", { start: 1, strength: 1 }), param: "strength", min: t.brakeMin, max: t.brakeMax }),
+    rule("abs", "leftTrigger", { from: 0.5, trigger: trigger("vibration", { start: 1, amplitude: 6, frequency: t.abs }) }),
+    rule("rpm", "rightTrigger", { trigger: trigger("feedback", { start: 2, strength: 1 }), param: "strength", min: 1, max: 4 }),
+    rule("traction", "rightTrigger", { from: 0.5, trigger: trigger("vibration", { start: 2, amplitude: 5, frequency: t.traction }) }),
+    rule(t.lightbar, "lightbar", { colorFrom: { r: 0, g: 255, b: 0 }, colorTo: { r: 255, g: 0, b: 0 }, blinkAt: t.blinkAt }),
+    rule(t.leds, "playerLeds", { from: t.ledsFrom, max: 5 }),
+    rule("rumbleStrip", "rumbleRight", { from: 0.5, to: 0.5, max: t.rumble }),
+  ] };
+}
+
 function sampleTelemetry(time: number): TelemetryValues {
   const wave = (speed: number, offset = 0) => (1 + Math.sin(time * speed + offset)) / 2;
   const gas = wave(0.65);
@@ -105,11 +131,13 @@ function sampleTelemetry(time: number): TelemetryValues {
   const speedKmh = 35 + wave(0.65, -0.7) * 175;
   const slipFront = wave(1.3) * brake * 1.8;
   const slipRear = wave(1.1, 2) * gas * 1.8;
+  const rpm = 0.2 + wave(1.2) * 0.8;
   return {
-    raceOn: 1, speedKmh, rpm: 0.2 + wave(1.2) * 0.8, gas, brake,
+    raceOn: 1, speedKmh, rpm, gas, brake,
     clutch: 0, handbrake: 0, gear: 1 + Math.floor(speedKmh / 36), steer: Math.sin(time * 0.8),
     slipFront, slipRear, surface: wave(3.2) * 0.35, rumbleStrip: Number(wave(2) > 0.9),
     boost: gas * 15, abs: Number(slipFront > 1), traction: Number(slipRear > 1),
+    revLights: Math.max(0, (rpm - 0.5) * 2), drs: Number(wave(0.2) > 0.7),
   };
 }
 
@@ -150,6 +178,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   let udpHolding = true;
   let udpFormat: UdpStatus["format"] = "dsx";
   let forzaPackets = 1;
+  let racingPackets = 1;
   let dsuPackets = 0;
   let telemetry = sampleTelemetry(performance.now() / 1000);
   let activeId = profiles[0].id;
@@ -346,7 +375,22 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   function dsuState(): DsuStatus["state"] {
     const s = settings.integration;
     if (!s.dsuEnabled) return "off";
-    return s.dsuPort === s.udpPort || s.dsuPort === s.forzaPort ? "portConflict" : "listening";
+    return s.dsuPort === s.udpPort || s.dsuPort === s.forzaPort || s.dsuPort === s.f1Port || s.dsuPort === s.beamNgPort
+      ? "portConflict" : "listening";
+  }
+
+  // Same conflict rules as the host: a disabled source never blocks another one's port.
+  function sourceStates() {
+    type Listening = "off" | "portConflict" | "receiving";
+    const s = settings.integration;
+    const forza: Listening = !s.forzaEnabled ? "off" : s.forzaPort === s.udpPort ? "portConflict" : "receiving";
+    const f1: Listening = !s.f1Enabled ? "off"
+      : s.f1Port === s.udpPort || (s.forzaEnabled && s.f1Port === s.forzaPort) ? "portConflict" : "receiving";
+    const beam: Listening = !s.beamNgEnabled ? "off"
+      : s.beamNgPort === s.udpPort || (s.forzaEnabled && s.beamNgPort === s.forzaPort) || (s.f1Enabled && s.beamNgPort === s.f1Port)
+        ? "portConflict" : "receiving";
+    const ac: Listening = s.acEnabled ? "receiving" : "off";
+    return { forza, f1, beam, ac };
   }
 
   function sendIntegration() {
@@ -354,7 +398,9 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     const dsu = dsuState();
     const elapsed = Math.floor(performance.now() - udpLastPacket);
     if (!s.udpEnabled || (s.releaseAfterSeconds > 0 && elapsed >= s.releaseAfterSeconds * 1000)) udpHolding = false;
-    const forzaState = !s.forzaEnabled ? "off" : s.forzaPort === s.udpPort ? "portConflict" : "receiving";
+    const { forza: forzaState, f1: f1State, beam: beamState, ac: acState } = sourceStates();
+    const activeSource = forzaState === "receiving" ? "forza" : f1State === "receiving" ? "f1"
+      : acState === "receiving" ? "acc" : beamState === "receiving" ? "beamNg" : null;
     emit({
       type: "integration",
       udp: {
@@ -366,6 +412,15 @@ export function createSimulator(emit: (m: HostMessage) => void) {
         state: forzaState, port: s.forzaPort, format: forzaState === "receiving" ? "fh" : null,
         packets: forzaPackets, rejected: 0, values: forzaState === "receiving" ? telemetry : null,
       },
+      f1: {
+        state: f1State, port: s.f1Port, format: f1State === "receiving" ? 2025 : null,
+        packets: racingPackets, rejected: 0, unsupported: 0, values: f1State === "receiving" ? telemetry : null,
+      },
+      ac: { state: acState, game: acState === "receiving" ? "acc" : null, packets: racingPackets, values: acState === "receiving" ? telemetry : null },
+      beamNg: {
+        state: beamState, port: s.beamNgPort, packets: racingPackets, rejected: 0, values: beamState === "receiving" ? telemetry : null,
+      },
+      activeSource,
       dsu: { state: dsu, port: s.dsuPort, clients: dsu === "listening" ? 1 : 0, packets: dsuPackets, rejected: 0 },
     });
   }
@@ -547,11 +602,10 @@ export function createSimulator(emit: (m: HostMessage) => void) {
     if (tick % 3 === 0) pushOutput();
     if (tick % 30 === 0) {
       sendEmulation();
-      const s = settings.integration;
-      if (s.forzaEnabled && s.forzaPort !== s.udpPort) {
-        forzaPackets += 30;
-        telemetry = sampleTelemetry(t);
-      }
+      const states = sourceStates();
+      if (states.forza === "receiving") forzaPackets += 30;
+      if (states.f1 === "receiving" || states.ac === "receiving" || states.beam === "receiving") racingPackets += 30;
+      if (Object.values(states).includes("receiving")) telemetry = sampleTelemetry(t);
       if (dsuState() === "listening") dsuPackets += 250;
       sendIntegration();
     }
@@ -673,8 +727,9 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       case "telemetry.applyTemplate": {
         const index = profiles.findIndex((p) => p.id === m.profileId);
         if (index < 0) return emit({ type: "error", message: L("Profile not found.", "Profil bulunamadı.") });
-        if (m.template !== "forza") return emit({ type: "error", message: L("Telemetry template not found.", "Telemetri şablonu bulunamadı.") });
-        profiles[index] = { ...profiles[index], telemetry: forzaTemplate() };
+        const template = m.template as string;
+        if (!(["forza", "f1", "acc", "ac", "beamNg"] as string[]).includes(template)) return emit({ type: "error", message: L("Telemetry template not found.", "Telemetri şablonu bulunamadı.") });
+        profiles[index] = { ...profiles[index], telemetry: template === "forza" ? forzaTemplate() : racingTemplate(template as TelemetrySource) };
         sendProfiles();
         return;
       }

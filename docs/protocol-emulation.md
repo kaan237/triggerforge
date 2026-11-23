@@ -964,4 +964,5 @@ this is verified on our hardware yet.
 - Input report `0x01` is 64 bytes; IMU timestamp is `SensorTimestamp >> 4`; touchpad holds two contacts, maximum `1919 × 941`.
 - Output report `0x05` is 32 bytes (rumble and lightbar); on EP0 a 31-byte report without the ID is also accepted.
 - Feature reports answered: `0x02` calibration, `0x12` pairing, `0x81` device MAC (reversed byte order), `0xA3` version info; 14 feature reports with documented sizes. Secondary slots use serials `TACTILE1`–`TACTILE3`.
+- Gyro range order in the calibration report: USB `0x02` is axis-paired (pitch+, pitch-, yaw+, yaw-, roll+, roll-), the same as DualSense `0x05`; only BT `0x05` and the wireless dongle use the grouped order (pitch+, yaw+, roll+, pitch-, yaw-, roll-). The virtual pad copies the bytes unchanged.
 - Not verified yet: the full 507-byte v2 report descriptor table and behaviour in Steam/SDL on real hardware.

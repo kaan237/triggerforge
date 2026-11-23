@@ -53,6 +53,11 @@ public sealed record IntegrationSettings
     public int ForzaPort { get; init; } = 5555;
     public bool DsuEnabled { get; init; }
     public int DsuPort { get; init; } = 26760;
+    public bool F1Enabled { get; init; }
+    public int F1Port { get; init; } = 20777;
+    public bool AcEnabled { get; init; }
+    public bool BeamNgEnabled { get; init; }
+    public int BeamNgPort { get; init; } = 4444;
 }
 
 public sealed record EmulationSettings

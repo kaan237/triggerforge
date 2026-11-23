@@ -144,4 +144,66 @@ public sealed class TelemetryRulesTests
         Assert.Equal(TriggerEffect.Vibration(2, 5, 40), assists.RightTrigger);
         Assert.Equal(UdpState.Empty, TelemetryRules.Evaluate(reloaded.Telemetry, values with { RaceOn = 0 }, TimeSpan.Zero));
     }
+
+    [Fact]
+    public void Rev_lights_and_drs_signals_drive_rules_and_forza_reports_rpm_as_rev_lights()
+    {
+        var config = new TelemetryConfig
+        {
+            Rules =
+            [
+                new() { Signal = TelemetrySignal.RevLights, Target = TelemetryTarget.RumbleLeft, Max = 200 },
+                new() { Signal = TelemetrySignal.Drs, From = 0.5, To = 0.5, Target = TelemetryTarget.RumbleRight, Max = 77 },
+            ],
+        };
+        UdpState state = TelemetryRules.Evaluate(config, Signals with { RevLights = 0.5, Drs = 1 }, TimeSpan.Zero);
+        Assert.Equal((byte)100, state.RumbleLeft);
+        Assert.Equal((byte)77, state.RumbleRight);
+        Assert.Null(TelemetryRules.Evaluate(config, Signals, TimeSpan.Zero).RumbleRight);
+        Assert.Equal(2, Validation.Normalize(new Profile { Telemetry = config }).Telemetry.Rules.Count);
+
+        Assert.True(ForzaPacket.TryParse(ForzaPacketTests.Packet(324), out TelemetryFrame frame));
+        Assert.Equal(frame.Values.Rpm, frame.Values.RevLights);
+        Assert.Equal(0, frame.Values.Drs);
+    }
+
+    [Theory]
+    [InlineData("forza", 120, 35, 40, false)]
+    [InlineData("f1", 140, 40, 45, true)]
+    [InlineData("acc", 130, 38, 42, false)]
+    [InlineData("ac", 120, 35, 40, false)]
+    [InlineData("beamNg", 120, 32, 36, true)]
+    public void All_five_game_templates_validate_and_drive_expected_targets(
+        string name, int rumble, int absFrequency, int tractionFrequency, bool revLightsLightbar)
+    {
+        Assert.True(TelemetryTemplates.TryGet(name, out TelemetryConfig template));
+        Assert.True(TelemetryTemplates.TryGet(name.ToUpperInvariant(), out _));
+        var issues = new List<string>();
+        TelemetryConfig normalized = Validation.Normalize(new Profile { Telemetry = template }, issues).Telemetry;
+        Assert.Empty(issues);
+        Assert.Equal(7, normalized.Rules.Count);
+
+        var full = Signals with { Rpm = 1, RevLights = 1, Brake = 1, Abs = 1, Traction = 1, RumbleStrip = 1, Drs = 1 };
+        UdpState state = TelemetryRules.Evaluate(normalized, full, TimeSpan.Zero);
+        Assert.Equal(TriggerEffect.Vibration(1, 6, absFrequency), state.LeftTrigger);
+        Assert.Equal(TriggerEffect.Vibration(2, 5, tractionFrequency), state.RightTrigger);
+        Assert.Equal(new Rgb(255, 0, 0), state.Lightbar);
+        Assert.Equal((byte)0b11111, state.PlayerLeds);
+        Assert.Equal((byte)rumble, state.RumbleRight);
+
+        // Only the signal each game feeds the lightbar with moves it.
+        UdpState revOnly = TelemetryRules.Evaluate(normalized, full with { Rpm = 0 }, TimeSpan.Zero);
+        UdpState rpmOnly = TelemetryRules.Evaluate(normalized, full with { RevLights = 0 }, TimeSpan.Zero);
+        Assert.Equal(revLightsLightbar, revOnly.Lightbar == new Rgb(255, 0, 0));
+        Assert.Equal(!revLightsLightbar, rpmOnly.Lightbar == new Rgb(255, 0, 0));
+    }
+
+    [Fact]
+    public void Unknown_template_names_are_not_found()
+    {
+        Assert.False(TelemetryTemplates.TryGet(null, out TelemetryConfig config));
+        Assert.Empty(config.Rules);
+        Assert.False(TelemetryTemplates.TryGet("wrc", out _));
+        Assert.True(TelemetryTemplates.TryGet("beamng", out _));
+    }
 }

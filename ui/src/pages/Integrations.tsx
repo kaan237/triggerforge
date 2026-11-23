@@ -2,7 +2,7 @@ import { L, locale } from "../i18n";
 import { useEffect, useState } from "react";
 import {
   send, subscribe, type ForzaStatus, type IntegrationSettings, type IntegrationStatus, type TelemetryColor,
-  type TelemetryRule, type TelemetrySignal, type TelemetryTarget, type TriggerConfig,
+  type TelemetryRule, type TelemetrySignal, type TelemetrySource, type TelemetryTarget, type TelemetryTemplate, type TelemetryValues, type TriggerConfig,
 } from "../host";
 import { clamp, deepEqual, defaultTelemetryRule, defaultTrigger, hexToRgb, modeDef, rgbToHex, triggerSummary, zoneFrequency } from "../model";
 import { useApp } from "../state";
@@ -14,18 +14,19 @@ const signals: Record<TelemetrySignal, string> = {
   get clutch() { return L("Clutch", "Debriyaj"); }, get handbrake() { return L("Handbrake", "El freni"); }, get gear() { return L("Gear", "Vites"); }, get steer() { return L("Steering", "Direksiyon"); },
   get slipFront() { return L("Front slip", "Ön kayma"); }, get slipRear() { return L("Rear slip", "Arka kayma"); }, get surface() { return L("Road vibration", "Yol titreşimi"); }, get rumbleStrip() { return L("Rumble strip", "Kasis"); },
   boost: "Turbo", abs: "ABS", get traction() { return L("Traction loss", "Patinaj"); },
+  get revLights() { return L("Rev LEDs", "Devir LED'i"); }, drs: "DRS",
 };
 const targets: Record<TelemetryTarget, string> = {
   get leftTrigger() { return L("Left trigger", "Sol tetik"); }, get rightTrigger() { return L("Right trigger", "Sağ tetik"); }, get lightbar() { return L("Light bar", "Işık çubuğu"); },
   get playerLeds() { return L("Player LEDs", "Oyuncu LED'leri"); }, get rumbleLeft() { return L("Left vibration", "Sol titreşim"); }, get rumbleRight() { return L("Right vibration", "Sağ titreşim"); },
 };
-const forzaStates: Record<ForzaStatus["state"], string> = {
-  get off() { return L("Off", "Kapalı"); }, get listening() { return L("Waiting", "Bekliyor"); }, get receiving() { return L("Receiving data", "Veri geliyor"); },
-  get portBusy() { return L("Port in use", "Port kullanımda"); }, get portConflict() { return L("Port conflict", "Port çakışıyor"); },
-};
 const forzaFormats: Record<NonNullable<ForzaStatus["format"]>, string> = {
   sled: "Sled", fm7: "FM7", fm: "FM", fh: "FH",
 };
+const sourceNames: Record<TelemetrySource, string> = {
+  forza: "Forza", f1: "EA SPORTS F1", acc: "Assetto Corsa Competizione", ac: "Assetto Corsa", beamNg: "BeamNG.drive",
+};
+const templateNames: Record<TelemetryTemplate, string> = sourceNames;
 const releaseTimes = [
   { value: 0, get label() { return L("Never", "Hiçbir zaman"); } }, { value: 10, get label() { return L("10 sec", "10 sn"); } },
   { value: 30, get label() { return L("30 sec", "30 sn"); } }, { value: 60, get label() { return L("60 sec", "60 sn"); } },
@@ -58,17 +59,56 @@ function PortField({ label, port, onSave, onInput }: {
   );
 }
 
+type LiveState = "off" | "listening" | "receiving" | "portBusy" | "portConflict";
+const liveStateLabel = (state: LiveState | undefined) => {
+  switch (state) {
+    case undefined: return L("Waiting…", "Bekleniyor…");
+    case "off": return L("Off", "Kapalı");
+    case "listening": return L("Waiting", "Bekliyor");
+    case "receiving": return L("Receiving data", "Veri geliyor");
+    case "portBusy": return L("Port in use", "Port kullanımda");
+    case "portConflict": return L("Port conflict", "Port çakışıyor");
+  }
+};
+
+function LiveStatus({ state, detail, values }: { state: LiveState | undefined; detail?: string; values: TelemetryValues | null | undefined }) {
+  return (
+    <>
+      <p className={state === "portBusy" || state === "portConflict" ? "small warn" : "small muted-text"}>
+        {liveStateLabel(state)}
+        {state === "receiving" && detail && ` (${detail})`}
+      </p>
+      {state === "receiving" && values && <dl className="kv compact">
+        <dt>{signals.speedKmh}</dt><dd className="num">{fixed(1)(values.speedKmh)}</dd>
+        <dt>{signals.rpm}</dt><dd className="num">{pct(values.rpm)}</dd>
+        <dt>{signals.gas}</dt><dd className="num">{pct(values.gas)}</dd>
+        <dt>{signals.brake}</dt><dd className="num">{pct(values.brake)}</dd>
+        <dt>{signals.gear}</dt><dd className="num">{values.gear}</dd>
+        <dt>{signals.slipFront}</dt><dd className="num">{fixed(2)(values.slipFront)}</dd>
+        <dt>{signals.slipRear}</dt><dd className="num">{fixed(2)(values.slipRear)}</dd>
+      </dl>}
+    </>
+  );
+}
+
 function Connections({ status }: { status: IntegrationStatus | null }) {
   const { settings } = useApp();
   const [forzaInput, setForzaInput] = useState<number>();
   const [dsuInput, setDsuInput] = useState<number>();
+  const [f1Input, setF1Input] = useState<number>();
+  const [beamInput, setBeamInput] = useState<number>();
   if (!settings) return null;
   const s = settings.integration;
   const save = (patch: Partial<IntegrationSettings>) => send({ type: "settings.save", settings: { ...settings, integration: { ...s, ...patch } } });
   const udp = status?.udp;
   const forza = status?.forza;
-  const values = forza?.state === "receiving" ? forza.values : null;
   const forzaPort = forzaInput ?? s.forzaPort;
+  const f1 = status?.f1;
+  const ac = status?.ac;
+  const beamNg = status?.beamNg;
+  const f1Port = f1Input ?? s.f1Port;
+  const beamPort = beamInput ?? s.beamNgPort;
+  const activeSource = status?.activeSource;
   const dsu = status?.dsu;
   const dsuPort = dsuInput ?? s.dsuPort;
   const dsuLabel = !dsu ? L("Waiting…", "Bekleniyor…") : dsu.state === "off" ? L("Off", "Kapalı")
@@ -79,6 +119,7 @@ function Connections({ status }: { status: IntegrationStatus | null }) {
 
   return (
     <>
+      {activeSource && <p className="small" style={{ gridColumn: "1 / -1", margin: 0 }}>{L("Active source", "Etkin kaynak")}: <strong>{sourceNames[activeSource]}</strong></p>}
       <Section title="UDP API">
         <Toggle label="UDP API" checked={s.udpEnabled} onChange={(udpEnabled) => save({ udpEnabled })}
           hint={L("Other apps and DSX mods can control triggers, lights, and vibration. Only commands from this PC are accepted.", "Başka programlar ve DSX modları tetik, ışık ve titreşimi değiştirebilir. Yalnız bu bilgisayardan gelen komutlar kabul edilir.")} />
@@ -114,19 +155,31 @@ function Connections({ status }: { status: IntegrationStatus | null }) {
         <p className="hint">{L("In Forza, go to Settings > HUD and Gameplay > Data Out. Set the IP to 127.0.0.1 and use this port. Avoid ports 5200–5300.", "Oyunda Ayarlar > HUD ve Oynanış > Data Out: IP 127.0.0.1, port bu sayı. 5200-5300 arası kullanılmasın.")}</p>
         {forzaPort >= 5200 && forzaPort <= 5300 && <p className="hint warn">{L("Avoid ports 5200–5300.", "5200-5300 arası kullanılmasın.")}</p>}
         {forzaPort === s.udpPort && <p className="hint warn">{L("The Forza and UDP ports must differ.", "Forza portu UDP portuyla aynı olamaz.")}</p>}
-        <p className={forza?.state === "portBusy" || forza?.state === "portConflict" ? "small warn" : "small muted-text"}>
-          {forza ? forzaStates[forza.state] : L("Waiting…", "Bekleniyor…")}
-          {forza?.state === "receiving" && forza.format && ` (${forzaFormats[forza.format]})`}
-        </p>
-        {values && <dl className="kv compact">
-          <dt>{signals.speedKmh}</dt><dd className="num">{fixed(1)(values.speedKmh)}</dd>
-          <dt>{signals.rpm}</dt><dd className="num">{pct(values.rpm)}</dd>
-          <dt>{signals.gas}</dt><dd className="num">{pct(values.gas)}</dd>
-          <dt>{signals.brake}</dt><dd className="num">{pct(values.brake)}</dd>
-          <dt>{signals.gear}</dt><dd className="num">{values.gear}</dd>
-          <dt>{signals.slipFront}</dt><dd className="num">{fixed(2)(values.slipFront)}</dd>
-          <dt>{signals.slipRear}</dt><dd className="num">{fixed(2)(values.slipRear)}</dd>
-        </dl>}
+        <LiveStatus state={forza?.state} detail={forza?.format ? forzaFormats[forza.format] : undefined} values={forza?.values} />
+      </Section>
+
+      <Section title="EA SPORTS F1">
+        <Toggle label={L("F1 UDP telemetry", "F1 UDP telemetrisi")} checked={s.f1Enabled} onChange={(f1Enabled) => save({ f1Enabled })} />
+        <PortField label={L("F1 port", "F1 portu")} port={s.f1Port} onInput={(port) => setF1Input(Number.isFinite(port) ? port : undefined)}
+          onSave={(f1Port) => { save({ f1Port }); setF1Input(undefined); }} />
+        <p className="hint">{L("In F1 Settings > Telemetry Settings, enable UDP Telemetry on port 20777 and keep UDP Broadcast Mode off.", "Oyunda Ayarlar > Telemetri Ayarları: UDP Telemetrisi açık, port 20777, UDP Broadcast kapalı olsun.")}</p>
+        {(f1Port === s.udpPort || (s.forzaEnabled && f1Port === s.forzaPort)) && <p className="hint warn">{L("The F1 port must differ from the UDP and Forza ports.", "F1 portu UDP ve Forza portlarından farklı olmalı.")}</p>}
+        <LiveStatus state={f1?.state} detail={f1?.format ? String(f1.format) : undefined} values={f1?.values} />
+      </Section>
+
+      <Section title={L("Assetto Corsa / ACC", "Assetto Corsa / ACC")}>
+        <Toggle label={L("Assetto Corsa / ACC shared memory", "Assetto Corsa / ACC paylaşımlı bellek")} checked={s.acEnabled} onChange={(acEnabled) => save({ acEnabled })}
+          hint={L("Reads telemetry automatically from Assetto Corsa and Assetto Corsa Competizione while driving. No in-game port setup needed.", "Assetto Corsa ve Assetto Corsa Competizione sürüş sırasında otomatik okunur; oyun içi port ayarı gerekmez.")} />
+        <LiveStatus state={ac?.state} detail={ac?.game ? (ac.game === "acc" ? "ACC" : "AC") : undefined} values={ac?.values} />
+      </Section>
+
+      <Section title="BeamNG.drive">
+        <Toggle label={L("BeamNG.drive OutGauge", "BeamNG.drive OutGauge")} checked={s.beamNgEnabled} onChange={(beamNgEnabled) => save({ beamNgEnabled })} />
+        <PortField label={L("BeamNG port", "BeamNG portu")} port={s.beamNgPort} onInput={(port) => setBeamInput(Number.isFinite(port) ? port : undefined)}
+          onSave={(beamNgPort) => { save({ beamNgPort }); setBeamInput(undefined); }} />
+        <p className="hint">{L("In BeamNG Options > Other > OutGauge support, set IP to 127.0.0.1 and port to 4444.", "BeamNG Ayarlar > Diğer > OutGauge desteği: IP 127.0.0.1, port 4444.")}</p>
+        {(beamPort === s.udpPort || (s.forzaEnabled && beamPort === s.forzaPort) || (s.f1Enabled && beamPort === s.f1Port)) && <p className="hint warn">{L("The BeamNG port must differ from the UDP, Forza, and F1 ports.", "BeamNG portu UDP, Forza ve F1 portlarından farklı olmalı.")}</p>}
+        <LiveStatus state={beamNg?.state} values={beamNg?.values} />
       </Section>
 
       <Section title={L("Motion server (DSU / Cemuhook)", "Hareket sunucusu (DSU / Cemuhook)")}>
@@ -134,7 +187,7 @@ function Connections({ status }: { status: IntegrationStatus | null }) {
           hint={L("Streams gyro, accelerometer, touchpad, and buttons to Cemu, Dolphin, Ryujinx, and Yuzu on 127.0.0.1.", "Gyro, ivmeölçer, touchpad ve tuşları 127.0.0.1 üzerinden Cemu, Dolphin, Ryujinx ve Yuzu'ya aktarır.")} />
         <PortField label={L("DSU port", "DSU portu")} port={s.dsuPort} onInput={(port) => setDsuInput(Number.isFinite(port) ? port : undefined)}
           onSave={(dsuPort) => { save({ dsuPort }); setDsuInput(undefined); }} />
-        {(dsuPort === s.udpPort || dsuPort === s.forzaPort) && <p className="hint warn">{L("The DSU port must differ from the UDP and Forza ports.", "DSU portu UDP ve Forza portlarından farklı olmalı.")}</p>}
+        {(dsuPort === s.udpPort || dsuPort === s.forzaPort || dsuPort === s.f1Port || dsuPort === s.beamNgPort) && <p className="hint warn">{L("The DSU port must differ from the UDP, Forza, F1, and BeamNG ports.", "DSU portu UDP, Forza, F1 ve BeamNG portlarından farklı olmalı.")}</p>}
         <p className="hint">{L("In the emulator, add a DSU server at 127.0.0.1 with this port.", "Emülatörde 127.0.0.1 adresi ve bu portla bir DSU sunucusu ekleyin.")}</p>
         <p className={dsu?.state === "portBusy" || dsu?.state === "portConflict" ? "small warn" : "small muted-text"}>{dsuLabel}</p>
         {dsu && dsu.state !== "off" && <p className="hint num">
@@ -172,6 +225,7 @@ function signalRange(signal: TelemetrySignal): [number, number] {
     case "boost": return [-floatMax, floatMax];
     case "gear": return [0, 255];
     case "steer": return [-1, 1];
+    case "revLights": case "drs": return [0, 1];
     default: return [0, 1];
   }
 }
@@ -284,6 +338,7 @@ function Rules() {
   const [selectedId, setSelectedId] = useState("");
   const [editing, setEditing] = useState<{ profileId: string; index: number }>();
   const [confirm, setConfirm] = useState("");
+  const [template, setTemplate] = useState<TelemetryTemplate>("forza");
   const profile = profiles.find((p) => p.id === selectedId) ?? profiles.find((p) => p.id === activeId) ?? profiles[0];
   if (!profile) return null;
   const rules = telemetryDrafts.get(profile.id) ?? profile.telemetry.rules;
@@ -340,7 +395,13 @@ function Rules() {
           update([...rules, defaultTelemetryRule()]);
           selectRule(rules.length);
         }}>{L("Add rule", "Kural ekle")}</button>
-        <button className="button" onClick={() => setConfirm(profile.id)}>{L("Apply Forza template", "Forza şablonunu uygula")}</button>
+        <label className="field-inline">
+          {L("Template", "Şablon")}
+          <select value={template} onChange={(e) => { setTemplate(e.target.value as TelemetryTemplate); setConfirm(""); }}>
+            {Object.entries(templateNames).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </label>
+        <button className="button" onClick={() => setConfirm(profile.id)}>{L("Apply template", "Şablonu uygula")}</button>
         <span className="spacer" />
         {dirty && <>
           <span className="unsaved">{L("Unsaved", "Kaydedilmedi")}</span>
@@ -356,7 +417,7 @@ function Rules() {
           <span className="small warn">{L("This will replace the profile's rules.", "Bu profilin kuralları değiştirilecek.")}</span>
           <button className="button ghost" onClick={() => setConfirm("")}>{L("Cancel", "Vazgeç")}</button>
           <button className="button primary" onClick={() => {
-            send({ type: "telemetry.applyTemplate", profileId: profile.id, template: "forza" });
+            send({ type: "telemetry.applyTemplate", profileId: profile.id, template });
             forget();
             setEditing(undefined);
             setConfirm("");
