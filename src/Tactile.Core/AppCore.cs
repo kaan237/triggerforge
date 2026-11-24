@@ -65,6 +65,9 @@ public sealed class AppCore : IDisposable
     private readonly InputPlatform _platform;
     private readonly Mapper _mapper;
     private readonly OnScreenKeyboard _osk;
+    private readonly RadialMenuController _radial = new();
+    // Buttons whose radial menu was cancelled while held; withheld from mapping and the virtual pad until let go.
+    private Buttons _radialHoldMask;
     // Buttons held when the keyboard closed; withheld from mapping and the virtual pad until let go.
     private Buttons _oskHoldMask;
     private readonly OrderedEvents<OnScreenKeyboardState> _oskEvents = new();
@@ -113,10 +116,11 @@ public sealed class AppCore : IDisposable
     {
         _time = time;
         _platform = platform ?? InputPlatform.None;
-        _mapper = new Mapper(_platform, new MappingHost(this), Now, threaded: runTimer);
+        _mapper = new Mapper(_platform, new MappingHost(this), Now, threaded: runTimer, _radial);
         _osk = new OnScreenKeyboard(_platform.Injector);
         _oskEvents.Handler = state => OnScreenKeyboardChanged?.Invoke(state);
         _osk.Changed += _oskEvents.Enqueue;
+        _radial.Changed += state => RadialMenuChanged?.Invoke(state);
         _startTimestamp = time.GetTimestamp();
         Controllers = controllers;
         Settings = new SettingsStore(dataDir, portable);
@@ -413,6 +417,20 @@ public sealed class AppCore : IDisposable
     /// <summary>The on-screen keyboard was shown, hidden or moved. Raised on the input thread; marshal before drawing.</summary>
     public event Action<OnScreenKeyboardState>? OnScreenKeyboardChanged;
 
+    /// <summary>A radial menu was shown, hidden or its selection moved. Raised outside the core's locks; marshal before drawing.</summary>
+    public event Action<RadialMenuState>? RadialMenuChanged;
+
+    public bool RadialMenuOpen => _radial.IsOpen;
+
+    public RadialMenuState RadialMenuSnapshot => _radial.State;
+
+    /// <summary>Closes an open radial menu without firing its slice; the button that opened it stays withheld until let go.</summary>
+    public void CancelRadialMenu()
+    {
+        _radial.Cancel();
+        DrainKeyboardEvents();
+    }
+
     public bool OnScreenKeyboardOpen => _osk.IsOpen;
 
     public OnScreenKeyboardState OnScreenKeyboardSnapshot => _osk.State;
@@ -470,6 +488,8 @@ public sealed class AppCore : IDisposable
     {
         if (!_primaryInputLock.IsHeldByCurrentThread)
         {
+            // The radial first: opening the keyboard cancels an open menu, and that cancel happened before the keyboard state.
+            _radial.Drain();
             _oskEvents.Drain();
         }
     }
@@ -663,6 +683,8 @@ public sealed class AppCore : IDisposable
         _mapper.Dispose();
         lock (_primaryInputLock)
         {
+            _radial.Reset();
+            _radialHoldMask = Buttons.None;
             _oskHoldMask = Buttons.None;
             Volatile.Write(ref _oskToggleRequested, 0);
             _osk.Close();
@@ -808,9 +830,49 @@ public sealed class AppCore : IDisposable
             _ = Task.Run(() => BluetoothLink.Disconnect(sleepMac));
         }
 
+        bool radialWasOpen = _radial.IsOpen;
         _mapper.Tick(now);
+        if (!radialWasOpen && _radial.IsOpen)
+        {
+            NeutralizeRadialOpenedByTick();
+        }
+
         ApplyKeyboardRequest();
+        DrainKeyboardEvents();
         Flush();
+    }
+
+    // A chord window that ran out in Tick opened a menu outside any input frame: take the menu stick from the last
+    // report, and let the virtual pad and the motion server see it neutral at once (no new report needed).
+    // Runs after Mapper.Tick returned, so no mapper lock is held when the input lock is taken.
+    private void NeutralizeRadialOpenedByTick()
+    {
+        lock (_primaryInputLock)
+        {
+            if (_disposed || !_radial.IsOpen || _osk.IsOpen)
+            {
+                return;
+            }
+
+            InputState? current;
+            lock (_lock)
+            {
+                current = _latestInput;
+            }
+
+            if (current is null)
+            {
+                return;
+            }
+
+            InputState input = ApplyRadial(current, current);
+            if (Controllers.PrimarySlot is { } slot && Controllers.IsCurrent(slot))
+            {
+                _dsu.PublishInput(0, input, default, default, slot.Controller.Details.Link, slot.Mac, _dsu.Generation(0));
+            }
+
+            _emulation?.OnInput(input, gyroDegPerSec: default, now: Now(), mappingActive: _mapper.Active);
+        }
     }
 
     // A mapped timer action (hold, double tap, chord) asked outside any input frame.
@@ -1073,15 +1135,8 @@ public sealed class AppCore : IDisposable
             }
         }
 
+        input = ApplyRadial(input, s);
         _haptics.Observe(s);
-
-        // Published ahead of the slower mapping work unless a keyboard toggle may still change this frame.
-        bool published = false;
-        if (Volatile.Read(ref _oskToggleRequested) == 0)
-        {
-            PublishDsu(slot, input, inputGyro, inputAccel, dsuGeneration);
-            published = true;
-        }
 
         if (firstInput)
         {
@@ -1102,7 +1157,6 @@ public sealed class AppCore : IDisposable
         }
 
         _mapper.OnInput(input, inputGyro, now, suppressLayerPulse: togglePause);
-        bool opened = false;
         if (Volatile.Read(ref _oskToggleRequested) != 0 && Interlocked.Exchange(ref _oskToggleRequested, 0) != 0)
         {
             // A mapped action asked in this very frame; the pad and the motion server must not get the frame that did it.
@@ -1120,7 +1174,6 @@ public sealed class AppCore : IDisposable
                 input = Neutral(s);
                 inputGyro = default;
                 inputAccel = default;
-                opened = true;
             }
         }
 
@@ -1129,10 +1182,9 @@ public sealed class AppCore : IDisposable
             ToggleUserPause();
         }
 
-        if (!published || opened)
-        {
-            PublishDsu(slot, input, inputGyro, inputAccel, dsuGeneration);
-        }
+        // After mapping, so a radial menu that opened or closed in this frame is already neutral for the motion server.
+        input = ApplyRadial(input, s);
+        PublishDsu(slot, input, inputGyro, inputAccel, dsuGeneration);
 
         _emulation?.OnInput(input, gyroDegPerSec: inputGyro, now: now, mappingActive: _mapper.Active);
 
@@ -1150,6 +1202,35 @@ public sealed class AppCore : IDisposable
         }
 
         return false;
+    }
+
+    // A radial menu owns one stick while it is open (and until that stick is centred once after it closes), and a
+    // cancelled menu's button stays withheld until let go. Runs before and after mapping; applying it twice is harmless.
+    private InputState ApplyRadial(InputState input, InputState raw)
+    {
+        _radial.Update(raw.Left, raw.Right);
+        _radialHoldMask = (_radialHoldMask | _radial.TakeCancelledButtons()) & raw.Buttons;
+        if (_osk.IsOpen)
+        {
+            return input;
+        }
+
+        if (_radialHoldMask != Buttons.None)
+        {
+            input = input with
+            {
+                Buttons = input.Buttons & ~_radialHoldMask,
+                L2 = (_radialHoldMask & Buttons.L2) != 0 ? (byte)0 : input.L2,
+                R2 = (_radialHoldMask & Buttons.R2) != 0 ? (byte)0 : input.R2,
+            };
+        }
+
+        if (_radial.LeftNeutral)
+        {
+            input = input with { Left = new Stick(128, 128) };
+        }
+
+        return _radial.RightNeutral ? input with { Right = new Stick(128, 128) } : input;
     }
 
     private void OnSecondaryInput(ControllerSlot slot, InputState s)
@@ -1346,6 +1427,9 @@ public sealed class AppCore : IDisposable
             CloseOnScreenKeyboard();
         }
 
+        // The mapper cancels an open radial menu on pause, profile change or mapping off; announce it outside every lock.
+        DrainKeyboardEvents();
+
         // The probe is a few system calls; keep it outside the lock.
         CheckElevation(active);
 
@@ -1504,9 +1588,11 @@ public sealed class AppCore : IDisposable
 
         _pauseShortcut.Reset();
         _oskHoldMask = Buttons.None;
+        _radialHoldMask = Buttons.None;
         Volatile.Write(ref _oskToggleRequested, 0);
         _osk.Close();
         _mapper.ResetController();
+        _radial.Reset();
     }
 
     private void TimerTick()

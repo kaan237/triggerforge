@@ -15,6 +15,11 @@ public static partial class Validation
     public const int MaxLayers = 4;
     public const int MaxLayerNameLength = 32;
     public const int MaxChords = 32;
+    public const int MaxRadialMenus = 4;
+    public const int MinRadialSlices = 2;
+    public const int MaxRadialSlices = 8;
+    public const int MaxRadialMenuNameLength = 32;
+    public const int MaxRadialSliceLabelLength = 24;
 
     /// <summary>Replaces every <c>run</c> action with <c>none</c>; used for imported profiles.</summary>
     public static Profile StripRunActions(Profile p, out int removed)
@@ -58,6 +63,9 @@ public static partial class Validation
                 LayerButton = layers.Length == 0 ? m.LayerButton : layers[0].Button,
                 Layer = layers.Length == 0 ? MapBindings(m.Layer, Strip) : layers[0].Buttons,
                 Layers = layers,
+                RadialMenus = (m.RadialMenus ?? []).Where(r => r is not null)
+                    .Select(r => r with { Slices = (r.Slices ?? []).Select(sl => (sl ?? new()) with { Action = Strip(sl?.Action) }).ToArray() })
+                    .ToArray(),
                 Chords = (m.Chords ?? []).Where(c => c is not null)
                     .Select(c => c with { Action = Strip(c.Action) })
                     .Where(c => c.Action.Kind != ActionKind.None).ToArray(),
@@ -202,7 +210,10 @@ public static partial class Validation
         GyroMouseConfig gyro = m.GyroMouse ?? new();
         StickMappingPair sticks = m.Sticks ?? new();
 
-        MappingLayer[] layers = NormalizeLayers(m, macroIds, issues);
+        // Menus first: a button may only point at a menu that survives.
+        IReadOnlyList<RadialMenu> radialMenus = NormalizeRadialMenus(m.RadialMenus, macroIds, issues);
+        HashSet<string> radialIds = radialMenus.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        MappingLayer[] layers = NormalizeLayers(m, macroIds, radialIds, issues);
         TriggerMappingPair triggers = m.Triggers ?? new();
         FlickStickConfig flick = m.FlickStick ?? new();
 
@@ -226,9 +237,10 @@ public static partial class Validation
         {
             Enabled = m.Enabled,
             LayerButton = layers[0].Button,
-            Buttons = ButtonMap(m.Buttons, "", macroIds, issues),
+            Buttons = ButtonMap(m.Buttons, "", macroIds, issues, radialIds),
             Layer = layers[0].Buttons,
             Layers = layers,
+            RadialMenus = radialMenus,
             ChordWindowMs = m.ChordWindowMs == 0 ? 50 : Math.Clamp(m.ChordWindowMs, 20, 300),
             Chords = NormalizeChords(m.Chords, macroIds, issues),
             Triggers = new()
@@ -284,7 +296,68 @@ public static partial class Validation
         };
     }
 
-    private static MappingLayer[] NormalizeLayers(MappingConfig m, HashSet<string> macroIds, List<string> issues)
+    private static IReadOnlyList<RadialMenu> NormalizeRadialMenus(IReadOnlyList<RadialMenu>? menus, HashSet<string> macroIds, List<string> issues)
+    {
+        List<RadialMenu> source = (menus ?? []).Where(r => r is not null).ToList();
+        if (source.Count > MaxRadialMenus)
+        {
+            issues.Add(Text.Pick($"Maximum {MaxRadialMenus} radial menus. Extra menus were removed.", $"En fazla {MaxRadialMenus} daire menü olabilir; fazlası silindi."));
+            source = source.Take(MaxRadialMenus).ToList();
+        }
+
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<RadialMenu>(source.Count);
+        foreach (RadialMenu menu in source)
+        {
+            string name = (menu.Name ?? "").Trim();
+            if (name.Length == 0)
+            {
+                name = Text.Pick("Radial menu", "Daire menü");
+            }
+            else if (name.Length > MaxRadialMenuNameLength)
+            {
+                name = name[..MaxRadialMenuNameLength];
+            }
+
+            string id = IsId(menu.Id) && !ids.Contains(menu.Id) ? menu.Id : NewId();
+            ids.Add(id);
+
+            List<RadialSlice?> slices = (menu.Slices ?? []).Select(sl => (RadialSlice?)sl).ToList();
+            if (slices.Count > MaxRadialSlices)
+            {
+                issues.Add(Text.Pick($"Radial menu \"{name}\": maximum {MaxRadialSlices} slices. Extra slices were removed.", $"Daire menü \"{name}\": en fazla {MaxRadialSlices} dilim olabilir; fazlası silindi."));
+                slices = slices.Take(MaxRadialSlices).ToList();
+            }
+            else if (slices.Count < MinRadialSlices)
+            {
+                issues.Add(Text.Pick($"Radial menu \"{name}\": at least {MinRadialSlices} slices are needed. Empty slices were added.", $"Daire menü \"{name}\": en az {MinRadialSlices} dilim gerekir; boş dilim eklendi."));
+                while (slices.Count < MinRadialSlices)
+                {
+                    slices.Add(null);
+                }
+            }
+
+            result.Add(new RadialMenu
+            {
+                Id = id,
+                Name = name,
+                Stick = Defined(menu.Stick, RadialStick.Left),
+                Slices = slices.Select((sl, i) =>
+                {
+                    string label = (sl?.Label ?? "").Trim();
+                    return new RadialSlice
+                    {
+                        Label = label.Length > MaxRadialSliceLabelLength ? label[..MaxRadialSliceLabelLength] : label,
+                        Action = ActionOf(sl?.Action, $"{name} {i + 1}", macroIds, issues),
+                    };
+                }).ToArray(),
+            });
+        }
+
+        return result;
+    }
+
+    private static MappingLayer[] NormalizeLayers(MappingConfig m, HashSet<string> macroIds, HashSet<string> radialIds, List<string> issues)
     {
         MappingLayer[] layers = m.ShiftLayers().Take(MaxLayers + 1).ToArray();
         if (layers.Length > MaxLayers)
@@ -326,7 +399,7 @@ public static partial class Validation
                 Name = name[..Math.Min(name.Length, MaxLayerNameLength)],
                 Button = ButtonNames.Name(flag),
                 Mode = Defined(layer.Mode, LayerMode.Hold),
-                Buttons = ButtonMap(layer.Buttons, $" ({name})", macroIds, issues),
+                Buttons = ButtonMap(layer.Buttons, $" ({name})", macroIds, issues, radialIds),
             };
         }
 
@@ -399,7 +472,8 @@ public static partial class Validation
     }
 
     private static Dictionary<string, Binding> ButtonMap(
-        IReadOnlyDictionary<string, Binding>? map, string suffix, HashSet<string> macroIds, List<string> issues)
+        IReadOnlyDictionary<string, Binding>? map, string suffix, HashSet<string> macroIds, List<string> issues,
+        HashSet<string>? radialIds = null)
     {
         var result = new Dictionary<string, Binding>(StringComparer.Ordinal);
         foreach ((string key, Binding b) in map ?? new Dictionary<string, Binding>())
@@ -416,13 +490,14 @@ public static partial class Validation
                 continue;
             }
 
-            result[name] = BindingOf(b, name + suffix, macroIds, issues);
+            result[name] = BindingOf(b, name + suffix, macroIds, issues, radialIds);
         }
 
         return result;
     }
 
-    private static Binding BindingOf(Binding? b, string label, HashSet<string> macroIds, List<string> issues)
+    private static Binding BindingOf(Binding? b, string label, HashSet<string> macroIds, List<string> issues,
+        HashSet<string>? radialIds = null)
     {
         b ??= new();
         ActionConfig[] cycle = (b.Cycle ?? []).Select(a => ActionOf(a, label, macroIds, issues))
@@ -433,18 +508,28 @@ public static partial class Validation
             cycle = cycle[..MaxCycleActions];
         }
 
+        ActionConfig press = ActionOf(b.Press, label, macroIds, issues, radialIds);
+        // A radial menu is the plain press: nothing may delay, repeat or latch it.
+        bool radial = press is { Kind: ActionKind.Special, Special: SpecialAction.RadialMenu };
+        // An explicit none beside the press is just "not set" and no conflict.
+        if (radial && (b.Hold is { Kind: not ActionKind.None } || b.Double is { Kind: not ActionKind.None } ||
+            b.Triple is { Kind: not ActionKind.None } || cycle.Length > 0 || b.Turbo || b.Toggle))
+        {
+            issues.Add(Text.Pick($"{label}: a radial menu cannot be combined with hold, double press, triple press, cycle, turbo or toggle. Those were removed.", $"{label}: daire menü basılı tutma, çift/üçlü basma, döngü, turbo ya da kilitleme ile birlikte kullanılamaz; bunlar kaldırıldı."));
+        }
+
         return new Binding
         {
-            Press = ActionOf(b.Press, label, macroIds, issues),
-            Hold = Optional(b.Hold, label + Text.Pick(" (hold)", " (basılı tutma)"), macroIds, issues),
-            Double = Optional(b.Double, label + Text.Pick(" (double press)", " (çift basma)"), macroIds, issues),
-            Triple = Optional(b.Triple, label + Text.Pick(" (triple press)", " (üçlü basma)"), macroIds, issues),
-            Cycle = cycle.Length == 0 ? null : cycle,
+            Press = press,
+            Hold = radial ? null : Optional(b.Hold, label + Text.Pick(" (hold)", " (basılı tutma)"), macroIds, issues),
+            Double = radial ? null : Optional(b.Double, label + Text.Pick(" (double press)", " (çift basma)"), macroIds, issues),
+            Triple = radial ? null : Optional(b.Triple, label + Text.Pick(" (triple press)", " (üçlü basma)"), macroIds, issues),
+            Cycle = radial || cycle.Length == 0 ? null : cycle,
             HoldMs = Math.Clamp(b.HoldMs, 150, 2000),
             DoubleMs = Math.Clamp(b.DoubleMs, 100, 600),
-            Turbo = b.Turbo,
+            Turbo = !radial && b.Turbo,
             TurboHz = Math.Clamp(b.TurboHz, 1, 30),
-            Toggle = b.Toggle,
+            Toggle = !radial && b.Toggle,
         };
     }
 
@@ -460,7 +545,9 @@ public static partial class Validation
         return cleaned.Kind == ActionKind.None ? null : cleaned;
     }
 
-    private static ActionConfig ActionOf(ActionConfig? a, string label, HashSet<string> macroIds, List<string> issues)
+    /// <param name="radialIds">Menus a radial menu action may point at; null where a radial menu is not allowed at all.</param>
+    private static ActionConfig ActionOf(ActionConfig? a, string label, HashSet<string> macroIds, List<string> issues,
+        HashSet<string>? radialIds = null)
     {
         if (a is null)
         {
@@ -546,7 +633,27 @@ public static partial class Validation
                 return new ActionConfig { Kind = ActionKind.MicMute };
 
             case ActionKind.Special:
-                return new ActionConfig { Kind = ActionKind.Special, Special = Defined(a.Special ?? SpecialAction.Screenshot, SpecialAction.Screenshot) };
+            {
+                SpecialAction special = Defined(a.Special ?? SpecialAction.Screenshot, SpecialAction.Screenshot);
+                if (special != SpecialAction.RadialMenu)
+                {
+                    return new ActionConfig { Kind = ActionKind.Special, Special = special };
+                }
+
+                if (radialIds is null)
+                {
+                    issues.Add(Text.Pick($"{label}: a radial menu can only be the press action of a button. Action removed.", $"{label}: daire menü yalnızca bir tuşun basma eylemi olabilir, eylem kaldırıldı."));
+                    return ActionConfig.None;
+                }
+
+                if (a.RadialMenuId is { } menuId && radialIds.Contains(menuId))
+                {
+                    return new ActionConfig { Kind = ActionKind.Special, Special = special, RadialMenuId = menuId };
+                }
+
+                issues.Add(Text.Pick($"{label}: radial menu not found. Action removed.", $"{label}: daire menü bulunamadı, eylem kaldırıldı."));
+                return ActionConfig.None;
+            }
 
             default:
                 return ActionConfig.None;

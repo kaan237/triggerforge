@@ -79,7 +79,7 @@ export type KeyName = string;
 export type ActionKind = "none" | "key" | "mouseButton" | "wheel" | "macro" | "profile" | "run" | "micMute" | "special";
 export type MouseButtonName = "left" | "right" | "middle" | "x1" | "x2";
 export type Direction = "up" | "down" | "left" | "right";
-export type Special = "screenshot" | "gameBar" | "taskView" | "desktop" | "showApp" | "onScreenKeyboard";
+export type Special = "screenshot" | "gameBar" | "taskView" | "desktop" | "showApp" | "onScreenKeyboard" | "radialMenu";
 
 // Flat: `kind` picks which fields are used; the host drops the rest.
 export type Action = {
@@ -93,6 +93,7 @@ export type Action = {
   path?: string;
   args?: string;
   special?: Special;
+  radialMenuId?: string; // special "radialMenu" only
 };
 
 export type Binding = {
@@ -177,6 +178,10 @@ export type FlickStickConfig = {
   smoothing: number;
 };
 
+export type RadialStick = "left" | "right";
+export type RadialSlice = { label: string; action: Action };
+export type RadialMenu = { id: string; name: string; stick: RadialStick; slices: RadialSlice[] };
+
 export type Mapping = {
   enabled: boolean;
   layerButton: ButtonName | "none";
@@ -190,6 +195,7 @@ export type Mapping = {
   touchpad: TouchpadMapping;
   gyroMouse: GyroMouse;
   sticks: Pair<StickMapping>;
+  radialMenus: RadialMenu[];
 };
 
 export type MacroStep =

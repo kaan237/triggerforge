@@ -11,6 +11,7 @@ available in English and Turkish, with English selected for new installations.
 - Tune stick and trigger response, calibrate the gyro and create mappings and macros.
 - Save profiles and switch between them automatically by game.
 - Import signed community profiles and share your own.
+- Open radial menus of up to 8 actions with a button and a stick.
 - See profile, layer, battery and mode changes on screen, and type with an on-screen keyboard.
 - Use Bluetooth audio haptics, send sound to the controller speaker or create a virtual controller.
 - Control effects from compatible integrations: DSX commands over UDP and telemetry from Forza, EA SPORTS F1, Assetto Corsa, ACC, and BeamNG.drive.
@@ -72,6 +73,7 @@ ve Türkçe kullanılabilir. Yeni kurulumlar İngilizce başlar.
 - Analog çubuk ve tetik tepkisini ayarlayın, jiroskobu kalibre edin, tuş eşlemeleri ve makrolar oluşturun.
 - Profilleri kaydedin ve oyuna göre otomatik geçiş yapın.
 - İmzalı topluluk profillerini içe aktarın ve kendi profilinizi paylaşın.
+- Bir tuş ve stick ile 8 eyleme kadar daire menüler açın.
 - Profil, katman, pil ve kip değişimlerini ekranda görün; ekran klavyesiyle yazın.
 - Bluetooth üzerinden ses tabanlı dokunsal geri bildirim kullanın, kontrolcü hoparlörüne ses gönderin veya sanal kontrolcü oluşturun.
 - DSX komutları ve Forza, EA SPORTS F1, Assetto Corsa, ACC ve BeamNG.drive telemetrisiyle efektleri yönetin.

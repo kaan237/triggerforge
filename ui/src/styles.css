@@ -783,3 +783,23 @@ button.chip.on:hover { color: var(--bg); border-color: var(--accent); }
 .remap { display: grid; gap: 6px; }
 .remap-row { display: grid; grid-template-columns: minmax(0, 180px) auto minmax(0, 180px) auto; justify-content: start; align-items: center; gap: 10px; }
 .segmented button:disabled, .segmented button:disabled:hover { color: var(--faint); }
+
+.radial-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; align-items: start; }
+.radial-notes { display: grid; gap: 6px; min-width: 0; }
+.radial-preview { width: 100%; max-width: 220px; height: auto; display: block; }
+.radial-preview .wedge { cursor: pointer; outline: none; }
+.radial-preview .wedge path { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1; }
+.radial-preview .wedge text { fill: var(--muted); font-size: 11px; pointer-events: none; user-select: none; }
+.radial-preview .wedge:hover path { fill: var(--line); }
+.radial-preview .wedge.empty { opacity: 0.55; }
+.radial-preview .wedge.on path { fill: var(--accent-soft); stroke: var(--accent); }
+.radial-preview .wedge.on text { fill: var(--text); font-weight: 600; }
+.radial-preview .wedge:focus-visible path { stroke: var(--accent); stroke-width: 2; }
+.radial-preview .hub { fill: var(--bg); stroke: var(--line-strong); }
+.radial-preview .hub-text { fill: var(--faint); font-size: 8px; pointer-events: none; user-select: none; }
+.radial-slice { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 3px 4px; border-radius: 3px; }
+.radial-slice:hover { background: var(--surface-2); }
+.radial-slice.selected { background: var(--accent-soft); }
+.radial-slice.selected .step-no { color: var(--text); }
+.radial-slice-fields { display: grid; gap: 6px; min-width: 0; }
+@media (max-width: 900px) { .radial-layout { grid-template-columns: minmax(0, 1fr); } }

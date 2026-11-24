@@ -8,9 +8,10 @@ import { defaultAction, defaultBinding, defaultMappingLayer, maxChords, maxLayer
 import { useApp, useInput } from "../state";
 import { DraftBar, PageHead, Section, Segmented, Slider, Toggle, pct } from "../ui";
 import { Macros } from "./Macros";
+import { RadialMenus } from "./RadialMenus";
 import { GyroMouseTab, StickMappingTab, TouchpadTab } from "./MappingTabs";
 
-type Tab = "buttons" | "chords" | "triggers" | "touchpad" | "gyro" | "sticks" | "macros";
+type Tab = "buttons" | "chords" | "triggers" | "touchpad" | "gyro" | "sticks" | "radial" | "macros";
 
 const tabs: { id: Tab; label: string }[] = [
   { id: "buttons", get label() { return L("Mapping", "Tuşlar"); } },
@@ -19,6 +20,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "touchpad", get label() { return L("Touchpad", "Touchpad"); } },
   { id: "gyro", get label() { return L("Gyro mouse", "Gyro fare"); } },
   { id: "sticks", get label() { return L("Sticks", "Analoglar"); } },
+  { id: "radial", get label() { return L("Radial menus", "Daire menüler"); } },
   { id: "macros", get label() { return L("Macros", "Makrolar"); } },
 ];
 
@@ -112,7 +114,7 @@ function ButtonsTab({ draft, editMapping }: { draft: Profile; editMapping: EditM
   const shift = m.layers[index];
   const down = new Set((input?.buttons ?? []).map(fromInput));
   const activators = new Set(m.layers.map((entry) => entry.button));
-  const summary = (binding?: Binding) => bindingSummary(binding, profiles, draft.macros);
+  const summary = (binding?: Binding) => bindingSummary(binding, profiles, draft.macros, draft.mapping.radialMenus);
   const baseName = L("Base", "Temel");
   const nameOf = (entry: MappingLayer, i: number) => entry.name.trim() || L(`Layer ${i + 1}`, `Katman ${i + 1}`);
   const fallback = (button: ButtonName) => {
@@ -211,7 +213,7 @@ function ButtonsTab({ draft, editMapping }: { draft: Profile; editMapping: EditM
         {activators.has(selected) ? (
           <p className="hint">{L("This button activates a layer. Its own bindings and chords are ignored.", "Bu tuş katmanı etkinleştirir. Kendi atamaları ve akorları yok sayılır.")}</p>
         ) : !shift || own ? (
-          <BindingEditor key={`${index}:${selected}`} binding={own ?? defaultBinding()} onChange={setBinding} />
+          <BindingEditor key={`${index}:${selected}`} allowRadialMenu binding={own ?? defaultBinding()} onChange={setBinding} />
         ) : (
           <div className="inherit">
             <p className="hint">{inherited.shift
@@ -263,7 +265,7 @@ function ChordsTab({ draft, editMapping }: { draft: Profile; editMapping: EditMa
                 ))}
                 <button className="button ghost" onClick={() => editMapping((m) => ({ ...m, chords: m.chords.filter((_, i) => i !== index) }))}>{L("Remove chord", "Akoru kaldır")}</button>
               </div>
-              <ActionEditor action={chord.action} onChange={(action) => set(index, { action })} />
+              <ActionEditor action={chord.action} allowRadialMenu={false} onChange={(action) => set(index, { action })} />
               {chord.action.kind === "none" && <p className="hint">{L("Choose an action to save this chord.", "Bu akoru kaydetmek için bir eylem seç.")}</p>}
               {duplicate && <p className="hint warn">{L("This combination already exists above.", "Bu tuş birleşimi yukarıda zaten var.")}</p>}
               {chord.buttons.some((button) => activators.has(button)) && <p className="hint warn">{L("A layer activator prevents this chord from firing.", "Katman tuşu bu akorun çalışmasını engeller.")}</p>}
@@ -303,8 +305,8 @@ function TriggersTab({ draft, editMapping }: { draft: Profile; editMapping: Edit
             <Slider label={L("Full threshold", "Tam basış eşiği")} min={minimumFull(cfg.softThreshold)} max={1} step={0.01} value={cfg.fullThreshold} format={pct} onChange={(fullThreshold) => set({ fullThreshold })} />
             <Slider label={L("Release hysteresis", "Bırakma farkı")} min={0.01} max={0.2} step={0.01} value={cfg.hysteresis} format={pct} onChange={(hysteresis) => set({ hysteresis })} />
             {cfg.mode === "hipFire" && <Slider label={L("Hip fire window", "Hızlı tam basış süresi")} min={20} max={300} value={cfg.hipFireMs} format={(ms) => L(`${ms} ms`, `${ms} ms`)} onChange={(hipFireMs) => set({ hipFireMs })} />}
-            <div className="bind-row"><span className="label">{L("Soft pull", "Hafif basış")}</span><ActionEditor action={cfg.soft} onChange={(soft) => set({ soft })} /></div>
-            <div className="bind-row"><span className="label">{L("Full pull", "Tam basış")}</span><ActionEditor action={cfg.full} onChange={(full) => set({ full })} /></div>
+            <div className="bind-row"><span className="label">{L("Soft pull", "Hafif basış")}</span><ActionEditor action={cfg.soft} allowRadialMenu={false} onChange={(soft) => set({ soft })} /></div>
+            <div className="bind-row"><span className="label">{L("Full pull", "Tam basış")}</span><ActionEditor action={cfg.full} allowRadialMenu={false} onChange={(full) => set({ full })} /></div>
           </Section>
         );
       })}
@@ -347,6 +349,7 @@ export function Mapping() {
           <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)}>
             {t.label}
             {t.id === "macros" && draft.macros.length > 0 && <span className="faint num"> {draft.macros.length}</span>}
+            {t.id === "radial" && draft.mapping.radialMenus.length > 0 && <span className="faint num"> {draft.mapping.radialMenus.length}</span>}
           </button>
         ))}
       </div>
@@ -356,6 +359,7 @@ export function Mapping() {
       {tab === "touchpad" && <TouchpadTab draft={draft} editMapping={editMapping} />}
       {tab === "gyro" && <GyroMouseTab draft={draft} editMapping={editMapping} countdown={countdown} onTestTurn={testTurn} />}
       {tab === "sticks" && <StickMappingTab draft={draft} editMapping={editMapping} countdown={countdown} onTestTurn={testTurn} />}
+      {tab === "radial" && <RadialMenus draft={draft} editMapping={editMapping} />}
       {tab === "macros" && <Macros draft={draft} />}
     </div>
   );

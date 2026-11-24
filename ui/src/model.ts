@@ -23,6 +23,8 @@ import type {
   LightEffect,
   Lightbar,
   Profile,
+  RadialMenu,
+  RadialSlice,
   StickConfig,
   TelemetryRule,
   TriggerConfig,
@@ -95,6 +97,15 @@ export const defaultStickMapping = (): StickMapping => ({
 export const maxLayers = 4;
 export const maxLayerNameLength = 32;
 export const maxChords = 32;
+export const maxRadialMenus = 4;
+export const minRadialSlices = 2;
+export const maxRadialSlices = 8;
+export const maxRadialNameLength = 32;
+export const maxRadialLabelLength = 24;
+export const defaultRadialSlice = (): RadialSlice => ({ label: "", action: defaultAction() });
+export const defaultRadialMenu = (name: string, id = newId()): RadialMenu => ({
+  id, name, stick: "left", slices: Array.from({ length: 4 }, defaultRadialSlice),
+});
 export const defaultMappingLayer = (index = 0): MappingLayer => ({
   name: L(`Layer ${index + 1}`, `Katman ${index + 1}`),
   button: index === 0 ? "ps" : "none", mode: "hold", buttons: {},
@@ -125,6 +136,7 @@ export function defaultMapping(): Mapping {
     touchpad: defaultTouchpad(),
     gyroMouse: defaultGyroMouse(),
     sticks: { left: defaultStickMapping(), right: defaultStickMapping() },
+    radialMenus: [],
   };
 }
 export const defaultMacro = (name: string, id = newId()): Macro => ({ id, name, repeat: "once", steps: [] });
@@ -270,6 +282,9 @@ export function normalizeProfile(p: Partial<Profile> & { id: string }): Profile 
 
 const normAction = (a?: Partial<Action> | null): Action => (a && a.kind ? { ...a, kind: a.kind } : defaultAction());
 
+const isRadialAction = (a?: Partial<Action> | null) => a?.kind === "special" && a.special === "radialMenu";
+const radialIdPattern = /^[0-9a-f]{32}$/;
+
 function optionalAction(a?: Action | null): Action | null {
   switch (a?.kind) {
     case "key":
@@ -290,21 +305,36 @@ function optionalAction(a?: Action | null): Action | null {
   }
 }
 
-export function normalizeBinding(b?: Partial<Binding> | null): Binding {
+// radialIds: ids of the menus that exist. The radial menu is only valid as the plain press action
+// of a button binding with a known menu id; anywhere else it is dropped.
+export function normalizeBinding(b?: Partial<Binding> | null, radialIds?: ReadonlySet<string>): Binding {
   const d = defaultBinding();
   if (!b) return d;
   const cycle = Array.isArray(b.cycle)
-    ? b.cycle.map(optionalAction).filter((action) => action !== null).slice(0, 8)
+    ? b.cycle.filter((action) => !isRadialAction(action)).map(optionalAction).filter((action) => action !== null).slice(0, 8)
     : [];
+  const rawPress = normAction(b.press);
+  let press = rawPress;
+  let radial = false;
+  if (isRadialAction(rawPress)) {
+    const id = typeof rawPress.radialMenuId === "string" ? rawPress.radialMenuId : "";
+    if (radialIds?.has(id)) {
+      press = { kind: "special", special: "radialMenu", radialMenuId: id };
+      radial = true;
+    } else press = defaultAction();
+  }
+  const sub = (a?: Action | null) => (!radial && a && !isRadialAction(a) ? a : null);
   return {
     ...d, ...b,
-    press: normAction(b.press),
-    hold: b.hold ? normAction(b.hold) : null,
-    double: b.double ? normAction(b.double) : null,
-    triple: optionalAction(b.triple),
-    cycle: cycle.length ? cycle : null,
+    press,
+    hold: b.hold ? sub(normAction(b.hold)) : null,
+    double: b.double ? sub(normAction(b.double)) : null,
+    triple: sub(optionalAction(b.triple)),
+    cycle: !radial && cycle.length ? cycle : null,
     holdMs: Math.trunc(bounded(b.holdMs, 150, 2000, d.holdMs)),
     doubleMs: Math.trunc(bounded(b.doubleMs, 100, 600, d.doubleMs)),
+    turbo: radial ? false : b.turbo === true,
+    toggle: radial ? false : b.toggle === true,
   };
 }
 
@@ -339,18 +369,18 @@ function normalizeGyro(g: Partial<GyroMouse> | undefined, d: GyroMouse): GyroMou
   };
 }
 
-function normalizeBindings(m?: Partial<Record<ButtonName, Binding>>): Partial<Record<ButtonName, Binding>> {
+function normalizeBindings(m?: Partial<Record<ButtonName, Binding>>, radialIds?: ReadonlySet<string>): Partial<Record<ButtonName, Binding>> {
   const out: Partial<Record<ButtonName, Binding>> = {};
   for (const [key, binding] of Object.entries(m ?? {})) {
     const button = normalizeButton(key);
-    if (button && binding && typeof binding === "object") out[button] = normalizeBinding(binding);
+    if (button && binding && typeof binding === "object") out[button] = normalizeBinding(binding, radialIds);
   }
   return out;
 }
 
 type MappingInput = Omit<Partial<Mapping>, "layerButton"> & { layerButton?: string };
 
-function normalizeLayers(m: MappingInput): MappingLayer[] {
+function normalizeLayers(m: MappingInput, radialIds?: ReadonlySet<string>): MappingLayer[] {
   const raw = Array.isArray(m.layers) && m.layers.length
     ? m.layers : [{ button: m.layerButton, buttons: m.layer, name: undefined, mode: undefined }];
   const used = new Set<ButtonName>();
@@ -365,7 +395,7 @@ function normalizeLayers(m: MappingInput): MappingLayer[] {
     }
     return {
       name: (typeof layer?.name === "string" ? layer.name.trim() : "").slice(0, maxLayerNameLength) || d.name,
-      button, mode: layer?.mode === "toggle" ? "toggle" : "hold", buttons: normalizeBindings(layer?.buttons),
+      button, mode: layer?.mode === "toggle" ? "toggle" : "hold", buttons: normalizeBindings(layer?.buttons, radialIds),
     };
   });
 }
@@ -399,6 +429,7 @@ function normalizeMappingAction(value?: Action | null): Action {
       return { kind: "micMute" };
     case "special": {
       const special = action.special;
+      if (special === "radialMenu") return defaultAction();
       return { kind: "special", special: special === "gameBar" || special === "taskView" || special === "desktop" || special === "showApp" || special === "onScreenKeyboard" ? special : "screenshot" };
     }
     default:
@@ -452,14 +483,63 @@ function normalizeFlickStick(f?: Partial<FlickStickConfig>): FlickStickConfig {
   };
 }
 
+export function normalizeRadialMenus(raw: unknown): RadialMenu[] {
+  const menus: RadialMenu[] = [];
+  if (!Array.isArray(raw)) return menus;
+  const used = new Set<string>();
+  // Null entries go first, so they do not use up one of the four places.
+  for (const item of raw.filter((entry) => entry && typeof entry === "object").slice(0, maxRadialMenus) as Partial<RadialMenu>[]) {
+    let id = typeof item?.id === "string" ? item.id : "";
+    if (!radialIdPattern.test(id) || used.has(id)) {
+      do id = newId(); while (used.has(id));
+    }
+    used.add(id);
+    const slices = (Array.isArray(item?.slices) ? item.slices : []).slice(0, maxRadialSlices).map((slice): RadialSlice => ({
+      label: (typeof slice?.label === "string" ? slice.label.trim() : "").slice(0, maxRadialLabelLength),
+      action: normalizeMappingAction(slice?.action),
+    }));
+    while (slices.length < minRadialSlices) slices.push(defaultRadialSlice());
+    menus.push({
+      id,
+      name: (typeof item?.name === "string" ? item.name.trim() : "").slice(0, maxRadialNameLength) || L("Radial menu", "Daire menü"),
+      stick: item?.stick === "right" ? "right" : "left",
+      slices,
+    });
+  }
+  return menus;
+}
+
+// Deleting a menu clears every binding that opened it.
+export function removeRadialMenu(m: Mapping, id: string): Mapping {
+  const clear = (buttons: Mapping["buttons"]) => {
+    const out: Mapping["buttons"] = {};
+    for (const [key, binding] of Object.entries(buttons) as [ButtonName, Binding][]) {
+      if (!(isRadialAction(binding.press) && binding.press.radialMenuId === id)) {
+        out[key] = binding;
+      } else if (binding.hold || binding.double || binding.triple || binding.cycle?.length || binding.turbo || binding.toggle) {
+        out[key] = { ...binding, press: defaultAction() };
+      }
+      // Otherwise nothing else is in the binding: the entry goes away.
+    }
+    return out;
+  };
+  return withMappingLayers(
+    { ...m, buttons: clear(m.buttons), radialMenus: m.radialMenus.filter((menu) => menu.id !== id) },
+    m.layers.map((layer) => ({ ...layer, buttons: clear(layer.buttons) })),
+  );
+}
+
 export function normalizeMapping(m?: MappingInput): Mapping {
   const d = defaultMapping();
   if (!m) return d;
   const t: Partial<TouchpadMapping> = m.touchpad ?? {};
   const layout = t.zoneLayout === "quadrants" ? "quadrants" : "halves";
   const count = layout === "quadrants" ? 4 : 2;
+  const radialMenus = normalizeRadialMenus(m.radialMenus);
+  const radialIds = new Set(radialMenus.map((menu) => menu.id));
   const zones = Array.from({ length: count }, (_, i) => normalizeBinding(t.zones?.[i]));
   const sw: Partial<TouchpadMapping["swipes"]> = t.swipes ?? {};
+  const swipe = (a?: Action) => (isRadialAction(a) ? defaultAction() : normAction(a));
   const stick = (s?: Partial<StickMapping>): StickMapping => {
     const base = defaultStickMapping();
     return {
@@ -474,7 +554,8 @@ export function normalizeMapping(m?: MappingInput): Mapping {
     ...d,
     ...m,
     layerButton: d.layerButton,
-    buttons: normalizeBindings(m.buttons),
+    buttons: normalizeBindings(m.buttons, radialIds),
+    radialMenus,
     chordWindowMs: Math.trunc(bounded(m.chordWindowMs === 0 ? undefined : m.chordWindowMs, 20, 300, d.chordWindowMs)),
     chords: normalizeChords(m.chords),
     triggers: { left: normalizeTriggerMapping(m.triggers?.left), right: normalizeTriggerMapping(m.triggers?.right) },
@@ -484,11 +565,11 @@ export function normalizeMapping(m?: MappingInput): Mapping {
       ...t,
       zoneLayout: layout,
       zones,
-      swipes: { up: normAction(sw.up), down: normAction(sw.down), left: normAction(sw.left), right: normAction(sw.right) },
+      swipes: { up: swipe(sw.up), down: swipe(sw.down), left: swipe(sw.left), right: swipe(sw.right) },
     },
     gyroMouse: normalizeGyro(m.gyroMouse, d.gyroMouse),
     sticks: { left: stick(m.sticks?.left), right: stick(m.sticks?.right) },
-  }, normalizeLayers(m));
+  }, normalizeLayers(m, radialIds));
 }
 
 export function normalizeMacro(m: Partial<Macro>): Macro {

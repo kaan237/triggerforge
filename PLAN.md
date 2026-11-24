@@ -506,6 +506,14 @@ Yol haritası `docs/yol-haritasi.md` (Faz 10-15), dayanağı `docs/rakip-analizi
 - Denetim: incelemede 8, bağımsız denetimde 15 bulgu (çoğu ortak). En önemlileri: Bluetooth DS4 rapor boyu 547 olduğu için hiç bulunmuyordu; gyro sapması iki kez uygulanıyordu; adaptörde kontrolcü kapanınca tuşlar takılı kalıyordu; sanal DS4 koruması hata durumunda çalışmıyordu. Hepsi düzeltildi; iki madde bilerek bırakıldı (D14, D15).
 - Donanımda denenmedi (KH listesi sözleşme §7; DS4 gerekir).
 
+### Faz 15.4 — Daire menü → 1.7.0 (2026-11-24)
+
+**Faz 15.4 sonucu**
+- Sözleşme `docs/contract-phase15-radial.md`; plan denetiminde 8 bulgu, kararlar bölüm 9 (R1-R8). Profilde en çok 4 menü, her biri 2-8 dilim; tuş basılıyken açılır, stick seçer, bırakınca dilim bir kez çalışır, ortada bırakmak iptaldir.
+- Menü açıkken ve kapandıktan sonra ortalanana kadar o stick atama, flick, sanal pad ve DSU için nötr; iptal yolları (duraklatma, profil, katman, ekran klavyesi, kopma) dilim çalıştırmaz ve tuşu bırakılana kadar maskeler.
+- Denetim: ilk turda 15 bulgu, 12'si düzeltildi (ardışık iki menüde stick sızıntısı, akor üyesi tuş, sıfır ölü bölgede nötr olmayan orta değer dahil). İkinci, bağımsız denetimde 5 bulgu, 4'ü düzeltildi. Bilerek bırakılanlar: Edge kısayolu ve duraklatma kombosu sırası diğer atamalarla aynı; menü açıkken dil değişimi bir sonraki çizimde yansır; silinen menünün katmandaki tuşu temel katmanı miras alır.
+- Donanımda denenmedi (KH listesi sözleşme §7).
+
 ### Faz 9 — Yedek yol: Pico 2 W köprü (isteğe bağlı)
 
 Faz 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse: Pico 2 W firmware'i ile gerçek USB DualSense görünümü; uygulama aynı UI ve profil motoruyla Pico'yu yönetir. Referans: DS5Dongle (MIT).

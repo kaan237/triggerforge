@@ -50,6 +50,8 @@ internal sealed partial class TactileApp : ApplicationContext
     private readonly OsdCoordinator _osd;
     private readonly OnScreenKeyboardWindow _keyboardWindow = new();
     private readonly CoalescedRender<OnScreenKeyboardState> _keyboardRender;
+    private readonly RadialMenuWindow _radialWindow = new();
+    private readonly CoalescedRender<RadialMenuState> _radialRender;
 
     public TactileApp(bool startHidden, EventWaitHandle showSignal, AppPaths paths)
     {
@@ -75,6 +77,7 @@ internal sealed partial class TactileApp : ApplicationContext
         _osd = new OsdCoordinator(_osdWindow, _osdClock, () => _core.Settings.Current.Osd);
         _osd.Seed(_core.ActiveProfile.Id, null, _core.Mapping.Paused, _core.Emulation is { } mode ? PrimaryMode(mode.Status) : EmulationMode.Off);
         _keyboardRender = new CoalescedRender<OnScreenKeyboardState>(post => _window.BeginInvoke(post), RenderKeyboard);
+        _radialRender = new CoalescedRender<RadialMenuState>(post => _window.BeginInvoke(post), RenderRadial);
 
         _core.Controllers.PrimaryInput += OnInput;
         _core.Controllers.ConnectionChanged += OnConnection;
@@ -83,6 +86,7 @@ internal sealed partial class TactileApp : ApplicationContext
         _core.ActiveProfileChanged += OnActiveProfile;
         _core.ActiveLayerChanged += OnActiveLayer;
         _core.OnScreenKeyboardChanged += OnKeyboardChanged;
+        _core.RadialMenuChanged += OnRadialChanged;
         _core.Profiles.Changed += OnProfiles;
         _core.Settings.Changed += OnSettings;
         _core.Notice += OnNotice;
@@ -318,6 +322,32 @@ internal sealed partial class TactileApp : ApplicationContext
         }
     }
 
+    /// <summary>Input thread: same hand-over as the keyboard.</summary>
+    private void OnRadialChanged(RadialMenuState state)
+    {
+        if (_exiting)
+        {
+            return;
+        }
+
+        try
+        {
+            _radialRender.Submit(state);
+        }
+        catch (InvalidOperationException e)
+        {
+            Log.Info("Window handle was unavailable for the radial menu.", e);
+        }
+    }
+
+    private void RenderRadial(RadialMenuState state)
+    {
+        if (!_exiting)
+        {
+            _radialWindow.Render(state);
+        }
+    }
+
     private void OnProfiles() => Ui(() =>
     {
         _window.Bridge.PostProfiles();
@@ -333,6 +363,11 @@ internal sealed partial class TactileApp : ApplicationContext
         if (mapping.Paused && _core.OnScreenKeyboardOpen)
         {
             _core.CloseOnScreenKeyboard();
+        }
+
+        if (mapping.Paused && _core.RadialMenuOpen)
+        {
+            _core.CancelRadialMenu();
         }
     });
 
@@ -598,6 +633,7 @@ internal sealed partial class TactileApp : ApplicationContext
 
         // Closing releases held keys; our handler is already unsubscribed, so only the window is touched.
         _core.CloseOnScreenKeyboard();
+        _core.CancelRadialMenu();
 
         // Puts the controller back to neutral, then the overlays go.
         _core.Dispose();
@@ -639,6 +675,7 @@ internal sealed partial class TactileApp : ApplicationContext
         _core.ActiveProfileChanged -= OnActiveProfile;
         _core.ActiveLayerChanged -= OnActiveLayer;
         _core.OnScreenKeyboardChanged -= OnKeyboardChanged;
+        _core.RadialMenuChanged -= OnRadialChanged;
         _core.Profiles.Changed -= OnProfiles;
         _core.Settings.Changed -= OnSettings;
         _core.Notice -= OnNotice;
@@ -649,13 +686,14 @@ internal sealed partial class TactileApp : ApplicationContext
         _tray.Dispose();
     }
 
-    /// <summary>Stops the OSD timer and releases both overlay windows; safe to call twice.</summary>
+    /// <summary>Stops the OSD timer and releases the overlay windows; safe to call twice.</summary>
     private void DisposeOverlays()
     {
         _osd.Dispose();
         _osdClock.Dispose();
         _osdWindow.Dispose();
         _keyboardWindow.Dispose();
+        _radialWindow.Dispose();
     }
 
     protected override void Dispose(bool disposing)

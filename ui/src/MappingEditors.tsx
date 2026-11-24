@@ -2,7 +2,7 @@ import { L } from "./i18n";
 import { useRef, useState, type KeyboardEvent } from "react";
 import type { Action, ActionKind, Binding, Direction, KeyName, Macro, MouseButtonName, Special } from "./host";
 import { codeToKey, keyLabel, modifierKeys, searchKeys } from "./keys";
-import { actionKinds, actionOfKind, directions, mouseButtons, pickProgram, specials, usePause } from "./mapping";
+import { actionKinds, actionOfKind, directions, mouseButtons, pickProgram, radialMenuName, specials, usePause } from "./mapping";
 import { useApp } from "./state";
 import { Check, Segmented, Slider } from "./ui";
 
@@ -156,9 +156,10 @@ function KeyList({ selected, onPick, onClose }: { selected: KeyName[]; onPick: (
 
 // ---- action ----
 
-export function ActionEditor({ action, onChange, kinds }: { action: Action; onChange: (a: Action) => void; kinds?: ActionKind[] }) {
+export function ActionEditor({ action, onChange, kinds, allowRadialMenu = false }: { action: Action; onChange: (a: Action) => void; kinds?: ActionKind[]; allowRadialMenu?: boolean }) {
   const { profiles, draft } = useApp();
   const macros: Macro[] = draft?.macros ?? [];
+  const menus = draft?.mapping.radialMenus ?? [];
   const set = (patch: Partial<Action>) => onChange({ ...action, ...patch });
   const options = kinds ? actionKinds.filter((k) => kinds.includes(k.id)) : actionKinds;
 
@@ -225,13 +226,30 @@ export function ActionEditor({ action, onChange, kinds }: { action: Action; onCh
         {action.kind === "micMute" && <span className="hint">{L("Toggles the default Windows microphone. The microphone LED shows its state.", "Windows varsayılan mikrofonunu susturur ya da açar. Mikrofon ışığı durumu gösterir.")}</span>}
         {action.kind === "special" && (
           <>
-            <select value={action.special ?? "screenshot"} aria-label={L("System action", "Sistem eylemi")} onChange={(e) => set({ special: e.target.value as Special })}>
-              {specials.map((s) => (
+            <select value={action.special ?? "screenshot"} aria-label={L("System action", "Sistem eylemi")} onChange={(e) => {
+              const special = e.target.value as Special;
+              onChange(special === "radialMenu" ? { kind: "special", special, radialMenuId: menus[0]?.id ?? "" } : { kind: "special", special });
+            }}>
+              {specials.filter((s) => s.id !== "radialMenu" || allowRadialMenu || action.special === "radialMenu").map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.label}
                 </option>
               ))}
             </select>
+            {action.special === "radialMenu" && (menus.length > 0 ? (
+              <select value={action.radialMenuId ?? ""} aria-label={L("Radial menu", "Daire menü")} onChange={(e) => set({ radialMenuId: e.target.value })}>
+                <option value="" disabled>
+                  {L("Select a radial menu", "Daire menü seç")}
+                </option>
+                {menus.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {radialMenuName(m)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="hint">{L("No radial menus in this profile. Add one on the Radial menus tab.", "Bu profilde daire menü yok. Daire menüler sekmesinden ekle.")}</span>
+            ))}
             <span className="hint">{specials.find((s) => s.id === action.special)?.hint}</span>
           </>
         )}
@@ -244,8 +262,14 @@ export function ActionEditor({ action, onChange, kinds }: { action: Action; onCh
 
 const cycleKinds = actionKinds.map(({ id }) => id).filter((id) => id !== "none");
 
-export function BindingEditor({ binding, onChange }: { binding: Binding; onChange: (b: Binding) => void }) {
+export function BindingEditor({ binding, onChange, allowRadialMenu = false }: { binding: Binding; onChange: (b: Binding) => void; allowRadialMenu?: boolean }) {
   const set = (patch: Partial<Binding>) => onChange({ ...binding, ...patch });
+  const radial = binding.press.kind === "special" && binding.press.special === "radialMenu";
+  // A radial menu opens on press and closes on release, so nothing may delay or repeat the press.
+  const setPress = (press: Action) => {
+    const opens = press.kind === "special" && press.special === "radialMenu";
+    set(opens ? { press, hold: null, double: null, triple: null, cycle: null, turbo: false, toggle: false } : { press });
+  };
   const cycle = binding.cycle ?? [];
   const plain = !binding.hold && !binding.double && !binding.triple && !cycle.length;
   const setCycle = (actions: Action[]) => set({ cycle: actions.length ? actions : null });
@@ -260,14 +284,18 @@ export function BindingEditor({ binding, onChange }: { binding: Binding; onChang
     <div className="binding">
       <div className="bind-row">
         <span className="label">{L("On press", "Basınca")}</span>
-        <ActionEditor action={binding.press} onChange={(press) => set({ press })} />
+        <ActionEditor action={binding.press} allowRadialMenu={allowRadialMenu} onChange={setPress} />
       </div>
 
+      {radial ? (
+        <p className="hint">{L("The menu opens while the button is held. Hold, double, triple, cycle, turbo and latch are off for this button. Slices are taps.", "Menü tuş basılıyken açılır. Bu tuşta tutma, çift, üç kez basış, döngü, turbo ve kilitleme kapalıdır. Dilimler tek dokunuştur.")}</p>
+      ) : (
+        <>
       <div className="bind-row">
         <Check label={L("On hold", "Basılı tutunca")} checked={!!binding.hold} onChange={(on) => set({ hold: on ? actionOfKind("key") : null })} />
         {binding.hold && (
           <div className="bind-sub">
-            <ActionEditor action={binding.hold} onChange={(hold) => set({ hold })} />
+            <ActionEditor action={binding.hold} allowRadialMenu={false} onChange={(hold) => set({ hold })} />
             <Slider label={L("Hold time", "Tutma süresi")} min={150} max={2000} step={10} value={binding.holdMs} format={(v) => `${v} ms`} onChange={(holdMs) => set({ holdMs })} />
           </div>
         )}
@@ -275,12 +303,12 @@ export function BindingEditor({ binding, onChange }: { binding: Binding; onChang
 
       <div className="bind-row">
         <Check label={L("On double press", "Çift basınca")} checked={!!binding.double} onChange={(on) => set({ double: on ? actionOfKind("key") : null })} />
-        {binding.double && <div className="bind-sub"><ActionEditor action={binding.double} onChange={(double) => set({ double })} /></div>}
+        {binding.double && <div className="bind-sub"><ActionEditor action={binding.double} allowRadialMenu={false} onChange={(double) => set({ double })} /></div>}
       </div>
 
       <div className="bind-row">
         <Check label={L("On triple press", "Üç kez basınca")} checked={!!binding.triple} onChange={(on) => set({ triple: on ? actionOfKind("key") : null })} />
-        {binding.triple && <div className="bind-sub"><ActionEditor action={binding.triple} onChange={(triple) => set({ triple: triple.kind === "none" ? null : triple })} /></div>}
+        {binding.triple && <div className="bind-sub"><ActionEditor action={binding.triple} allowRadialMenu={false} onChange={(triple) => set({ triple: triple.kind === "none" ? null : triple })} /></div>}
         {(binding.double || binding.triple) && (
           <Slider label={L("Multi-press interval", "Çoklu basış aralığı")} min={100} max={600} step={10} value={binding.doubleMs} format={(v) => `${v} ms`} onChange={(doubleMs) => set({ doubleMs })} />
         )}
@@ -294,7 +322,7 @@ export function BindingEditor({ binding, onChange }: { binding: Binding; onChang
             <ol className="bind-sub">
               {cycle.map((action, index) => (
                 <li key={index} className="bind-row">
-                  <ActionEditor action={action} kinds={cycleKinds} onChange={(next) => setCycle(cycle.map((current, i) => i === index ? next : current))} />
+                  <ActionEditor action={action} kinds={cycleKinds} allowRadialMenu={false} onChange={(next) => setCycle(cycle.map((current, i) => i === index ? next : current))} />
                   <div className="button-row">
                     <button className="button ghost" disabled={index === 0} onClick={() => move(index, index - 1)}>{L("Move up", "Yukarı taşı")}</button>
                     <button className="button ghost" disabled={index === cycle.length - 1} onClick={() => move(index, index + 1)}>{L("Move down", "Aşağı taşı")}</button>
@@ -328,6 +356,8 @@ export function BindingEditor({ binding, onChange }: { binding: Binding; onChang
             : L("Turbo and latch are inactive with hold, multi-press, or a cycle.", "Tutma, çoklu basış veya döngü açıksa turbo ve kilitleme çalışmaz.")}
         </p>
       </div>
+        </>
+      )}
     </div>
   );
 }

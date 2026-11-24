@@ -9,7 +9,7 @@ public enum ActionKind { None, Key, MouseButton, Wheel, Macro, Profile, Run, Mic
 
 public enum WheelDirection { Up, Down, Left, Right }
 
-public enum SpecialAction { Screenshot, GameBar, TaskView, Desktop, ShowApp, OnScreenKeyboard }
+public enum SpecialAction { Screenshot, GameBar, TaskView, Desktop, ShowApp, OnScreenKeyboard, RadialMenu }
 
 public enum TouchpadMode { Off, Mouse, Zones }
 
@@ -30,6 +30,8 @@ public enum StickRingMode { Off, Outer, Inner }
 public enum FlickSnapMode { Off, Four, Eight }
 
 public enum MacroRepeat { Once, WhileHeld, Toggle }
+
+public enum RadialStick { Left, Right }
 
 public enum MacroOp { Down, Tap, Up, MouseDown, MouseUp, Click, Wheel, Delay }
 
@@ -52,6 +54,8 @@ public sealed record MappingConfig
     public GyroMouseConfig GyroMouse { get; init; } = new();
     public StickMappingPair Sticks { get; init; } = new();
     public FlickStickConfig FlickStick { get; init; } = new();
+    /// <summary>Up to 4 per profile; a button bound to special radialMenu opens one by id.</summary>
+    public IReadOnlyList<RadialMenu> RadialMenus { get; init; } = [];
 
     internal IEnumerable<MappingLayer> ShiftLayers() => Layers is { Count: > 0 }
         ? Layers
@@ -162,11 +166,34 @@ public sealed record ActionConfig
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SpecialAction? Special { get; init; }
 
+    /// <summary>special radialMenu: id of a menu in the same profile.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RadialMenuId { get; init; }
+
     /// <summary>A key chord action.</summary>
     public static ActionConfig ForKeys(params Key[] keys) => new() { Kind = ActionKind.Key, Keys = keys };
 
     /// <summary>A mouse button action.</summary>
     public static ActionConfig ForMouse(MouseButton button) => new() { Kind = ActionKind.MouseButton, Button = button };
+}
+
+/// <summary>A wheel of 2-8 slices opened by holding a button; the stick picks a slice, release taps its action.</summary>
+public sealed record RadialMenu
+{
+    /// <summary>32-character lowercase hex.</summary>
+    public string Id { get; init; } = "";
+    /// <summary>1-32 characters.</summary>
+    public string Name { get; init; } = "";
+    public RadialStick Stick { get; init; }
+    /// <summary>2-8, slice 0 at the top, clockwise.</summary>
+    public IReadOnlyList<RadialSlice> Slices { get; init; } = [];
+}
+
+public sealed record RadialSlice
+{
+    /// <summary>0-24 characters.</summary>
+    public string Label { get; init; } = "";
+    public ActionConfig Action { get; init; } = ActionConfig.None;
 }
 
 public sealed record TouchpadMapping

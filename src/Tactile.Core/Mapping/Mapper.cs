@@ -27,6 +27,7 @@ internal sealed class Mapper : IDisposable
     private readonly IMappingHost _host;
     private readonly MacroRunner _macros;
     private readonly ActionDispatcher _actions;
+    private readonly RadialMenuController _radial;
     private readonly Func<TimeSpan> _clock;
     private readonly bool _threaded;
     private readonly Dictionary<Buttons, ButtonMachine> _machines = [];
@@ -58,10 +59,14 @@ internal sealed class Mapper : IDisposable
     private bool _active;
     private bool _disposed;
     private bool _notifyLayers = true;
+    // Bit 1 = left, 2 = right: the sticks the mapper last saw as neutral because of a radial menu.
+    private int _radialNeutral;
 
     /// <param name="threaded">False: worker jobs and macros run on the calling thread when pumped (tests).</param>
-    public Mapper(InputPlatform platform, IMappingHost host, Func<TimeSpan> clock, bool threaded)
+    public Mapper(InputPlatform platform, IMappingHost host, Func<TimeSpan> clock, bool threaded,
+        RadialMenuController? radial = null)
     {
+        _radial = radial ?? new RadialMenuController();
         _threaded = threaded;
         _clock = clock;
         _host = host;
@@ -69,7 +74,7 @@ internal sealed class Mapper : IDisposable
         _pointer = new PointerOutput(platform.Injector);
         _worker = new ActionWorker(threaded, e => host.Report(new Notice(NoticeKinds.Mapping, $"Mapping error: {Text.English(e)}", $"Eşleme hatası: {e.Message}")));
         _macros = new MacroRunner(_outputs, clock, threaded);
-        _actions = new ActionDispatcher(_outputs, _macros, _worker, platform, host);
+        _actions = new ActionDispatcher(_outputs, _macros, _worker, platform, host, _radial);
         foreach (Buttons b in ButtonNames.All)
         {
             _machines[b] = new ButtonMachine(_actions);
@@ -77,6 +82,8 @@ internal sealed class Mapper : IDisposable
 
         Build(new Profile());
     }
+
+    internal RadialMenuController Radial => _radial;
 
     public bool Active
     {
@@ -130,6 +137,7 @@ internal sealed class Mapper : IDisposable
             // The host announces the layer reset itself, after the profile change.
             ReleaseAllLocked(notifyLayers: false);
             _config = profile.Mapping ?? new();
+            _radial.Configure(_config.RadialMenus);
             _gyroButton = ButtonNames.TryParse(_config.GyroMouse?.Button, out Buttons gb) ? gb : Buttons.None;
             _actions.SetMacros(profile.Macros ?? []);
             Build(profile);
@@ -170,6 +178,7 @@ internal sealed class Mapper : IDisposable
         {
             // Use the same serialized clock for live reports and timer decisions.
             now = _threaded ? _clock() : now;
+            _actions.SetTime(now);
             bool touched = s.Touch1.Active || s.Touch2.Active;
             if (!_active || _disposed)
             {
@@ -212,8 +221,18 @@ internal sealed class Mapper : IDisposable
                 ((_activators | _suppressedButtons) & Buttons.Touchpad) == 0);
             _pad.Input(firstTouch, secondTouch, padClick, now, deferZoneClick);
             _gyro.Input(gyroDegPerSec, GyroEnabled(s.Buttons, touched), now);
-            _left.Input(s.Left, now);
-            _right.Input(s.Right, now);
+            // A radial menu owns its stick: it reads neutral from the frame the menu opens until it is centred again.
+            (bool leftNeutral, bool rightNeutral) = SyncRadialNeutral();
+            if (!leftNeutral)
+            {
+                _left.Input(s.Left, now);
+            }
+
+            if (!rightNeutral)
+            {
+                _right.Input(s.Right, now);
+            }
+
             if (UsesStages(_l2, Buttons.L2))
             {
                 _l2.Input(s.L2, now);
@@ -224,7 +243,7 @@ internal sealed class Mapper : IDisposable
                 _r2.Input(s.R2, now);
             }
 
-            if (_flickEnabled)
+            if (_flickEnabled && !rightNeutral)
             {
                 _flick.Input(s.Right, now);
             }
@@ -240,6 +259,7 @@ internal sealed class Mapper : IDisposable
         lock (_gate)
         {
             now = _threaded ? _clock() : now;
+            _actions.SetTime(now);
             if (_disposed)
             {
                 return;
@@ -253,10 +273,19 @@ internal sealed class Mapper : IDisposable
                 }
 
                 UpdateTimers(now);
+                // A chord window that ran out may just have opened a menu.
+                (bool leftNeutral, bool rightNeutral) = SyncRadialNeutral();
                 _l2.Update(now);
                 _r2.Update(now);
-                _left.Update(now);
-                _right.Update(now);
+                if (!leftNeutral)
+                {
+                    _left.Update(now);
+                }
+
+                if (!rightNeutral)
+                {
+                    _right.Update(now);
+                }
             }
 
             if (_active || _testTurnAllowed)
@@ -343,6 +372,28 @@ internal sealed class Mapper : IDisposable
         _r2 = new TriggerMapper(triggers.Right ?? new(), new TriggerResponseProcessor(p.TriggerResponse?.Right), _actions);
         _flick = new FlickStick(flick, _pointer);
         _flickEnabled = flick.Enabled;
+    }
+
+    // Under the gate. A stick that just turned neutral lets go of its keys, ring action and flick; while it stays
+    // neutral the mapper does not feed it at all (the centre byte is not exactly zero once normalised). The reset
+    // clears the blocked keys, which only a fed centre frame would have cleared.
+    private (bool Left, bool Right) SyncRadialNeutral()
+    {
+        int next = (_radial.LeftNeutral ? 1 : 0) | (_radial.RightNeutral ? 2 : 0);
+        int added = next & ~_radialNeutral;
+        _radialNeutral = next;
+        if ((added & 1) != 0)
+        {
+            _left.ReleaseAll(reset: true);
+        }
+
+        if ((added & 2) != 0)
+        {
+            _right.ReleaseAll(reset: true);
+            _flick.ReleaseAll(reset: true);
+        }
+
+        return ((next & 1) != 0, (next & 2) != 0);
     }
 
     private void UpdatePointer(TimeSpan now)
@@ -460,6 +511,13 @@ internal sealed class Mapper : IDisposable
         if (pressedAt is { } pressed)
         {
             Binding? binding = Lookup(button, out int layer);
+            if (!down && binding?.Press is { Kind: ActionKind.Special, Special: SpecialAction.RadialMenu })
+            {
+                // Pressed and let go inside the chord window: too short to hold a menu, so nothing opens or latches.
+                return;
+            }
+
+            _radial.PendingOwner = button;
             machine.Down(binding, now, layer, pressed);
         }
 
@@ -499,6 +557,7 @@ internal sealed class Mapper : IDisposable
             if (down)
             {
                 Binding? binding = Lookup(b, out int layer);
+                _radial.PendingOwner = b;
                 machine.Down(binding, now, layer);
             }
             else
@@ -536,6 +595,8 @@ internal sealed class Mapper : IDisposable
 
     private void ReleaseAllLocked(bool resetLayers = true, bool resetAxes = false, bool notifyLayers = true)
     {
+        // First: releasing the button machines would otherwise commit the open menu's slice.
+        _radial.Cancel();
         foreach (ButtonMachine m in _machines.Values)
         {
             m.ReleaseAll(resetCycle: resetLayers);

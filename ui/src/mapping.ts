@@ -2,7 +2,7 @@ import { L } from "./i18n";
 // Labels, summaries and small helpers for the Tuşlar page.
 
 import { useEffect } from "react";
-import { send, subscribe, type Action, type ActionKind, type Binding, type ButtonName, type Direction, type FlickSnapMode, type GyroMouse, type LayerMode, type Macro, type Mapping, type MouseButtonName, type Profile, type Special, type StickRingMode, type TriggerStageMode } from "./host";
+import { send, subscribe, type Action, type ActionKind, type Binding, type ButtonName, type Direction, type FlickSnapMode, type GyroMouse, type LayerMode, type Macro, type Mapping, type MouseButtonName, type Profile, type RadialMenu, type Special, type StickRingMode, type TriggerStageMode } from "./host";
 import { chordLabel } from "./keys";
 import { defaultBinding, defaultMapping, defaultMappingLayer, withMappingLayers } from "./model";
 
@@ -108,6 +108,7 @@ export const specials: { id: Special; label: string; hint: string }[] = [
   { id: "desktop", get label() { return L("Show desktop", "Masaüstünü göster"); }, hint: "Win + D" },
   { id: "showApp", get label() { return L("Show TriggerForge", "Tactile'ı aç"); }, get hint() { return L("Brings this window to the front", "Bu pencereyi öne getirir"); } },
   { id: "onScreenKeyboard", get label() { return L("On-screen keyboard", "Ekran klavyesi"); }, get hint() { return L("Opens or closes the controller on-screen keyboard", "Kontrolcüyle kullanılan ekran klavyesini açar ya da kapatır"); } },
+  { id: "radialMenu", get label() { return L("Radial menu", "Daire menü"); }, get hint() { return L("Hold the button, tilt the stick to a slice, release to run it", "Tuşu basılı tut, analogu bir dilime yatır, bırakınca çalışır"); } },
 ];
 
 // A fresh action of that kind with its own fields filled.
@@ -132,7 +133,10 @@ export function actionOfKind(kind: ActionKind): Action {
   }
 }
 
-export function actionSummary(a: Action | null | undefined, profiles: Profile[], macros: Macro[]): string {
+// A menu without a name shows the default name, as the core gives it.
+export const radialMenuName = (m: RadialMenu) => m.name.trim() || L("Radial menu", "Daire menü");
+
+export function actionSummary(a: Action | null | undefined, profiles: Profile[], macros: Macro[], menus: RadialMenu[] = []): string {
   if (!a) return "—";
   switch (a.kind) {
     case "key":
@@ -152,16 +156,21 @@ export function actionSummary(a: Action | null | undefined, profiles: Profile[],
     case "micMute":
       return L("Toggle microphone mute", "Mikrofonu sustur");
     case "special":
+      if (a.special === "radialMenu") {
+        const menu = menus.find((m) => m.id === a.radialMenuId);
+        const name = menu && radialMenuName(menu);
+        return L(`Radial menu: ${name ?? "not selected"}`, `Daire menü: ${name ?? "seçilmedi"}`);
+      }
       return specials.find((s) => s.id === a.special)?.label ?? L("System", "Sistem");
     default:
       return "—";
   }
 }
 
-export function bindingSummary(b: Binding | undefined, profiles: Profile[], macros: Macro[]): string {
+export function bindingSummary(b: Binding | undefined, profiles: Profile[], macros: Macro[], menus: RadialMenu[] = []): string {
   if (!b) return "—";
   if (b.cycle?.length) return b.cycle.map((action) => actionSummary(action, profiles, macros)).join(" → ");
-  const parts = [actionSummary(b.press, profiles, macros)];
+  const parts = [actionSummary(b.press, profiles, macros, menus)];
   if (b.hold) parts.push(L(`hold: ${actionSummary(b.hold, profiles, macros)}`, `tut: ${actionSummary(b.hold, profiles, macros)}`));
   if (b.double) parts.push(L(`double: ${actionSummary(b.double, profiles, macros)}`, `çift: ${actionSummary(b.double, profiles, macros)}`));
   if (b.triple) parts.push(L(`triple: ${actionSummary(b.triple, profiles, macros)}`, `üçlü: ${actionSummary(b.triple, profiles, macros)}`));

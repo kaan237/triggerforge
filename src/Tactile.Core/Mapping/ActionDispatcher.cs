@@ -30,6 +30,9 @@ internal sealed class HeldAction
     public MouseButton? Button { get; init; }
     /// <summary>A whileHeld macro to stop on release.</summary>
     public Macro? Macro { get; init; }
+    /// <summary>A radial menu this press opened; the release commits it.</summary>
+    public string? RadialMenuId { get; init; }
+    public int RadialSession { get; init; }
 }
 
 /// <summary>
@@ -46,11 +49,15 @@ internal sealed class ActionDispatcher
     private readonly ActionWorker _worker;
     private readonly InputPlatform _platform;
     private readonly IMappingHost _host;
+    private readonly RadialMenuController _radial;
     private readonly List<(HeldAction Held, TimeSpan ReleaseAt)> _taps = [];
     private IReadOnlyDictionary<string, Macro> _macroById = new Dictionary<string, Macro>();
+    private TimeSpan _now;
 
-    public ActionDispatcher(HeldOutputs outputs, MacroRunner macros, ActionWorker worker, InputPlatform platform, IMappingHost host)
+    public ActionDispatcher(HeldOutputs outputs, MacroRunner macros, ActionWorker worker, InputPlatform platform, IMappingHost host,
+        RadialMenuController? radial = null)
     {
+        _radial = radial ?? new RadialMenuController();
         _outputs = outputs;
         _macros = macros;
         _worker = worker;
@@ -60,6 +67,9 @@ internal sealed class ActionDispatcher
 
     public void SetMacros(IReadOnlyList<Macro> macros) =>
         _macroById = macros.GroupBy(m => m.Id).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+    /// <summary>The mapper's clock for this pass, so a release can tap a radial slice without being handed a time.</summary>
+    public void SetTime(TimeSpan now) => _now = now;
 
     public static (int Delta, bool Horizontal) WheelDelta(WheelDirection direction, int amount)
     {
@@ -104,6 +114,11 @@ internal sealed class ActionDispatcher
             case ActionKind.MicMute:
                 _worker.Post(ToggleMic);
                 return null;
+            case ActionKind.Special when action.Special == SpecialAction.RadialMenu:
+                // Null (unknown id, another menu open) leaves nothing to release, so that Up cannot touch the open menu.
+                return _radial.TryOpen(action.RadialMenuId) is > 0 and var session
+                    ? new HeldAction { RadialMenuId = action.RadialMenuId, RadialSession = session }
+                    : null;
             case ActionKind.Special:
                 Special(action.Special ?? SpecialAction.Screenshot, now);
                 return null;
@@ -116,6 +131,16 @@ internal sealed class ActionDispatcher
     {
         if (held is null)
         {
+            return;
+        }
+
+        if (held.RadialSession != 0)
+        {
+            if (_radial.TryCommit(held.RadialSession) is { } slice)
+            {
+                Tap(slice, _now);
+            }
+
             return;
         }
 
@@ -139,6 +164,11 @@ internal sealed class ActionDispatcher
     /// <summary>Down, then up <see cref="TapLength"/> later. One-shots just fire.</summary>
     public void Tap(ActionConfig action, TimeSpan now)
     {
+        if (action is { Kind: ActionKind.Special, Special: SpecialAction.RadialMenu })
+        {
+            return;
+        }
+
         if (Down(action, now) is { } held)
         {
             _taps.Add((held, now + TapLength));

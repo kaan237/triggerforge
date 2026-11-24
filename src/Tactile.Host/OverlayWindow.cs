@@ -10,6 +10,9 @@ internal readonly record struct MonitorArea(Rectangle WorkArea, int Dpi);
 /// <summary>Cell geometry of the on-screen keyboard, all in device pixels.</summary>
 internal readonly record struct KeyboardMetrics(int Cell, int Gap, int Pad, int Hint, Size Size);
 
+/// <summary>Sizes of the radial menu disc, all in device pixels: whole disc, outer ring, centre disc, label ring and label width.</summary>
+internal readonly record struct RadialMetrics(int Diameter, int Pad, int Inner, int LabelRadius, int LabelWidth);
+
 /// <summary>Placement and sizing maths for the overlay windows. Pure, so it is tested without a window.</summary>
 internal static class OverlayLayout
 {
@@ -93,6 +96,50 @@ internal static class OverlayLayout
         int gridWidth = columns * m.Cell + (columns - 1) * m.Gap;
         int rowWidth = rowLength * m.Cell + (rowLength - 1) * m.Gap;
         return new Rectangle(m.Pad + (gridWidth - rowWidth) / 2 + column * step, m.Pad + row * step, m.Cell, m.Cell);
+    }
+
+    /// <summary>Radial menu disc: 360 px at 96 DPI, smaller when the work area (minus the margins) is.</summary>
+    public static RadialMetrics Radial(Rectangle work, int dpi)
+    {
+        int margin = Scale(OsdMargin, dpi);
+        int diameter = Math.Max(8, Math.Min(Scale(360, dpi), Math.Min(work.Width, work.Height) - 2 * margin));
+        int pad = Math.Max(1, diameter / 40);
+        int inner = diameter * 22 / 100;
+        int labelRadius = diameter * 36 / 100;
+        int labelWidth = Math.Max(1, diameter * 26 / 100);
+        return new RadialMetrics(diameter, pad, inner, labelRadius, labelWidth);
+    }
+
+    /// <summary>The disc centred on the work area and kept inside it.</summary>
+    public static Rectangle RadialBounds(Rectangle work, int diameter)
+    {
+        int x = work.Left + (work.Width - diameter) / 2;
+        int y = work.Top + (work.Height - diameter) / 2;
+        x = Math.Max(work.Left, Math.Min(x, work.Right - diameter));
+        y = Math.Max(work.Top, Math.Min(y, work.Bottom - diameter));
+        return new Rectangle(x, y, diameter, diameter);
+    }
+
+    /// <summary>
+    /// GDI+ start angle and sweep (degrees, clockwise from 3 o'clock) of a slice. Slice 0 is centred at
+    /// 12 o'clock and the rest follow clockwise, as the core picks them.
+    /// </summary>
+    public static (float Start, float Sweep) RadialSlice(int count, int index)
+    {
+        float sweep = 360f / Math.Max(count, 1);
+        return (-90f + index * sweep - sweep / 2, sweep);
+    }
+
+    /// <summary>The text a slice shows: its label, or its number (1-8) when the label is empty.</summary>
+    public static string RadialLabel(string? label, int index) =>
+        string.IsNullOrWhiteSpace(label) ? (index + 1).ToString() : label.Trim();
+
+    /// <summary>Centre of a slice's label inside the disc window, on the label ring.</summary>
+    public static Point RadialLabelCenter(RadialMetrics m, int count, int index)
+    {
+        double angle = 2 * Math.PI * index / Math.Max(count, 1);
+        double middle = m.Diameter / 2.0;
+        return new Point((int)Math.Round(middle + m.LabelRadius * Math.Sin(angle)), (int)Math.Round(middle - m.LabelRadius * Math.Cos(angle)));
     }
 
     /// <summary>Shortens <paramref name="text"/> with an ellipsis until <paramref name="measure"/> fits it in the width.</summary>
@@ -235,13 +282,15 @@ internal abstract partial class OverlayWindow : Form
     }
 
     /// <summary>Shows or moves the window without activating it, with an explicit alpha and a rounded shape.</summary>
-    protected void ShowUnactivated(Rectangle bounds, byte alpha, int cornerRadius)
+    protected void ShowUnactivated(Rectangle bounds, byte alpha, int cornerRadius, bool elliptic = false)
     {
         nint handle = Handle;
         _ = SetLayeredWindowAttributes(handle, 0, alpha, LwaAlpha);
 
         // The window owns the region once it is set.
-        nint region = CreateRoundRectRgn(0, 0, bounds.Width + 1, bounds.Height + 1, cornerRadius * 2, cornerRadius * 2);
+        nint region = elliptic
+            ? CreateEllipticRgn(0, 0, bounds.Width + 1, bounds.Height + 1)
+            : CreateRoundRectRgn(0, 0, bounds.Width + 1, bounds.Height + 1, cornerRadius * 2, cornerRadius * 2);
         if (SetWindowRgn(handle, region, true) == 0)
         {
             _ = DeleteObject(region);
@@ -364,6 +413,9 @@ internal abstract partial class OverlayWindow : Form
 
     [LibraryImport("gdi32.dll")]
     private static partial nint CreateRoundRectRgn(int left, int top, int right, int bottom, int widthEllipse, int heightEllipse);
+
+    [LibraryImport("gdi32.dll")]
+    private static partial nint CreateEllipticRgn(int left, int top, int right, int bottom);
 
     [LibraryImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

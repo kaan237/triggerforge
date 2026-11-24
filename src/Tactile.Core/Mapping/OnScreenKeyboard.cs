@@ -321,6 +321,9 @@ internal sealed class OrderedEvents<T>
 
     public Action<T>? Handler { get; set; }
 
+    /// <summary>Who owns these events; named in the log when a subscriber fails.</summary>
+    public string Name { get; init; } = "On-screen keyboard";
+
     public void Enqueue(T item)
     {
         lock (_gate)
@@ -367,7 +370,7 @@ internal sealed class OrderedEvents<T>
             }
             catch (Exception e)
             {
-                Log.Error("On-screen keyboard subscriber failed.", e);
+                Log.Error($"{Name} subscriber failed.", e);
             }
         }
     }

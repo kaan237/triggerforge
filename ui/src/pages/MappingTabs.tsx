@@ -117,7 +117,7 @@ export function TouchpadTab({ draft, editMapping }: TabProps) {
       {tp.mode === "zones" && (
         <>
           <Section title={L(`Zone: ${zoneNames[tp.zoneLayout][z]}`, `Bölge: ${zoneNames[tp.zoneLayout][z]}`)}>
-            <BindingEditor binding={tp.zones[z]} onChange={(b) => setZoneBinding(z, b)} />
+            <BindingEditor binding={tp.zones[z]} allowRadialMenu={false} onChange={(b) => setZoneBinding(z, b)} />
           </Section>
           <Section title={L("Swipe gestures", "Kaydırma hareketleri")} className="tab-wide">
             <p className="hint">{L("Swipe quickly across more than a quarter of the pad. The action runs when you lift your finger.", "Tek parmağı hızla padin dörtte birinden fazla kaydır. Kalkınca çalışır.")}</p>
@@ -125,7 +125,7 @@ export function TouchpadTab({ draft, editMapping }: TabProps) {
               {directions.map((d) => (
                 <div key={d.id} className="bind-row">
                   <span className="label">{d.label}</span>
-                  <ActionEditor action={tp.swipes[d.id]} onChange={(a) => set({ swipes: { ...tp.swipes, [d.id]: a } })} />
+                  <ActionEditor action={tp.swipes[d.id]} allowRadialMenu={false} onChange={(a) => set({ swipes: { ...tp.swipes, [d.id]: a } })} />
                 </div>
               ))}
             </div>
@@ -308,7 +308,7 @@ function StickMappingPanel({ side, cfg, flickEnabled, onChange }: { side: "left"
           <>
             <Slider label={L("Ring threshold", "Halka eşiği")} min={0.2} max={0.98} step={0.01} value={cfg.ringThreshold} format={pct} onChange={(ringThreshold) => set({ ringThreshold })} />
             <Slider label={L("Ring hysteresis", "Halka bırakma farkı")} min={0.01} max={0.2} step={0.01} value={cfg.ringHysteresis} format={pct} onChange={(ringHysteresis) => set({ ringHysteresis })} />
-            <div className="bind-row"><span className="label">{L("Ring action", "Halka eylemi")}</span><ActionEditor action={cfg.ringAction} onChange={(ringAction) => set({ ringAction })} /></div>
+            <div className="bind-row"><span className="label">{L("Ring action", "Halka eylemi")}</span><ActionEditor action={cfg.ringAction} allowRadialMenu={false} onChange={(ringAction) => set({ ringAction })} /></div>
           </>
         )}
       </div>
