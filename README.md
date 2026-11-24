@@ -14,6 +14,7 @@ available in English and Turkish, with English selected for new installations.
 - Open radial menus of up to 8 actions with a button and a stick.
 - See profile, layer, battery and mode changes on screen, and type with an on-screen keyboard.
 - Use Bluetooth audio haptics, send sound to the controller speaker or create a virtual controller.
+- Use the Bluetooth DualSense microphone through the virtual controller (experimental, off by default, not tested on hardware yet).
 - Control effects from compatible integrations: DSX commands over UDP and telemetry from Forza, EA SPORTS F1, Assetto Corsa, ACC, and BeamNG.drive.
 
 ### Requirements
@@ -74,6 +75,7 @@ ve Türkçe kullanılabilir. Yeni kurulumlar İngilizce başlar.
 - Profilleri kaydedin ve oyuna göre otomatik geçiş yapın.
 - İmzalı topluluk profillerini içe aktarın ve kendi profilinizi paylaşın.
 - Bir tuş ve stick ile 8 eyleme kadar daire menüler açın.
+- Bluetooth DualSense mikrofonunu sanal kontrolcü üzerinden kullanın (deneysel, varsayılan kapalı, henüz donanımda denenmedi).
 - Profil, katman, pil ve kip değişimlerini ekranda görün; ekran klavyesiyle yazın.
 - Bluetooth üzerinden ses tabanlı dokunsal geri bildirim kullanın, kontrolcü hoparlörüne ses gönderin veya sanal kontrolcü oluşturun.
 - DSX komutları ve Forza, EA SPORTS F1, Assetto Corsa, ACC ve BeamNG.drive telemetrisiyle efektleri yönetin.

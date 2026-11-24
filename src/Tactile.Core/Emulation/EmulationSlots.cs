@@ -109,7 +109,7 @@ public sealed partial class EmulationService
             return false;
         }
 
-        EmulationSettings settings = (primary?.Settings ?? new()) with { Audio = false, KeepAudioDefaults = false };
+        EmulationSettings settings = (primary?.Settings ?? new()) with { Audio = false, KeepAudioDefaults = false, BluetoothMic = false };
         // Secondary profiles on Auto follow the same game as the primary.
         string? exe = _autoExe;
         for (int index = 1; index <= _secondarySlots.Length; index++)

@@ -19,6 +19,7 @@ public sealed class ControllerStats
     public long Reduced;
     public long Writes;
     public long WriteErrors;
+    public long MicFrames;
 }
 
 /// <summary>
@@ -30,6 +31,7 @@ public sealed class DualSenseController : IDisposable
     private readonly HidDevice? _device;
     private readonly Thread? _reader;
     private readonly Action<OutputState>? _observeOutput;
+    private readonly Action<byte[]>? _observeRaw;
     private readonly Lock _writeLock = new();
     private readonly byte[] _writeBuffer;
     private volatile bool _running = true;
@@ -38,6 +40,16 @@ public sealed class DualSenseController : IDisposable
     private int _sequence;
     private bool _sentFirst;
     private volatile bool _hapticsActive;
+    private volatile bool _micStream;
+    // Stopwatch timestamp of the last on -> off change; 0 = none or forgotten. Written before _micStream, read after it.
+    private long _micOffAt;
+    // The mic was opened and neither the mic-less main report nor the off control has been confirmed written since.
+    private volatile bool _micOffPending;
+    // The main report written last still carried (or may have carried) mic bits; guarded by _writeLock.
+    private bool _micMainDirty;
+    private volatile bool _micMuted;
+    private volatile byte _micGain = 0x40;
+    private readonly HapticReport _micControl = new();
     private readonly bool _dongle;
 
     private DualSenseController(HidDevice device, ControllerDetails details, UsbFeatureReports features, bool dongle = false)
@@ -51,8 +63,9 @@ public sealed class DualSenseController : IDisposable
         _reader = new Thread(ReadLoop) { IsBackground = true, Name = "TriggerForge: dualsense-reader", Priority = ThreadPriority.AboveNormal };
     }
 
-    internal DualSenseController(string path, ControllerDetails details, Action<OutputState> observeOutput)
+    internal DualSenseController(string path, ControllerDetails details, Action<OutputState> observeOutput, Action<byte[]>? observeRaw = null)
     {
+        _observeRaw = observeRaw;
         DevicePath = path;
         _details = details;
         Features = new(null, null, null);
@@ -83,6 +96,9 @@ public sealed class DualSenseController : IDisposable
     public event Action<DualSenseController, InputState>? InputReceived;
 
     public event Action<DualSenseController>? Disconnected;
+
+    /// <summary>Bluetooth microphone frame; the span is valid only during the call. Handlers must be quick and must not throw.</summary>
+    public event MicFrameHandler? MicFrameReceived;
 
     public static DualSenseController Open(ControllerInfo info)
     {
@@ -253,7 +269,7 @@ public sealed class DualSenseController : IDisposable
                 return false;
             }
 
-            if (_observeOutput is not null)
+            if (_observeOutput is not null && _observeRaw is null)
             {
                 _observeOutput(state);
                 _lastSent = state;
@@ -272,6 +288,7 @@ public sealed class DualSenseController : IDisposable
             {
                 _lastSent = state;
                 _sentFirst = true;
+                _observeOutput?.Invoke(state);
                 return true;
             }
 
@@ -284,7 +301,164 @@ public sealed class DualSenseController : IDisposable
         FirstReport: !_sentFirst,
         RumbleV2: Details.Model == ControllerModel.DualSenseEdge || (Details.Firmware?.UpdateVersion ?? 0) >= OutputReport.RumbleV2UpdateVersion,
         Rumble: !_hapticsActive,
-        AudioStream: _hapticsActive);
+        AudioStream: _hapticsActive,
+        MicStream: _micStream,
+        MicGain: _micGain,
+        MicMuted: _micMuted);
+
+    public bool MicStreamActive => _micStream;
+
+    /// <summary>The mic was opened and the off is not confirmed yet: the main report without mic bits, then the off control.</summary>
+    public bool MicOffPending => _micOffPending;
+
+    /// <summary>Sets the microphone fields of the main report (Bluetooth DualSense only) and resends it when they change.</summary>
+    /// <returns>True when nothing had to change or the changed main report was written.</returns>
+    public bool SetMicStream(bool enabled, byte gain = 0x40, bool muted = false)
+    {
+        if (Details.Model == ControllerModel.DualShock4 || Details.Link != Link.Bluetooth)
+        {
+            return false;
+        }
+
+        lock (_writeLock)
+        {
+            // An unconfirmed off is not "nothing to change": it is written again.
+            if (_micStream == enabled && _micGain == gain && _micMuted == muted && (enabled || !_micOffPending))
+            {
+                return true;
+            }
+
+            if (enabled)
+            {
+                _micOffPending = true;
+                _micMainDirty = true;
+            }
+
+            // The timestamp goes out before the flag: a reader that sees the flag off sees the timestamp too.
+            MarkMicOff(_micStream && !enabled);
+            _micStream = enabled;
+            _micGain = gain;
+            _micMuted = muted;
+            bool sent = Connected && Send(LastSent, force: true);
+            if (!enabled)
+            {
+                _micMainDirty = !sent;
+            }
+
+            return sent;
+        }
+    }
+
+    /// <summary>Clears the mic flags without touching the device (the controller is gone or another one took over).</summary>
+    /// <param name="forget">True also forgets the unconfirmed off (nothing can be written any more).</param>
+    public void ClearMicFlags(bool forget)
+    {
+        MarkMicOff(_micStream);
+        _micStream = false;
+        if (forget)
+        {
+            _micOffPending = false;
+        }
+    }
+
+    /// <summary>Writes the pending off: the main report without mic bits first, the off control last.</summary>
+    /// <returns>True when the off is confirmed (or nothing was open).</returns>
+    public bool ConfirmMicOff()
+    {
+        if (Details.Model == ControllerModel.DualShock4 || Details.Link != Link.Bluetooth)
+        {
+            return true;
+        }
+
+        lock (_writeLock)
+        {
+            if (!_micStream && !_micOffPending)
+            {
+                return true;
+            }
+
+            SetMicStream(false);
+            WriteMicControl(false);
+            return !_micOffPending;
+        }
+    }
+
+    /// <summary>Standalone report opening or closing the microphone stream when no haptic stream carries the flag.</summary>
+    public bool WriteMicControl(bool enable)
+    {
+        if (Details.Model == ControllerModel.DualShock4 || Details.Link != Link.Bluetooth)
+        {
+            return false;
+        }
+
+        lock (_writeLock)
+        {
+            if (enable)
+            {
+                _micOffPending = true;
+            }
+
+            bool written = Write(_micControl.BuildMicControl(enable));
+            if (!enable && written && !_micMainDirty)
+            {
+                // The grace period starts now, before the flag drops.
+                Volatile.Write(ref _micOffAt, Math.Max(1, System.Diagnostics.Stopwatch.GetTimestamp()));
+                _micOffPending = false;
+            }
+
+            return written;
+        }
+    }
+
+    private void MarkMicOff(bool wasOn)
+    {
+        if (wasOn)
+        {
+            Volatile.Write(ref _micOffAt, Math.Max(1, System.Diagnostics.Stopwatch.GetTimestamp()));
+        }
+    }
+
+    private MicParseDecision MicDecision()
+    {
+        // Flag first, then timestamp: the writer stores them the other way round.
+        if (_micStream)
+        {
+            return MicParseGate.Decide(true, null);
+        }
+
+        // Until the off is confirmed a late mic frame must never be read as input; the grace starts at the confirmation.
+        if (_micOffPending)
+        {
+            return MicParseDecision.DropGrace;
+        }
+
+        long off = Volatile.Read(ref _micOffAt);
+        if (off == 0)
+        {
+            return MicParseDecision.Normal;
+        }
+
+        TimeSpan since = System.Diagnostics.Stopwatch.GetElapsedTime(off);
+        if (since > MicParseGate.Grace)
+        {
+            // Past the grace period: forget it, so later reports cost no clock read.
+            Interlocked.CompareExchange(ref _micOffAt, 0, off);
+        }
+
+        return MicParseGate.Decide(false, since);
+    }
+
+    private void CloseMic()
+    {
+        lock (_writeLock)
+        {
+            if ((_micStream || _micOffPending) && Details.Model != ControllerModel.DualShock4 && Details.Link == Link.Bluetooth)
+            {
+                // A failed write only returns false.
+                ConfirmMicOff();
+            }
+        }
+    }
 
     /// <summary>The state most recently written, or the default before the first write.</summary>
     public OutputState LastSent => _lastSent ?? OutputState.Default;
@@ -331,6 +505,8 @@ public sealed class DualSenseController : IDisposable
         _running = false;
         try
         {
+            // The microphone closes first, then a main report without microphone bits leaves the controller neutral.
+            CloseMic();
             // Leave the controller in a neutral state: triggers free, motors off.
             Send(OutputState.Default, force: true);
         }
@@ -345,11 +521,25 @@ public sealed class DualSenseController : IDisposable
         }
     }
 
+    /// <summary>Makes every write fail without disconnecting; a test hook.</summary>
+    internal volatile bool FailWrites;
+
     private bool Write(ReadOnlySpan<byte> report)
     {
-        if (_device is null)
+        if (FailWrites)
         {
             return false;
+        }
+
+        if (_device is null)
+        {
+            if (_observeRaw is null)
+            {
+                return false;
+            }
+
+            _observeRaw(report.ToArray());
+            return true;
         }
 
         // Windows wants the full capability length; the driver sends the report's real size.
@@ -378,6 +568,7 @@ public sealed class DualSenseController : IDisposable
         bool ds4 = Details.Model == ControllerModel.DualShock4;
         var clock = default(Ds4Timestamp);
         var pairing = new DonglePairing();
+        MicParseDecision micDecision = MicParseDecision.Normal;
         while (_running)
         {
             int read;
@@ -434,7 +625,8 @@ public sealed class DualSenseController : IDisposable
             }
             else
             {
-                result = InputParser.TryParse(buffer.AsSpan(0, read), Details.Link, out state);
+                micDecision = MicDecision();
+                result = InputParser.TryParse(buffer.AsSpan(0, read), Details.Link, out state, micDecision != MicParseDecision.Normal);
             }
 
             switch (result)
@@ -449,10 +641,37 @@ public sealed class DualSenseController : IDisposable
                 case ParseResult.ReducedReport:
                     Stats.Reduced++;
                     break;
+                case ParseResult.MicAudio:
+                    // In the grace period after the stream closed, late frames are dropped without a count.
+                    if (micDecision == MicParseDecision.Publish)
+                    {
+                        Stats.MicFrames++;
+                        PublishMic(buffer.AsSpan(0, read));
+                    }
+
+                    break;
             }
         }
 
         PublishDisconnect();
+    }
+
+    internal void PublishMic(ReadOnlySpan<byte> report)
+    {
+        MicFrameHandler? handler = MicFrameReceived;
+        if (handler is null || !InputParser.TryParseMic(report, out byte sequence, out ReadOnlySpan<byte> opus))
+        {
+            return;
+        }
+
+        try
+        {
+            handler(this, sequence, opus);
+        }
+        catch (Exception)
+        {
+            // A faulty consumer must not stop the reader.
+        }
     }
 
     private bool ReloadDongleCalibration(HidDevice device)
@@ -513,6 +732,29 @@ public sealed class DualSenseController : IDisposable
     }
 }
 
+/// <summary>What a 0x31 report with the microphone bit is: a mic frame, a late mic frame to drop, or ordinary input.</summary>
+public enum MicParseDecision { Normal, Publish, DropGrace }
+
+/// <summary>While the mic stream is on, and for <see cref="Grace"/> after it went off, a mic-bit report is never input state.</summary>
+public static class MicParseGate
+{
+    public static readonly TimeSpan Grace = TimeSpan.FromSeconds(2);
+
+    /// <param name="streamOn">The stream is on now.</param>
+    /// <param name="sinceOff">Time since the stream was turned off; null when it was never on.</param>
+    public static MicParseDecision Decide(bool streamOn, TimeSpan? sinceOff)
+    {
+        if (streamOn)
+        {
+            return MicParseDecision.Publish;
+        }
+
+        return sinceOff is { } d && d <= Grace ? MicParseDecision.DropGrace : MicParseDecision.Normal;
+    }
+}
+
+public delegate void MicFrameHandler(DualSenseController controller, byte sequence, ReadOnlySpan<byte> opus71);
+
 public delegate void HapticBlockSource(int block, Span<sbyte> samples);
 public delegate bool SpeakerFrameSource(int block, Span<byte> frame);
 
@@ -524,6 +766,8 @@ public sealed class HapticStreamer : IDisposable
     private readonly SpeakerFrameSource? _nextSpeaker;
     private readonly HapticReport _report = new();
     private readonly Thread _thread;
+    // Held while one tick builds and writes its reports.
+    private readonly Lock _tickGate = new();
     private volatile bool _running = true;
     private volatile SpeakerPacket _speakerPacket;
     private const int PrerollBlocks = 8;
@@ -531,6 +775,22 @@ public sealed class HapticStreamer : IDisposable
     /// <param name="nextBlock">Called with the block index and a buffer for 64 interleaved s8 samples.</param>
     public byte BufferLength { set => _report.BufferLength = value; }
     public SpeakerPacket SpeakerPacket { set => _speakerPacket = value; }
+    public bool MicEnabled { set => _report.MicEnabled = value; }
+
+    /// <summary>The controller this stream writes to.</summary>
+    public DualSenseController Controller => _controller;
+
+    /// <summary>
+    /// Clears the microphone flag and waits for a report that may already carry it. After this returns no report
+    /// of this stream carries mic-on, the pending flush at stop included.
+    /// </summary>
+    public void DisableMic()
+    {
+        _report.MicEnabled = false;
+        lock (_tickGate)
+        {
+        }
+    }
 
     public HapticStreamer(DualSenseController controller, HapticBlockSource nextBlock, SpeakerFrameSource? nextSpeaker = null,
         byte bufferLength = 64, SpeakerPacket speakerPacket = SpeakerPacket.Single36)
@@ -547,6 +807,7 @@ public sealed class HapticStreamer : IDisposable
 
         _controller = controller;
         _report.BufferLength = bufferLength;
+        _report.MicEnabled = controller.MicStreamActive;
         _speakerPacket = speakerPacket;
         _nextBlock = nextBlock;
         _nextSpeaker = nextSpeaker;
@@ -587,7 +848,13 @@ public sealed class HapticStreamer : IDisposable
                 }
 
                 bool hasSpeaker = _nextSpeaker?.Invoke(block, speaker) ?? false;
-                if (!_running || !WriteTick(_report, pairing, _speakerPacket, hasSpeaker, samples, speaker, write))
+                bool ok;
+                lock (_tickGate)
+                {
+                    ok = _running && WriteTick(_report, pairing, _speakerPacket, hasSpeaker, samples, speaker, write);
+                }
+
+                if (!ok)
                 {
                     break;
                 }
@@ -604,9 +871,12 @@ public sealed class HapticStreamer : IDisposable
                 }
             }
 
-            if (!_running && _controller.Connected && pairing.HasPending)
+            lock (_tickGate)
             {
-                Write(_report.Build(pairing.PendingHaptics));
+                if (!_running && _controller.Connected && pairing.HasPending)
+                {
+                    Write(_report.Build(pairing.PendingHaptics));
+                }
             }
         }
         finally

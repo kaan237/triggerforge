@@ -260,6 +260,7 @@ public static partial class Validation
                 HideController = s.Emulation?.HideController ?? true,
                 Audio = s.Emulation?.Audio ?? true,
                 KeepAudioDefaults = s.Emulation?.KeepAudioDefaults ?? true,
+                BluetoothMic = s.Emulation?.BluetoothMic ?? false,
                 HapticBuffer = Math.Clamp(s.Emulation?.HapticBuffer ?? 64, 16, 128),
                 SpeakerPacket = Defined(s.Emulation?.SpeakerPacket ?? SpeakerPacket.Single36, SpeakerPacket.Single36),
                 GameModes = NormalizeGameModes(s.Emulation?.GameModes),

@@ -264,6 +264,20 @@ audible dropout every 2-3 s; the source above measured ~20 dropouts / 5 s for `0
 (`0xD5` speaker, `0xD2` haptics sub-ids); one source reports it survives Bluetooth stalls
 better than `0x36`. Kept as a later option.
 
+## Bluetooth microphone (unverified on hardware)
+
+Experimental and off by default. The layout below comes from community notes and has not been
+checked against a real controller yet; treat every field as a hypothesis until the hardware test passes.
+
+- Enabling: main `0x31` report with Flags A bit 6 (mic volume enable), byte 6 = gain (`0x00`-`0x40`),
+  Flags B bit 1 (power save enable); bit 0 of the `0x91` stream flags in the `0x32`/`0x36`/`0x39` reports,
+  or a standalone `0x32` report with `0x91` length 7 and flags `0xFF` (on) / `0xFE` (off). Whether the
+  standalone form works without a running haptic stream is unknown.
+- Input: a `0x31` report with bit 1 of byte 1 set replaces the state block with a sequence byte
+  (byte 2) and one 71-byte 10 ms Opus frame (48 kHz, mono) in bytes 3-73. The trailing CRC is not
+  assumed valid. The app only takes such a report as a microphone frame while it has asked for the
+  stream; otherwise the bit is ignored and the report is checked as a state report.
+
 ## Virtual device (for games)
 
 To make games see a wired controller while the real one is on Bluetooth, the app

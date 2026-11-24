@@ -231,7 +231,7 @@ export type EmulationConfig = {
 
 export type SpeakerPacket = "double39" | "single36";
 export type EmulationSettings = {
-  enabled: boolean; hideController: boolean; audio: boolean; keepAudioDefaults: boolean; hapticBuffer: number; speakerPacket: SpeakerPacket;
+  enabled: boolean; hideController: boolean; audio: boolean; keepAudioDefaults: boolean; bluetoothMic: boolean; hapticBuffer: number; speakerPacket: SpeakerPacket;
   // lower-case .exe file name -> virtual controller used when a profile is on "auto"
   gameModes: Record<string, Exclude<EmulationMode, "auto">>;
 };
@@ -243,6 +243,7 @@ export type DriverStatus = { kind: DriverKind; state: DriverState; version: stri
 export type EmulationStatus = {
   type: "emulation";
   audio: "off" | "ready" | "playing";
+  mic?: "off" | "ready" | "active" | "muted";
   available?: boolean;
   enabled: boolean;
   mode: ActiveEmulationMode;

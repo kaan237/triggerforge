@@ -8,7 +8,7 @@
     <Deterministic>true</Deterministic>
     <Company>KH</Company>
     <Product>TriggerForge</Product>
-    <Version>1.7.0</Version>
+    <Version>1.8.0</Version>
     <Copyright>Copyright (c) 2026 KH. Licensed under GPL-3.0-or-later.</Copyright>
   </PropertyGroup>
 </Project>

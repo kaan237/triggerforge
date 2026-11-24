@@ -29,6 +29,28 @@ public sealed class HapticReport
     public byte BufferLength { get => _bufferLength; set => _bufferLength = value; }
     public bool IncludeStateBlock { get; set; }
 
+    /// <summary>Sets bit 0 of the stream flags so the controller also sends microphone frames.</summary>
+    public bool MicEnabled { get => _micEnabled; set => _micEnabled = value; }
+
+    private volatile bool _micEnabled;
+
+    /// <summary>Standalone 0x32 report that opens or closes the microphone stream without haptic samples.</summary>
+    public byte[] BuildMicControl(bool enable)
+    {
+        byte[] r = new byte[Length];
+        r[0] = 0x32;
+        r[1] = NextSequence();
+        r[2] = 0x91;
+        r[3] = 7;
+        r[4] = enable ? (byte)0xFF : (byte)0xFE;
+        r.AsSpan(5, 5).Fill(0x40);
+        r[10] = _counter++;
+        Crc32.Stamp(Crc32.OutputSeed, r);
+        return r;
+    }
+
+    private byte Flags(byte value) => _micEnabled ? (byte)(value | 0x01) : value;
+
     /// <summary>
     /// Opens the controller's Bluetooth audio/haptics session. Must precede haptic reports;
     /// carries a full state block (sub-packet 0x10) with the audio-stream flags.
@@ -64,7 +86,7 @@ public sealed class HapticReport
         // Sub-packet 0x11: session flags, buffer lengths, packet counter.
         r[2] = 0x91;
         r[3] = 4;
-        r[4] = 0x66;
+        r[4] = Flags(0x66);
         r[5] = r[6] = BufferLength;
         r[7] = _counter++;
 
@@ -98,7 +120,7 @@ public sealed class HapticReport
         r[1] = NextSequence();
         r[2] = 0x91;
         r[3] = 7;
-        r[4] = 0xFE;
+        r[4] = Flags(0xFE);
         r.AsSpan(5, 5).Fill(0x40);
         r[10] = _counter++;
 
@@ -140,7 +162,7 @@ public sealed class HapticReport
         r[1] = NextSequence();
         r[2] = 0x91;
         r[3] = 6;
-        r[4] = 0x7E;
+        r[4] = Flags(0x7E);
         r[5] = 0x51;
         r[6] = 0x1F;
         r[7] = 0x62;

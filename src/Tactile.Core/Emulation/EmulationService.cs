@@ -8,6 +8,9 @@ namespace Tactile.Core;
 
 public enum EmulationAudioStatus { Off, Ready, Playing }
 
+/// <summary>The Bluetooth microphone: off (not wanted or not possible), ready (no app recording), active, or muted.</summary>
+public enum EmulationMicStatus { Off, Ready, Active, Muted }
+
 public sealed record EmulationSlotStatus(int Index, EmulationMode Mode, bool Attached, bool Hidden, string? Error);
 
 /// <param name="Available">False when the USB/IP server or the driver layer could not start.</param>
@@ -25,6 +28,8 @@ public sealed record EmulationStatus(
 {
     public IReadOnlyList<EmulationSlotStatus> Slots { get; init; } = [];
 
+    public EmulationMicStatus Mic { get; init; }
+
     /// <summary>What the profile asks for; Auto while <see cref="Mode"/> shows the pad Auto picked.</summary>
     public EmulationMode ConfiguredMode { get; init; }
 
@@ -36,7 +41,7 @@ public sealed record EmulationStatus(
     /// <summary>Equal apart from latency, which moves all the time.</summary>
     public bool SameState(EmulationStatus other) =>
         Available == other.Available && Enabled == other.Enabled && Mode == other.Mode && Attached == other.Attached &&
-        Hidden == other.Hidden && Error == other.Error && Audio == other.Audio && Drivers.SequenceEqual(other.Drivers) &&
+        Hidden == other.Hidden && Error == other.Error && Audio == other.Audio && Mic == other.Mic && Drivers.SequenceEqual(other.Drivers) &&
         Slots.SequenceEqual(other.Slots) && ConfiguredMode == other.ConfiguredMode && AutoGame == other.AutoGame;
 }
 
@@ -218,6 +223,30 @@ public sealed partial class EmulationService : IDisposable
 
     internal IVirtualAudio? VirtualAudio => _route is { IsCurrent: true } route && ReferenceEquals(route.Pad, _pad)
         ? route.Pad as IVirtualAudio : null;
+
+    internal IVirtualMic? VirtualMic => _route is { IsCurrent: true } route && ReferenceEquals(route.Pad, _pad)
+        ? route.Pad as IVirtualMic : null;
+
+    /// <summary>Supplies <see cref="EmulationStatus.Mic"/>; set once by the owner. Must not take this service's locks.</summary>
+    internal Func<EmulationMicStatus>? MicStatusSource { get; set; }
+
+    /// <summary>Raises <see cref="Changed"/> when the microphone status moved.</summary>
+    internal void NotifyMicChanged() => RaiseIfChanged();
+
+    /// <summary>Raised when the virtual pad was attached or detached; listeners only signal.</summary>
+    internal event Action? PadChanged;
+
+    private void RaisePadChanged()
+    {
+        try
+        {
+            PadChanged?.Invoke();
+        }
+        catch (Exception)
+        {
+            // A listener must not break attaching or detaching.
+        }
+    }
 
     public EmulationStatus Status
     {
@@ -687,6 +716,7 @@ public sealed partial class EmulationService : IDisposable
         _route = route;
         // Published last: input starts flowing only once the pad is attached.
         _pad = pad;
+        RaisePadChanged();
     }
 
     private Dictionary<AudioDefaultSlot, string>? SnapshotAudioDefaults()
@@ -869,6 +899,7 @@ public sealed partial class EmulationService : IDisposable
         _pad = null;
         SecondaryEmulationConnection? secondary = _route?.Secondary;
         _route = null;
+        RaisePadChanged();
         if (_padHandler is not null)
         {
             pad.Feedback -= _padHandler;
@@ -1132,6 +1163,7 @@ public sealed partial class EmulationService : IDisposable
                 _error is { } slotError ? Text.Pick(slotError.En, slotError.Tr) : null)),
             ConfiguredMode = configured,
             AutoGame = configured == EmulationMode.Auto ? _wanted?.ForegroundExe : null,
+            Mic = _slotIndex == 0 && pad is IVirtualMic ? MicStatusSource?.Invoke() ?? EmulationMicStatus.Off : EmulationMicStatus.Off,
         };
     }
 

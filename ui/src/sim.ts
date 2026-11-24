@@ -572,6 +572,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       ...(configuredMode === "auto" ? { autoGame } : {}),
       attached,
       audio,
+      mic: audio !== "off" && settings.emulation.bluetoothMic ? "ready" : "off",
       hidden: attached && settings.emulation.hideController,
       drivers: (Object.keys(drivers) as DriverKind[]).map((kind) => ({ kind, state: drivers[kind].state, version: drivers[kind].version, detail: null })),
       latency: attached ? { p50Ms: 2.1 + Math.random() * 0.4, p95Ms: 3.8 + Math.random() * 0.8, samples: 512 } : { p50Ms: 0, p95Ms: 0, samples: 0 },

@@ -514,6 +514,15 @@ Yol haritası `docs/yol-haritasi.md` (Faz 10-15), dayanağı `docs/rakip-analizi
 - Denetim: ilk turda 15 bulgu, 12'si düzeltildi (ardışık iki menüde stick sızıntısı, akor üyesi tuş, sıfır ölü bölgede nötr olmayan orta değer dahil). İkinci, bağımsız denetimde 5 bulgu, 4'ü düzeltildi. Bilerek bırakılanlar: Edge kısayolu ve duraklatma kombosu sırası diğer atamalarla aynı; menü açıkken dil değişimi bir sonraki çizimde yansır; silinen menünün katmandaki tuşu temel katmanı miras alır.
 - Donanımda denenmedi (KH listesi sözleşme §7).
 
+### Faz 15.1 — Bluetooth mikrofon (deneysel) → 1.8.0 (2026-11-24)
+
+**Faz 15.1 sonucu**
+- Sözleşme `docs/contract-phase15-mic.md`; plan denetiminde 10 bulgu, kararlar bölüm 9 (M1-M10). Birincil Bluetooth DualSense/Edge'in mikrofonu, yalnız bir uygulama kayıt yaparken sanal DualSense'in mikrofonuna verilir. Varsayılan kapalı, arayüzde "deneysel"; diske bir şey yazılmaz.
+- Gizlilik: her kapanış yolunda mikrofon kapatma komutu gider ve onaylanana kadar yeniden denenir; mikrofon tuşu atama, duraklatma ve ekran klavyesinden bağımsız susturur; susturma ISO yolunda kilitsiz uygulanır; özellik kapalıyken iş parçacığı uyur ve giriş ayrıştırması eskisi gibidir.
+- Denetim: ilk turda 14 bulgu (12 düzeltme maddesi), ikinci bağımsız turda 7 bulgu; biri hariç (7c, anlık durum bildirimi) düzeltildi. Bilerek bırakılanlar: donanım susturma biti gönderilmez, Opus çözme okuyucu iş parçacığında, uyku dinleyicisi yok.
+- Donanımda doğrulanmadı: `0x31` mikrofon çerçevesi düzeni ve `0x32` ile tek başına açma varsayımdır (sözleşme §8). 2.0.0, KH'nin donanım testinden sonra.
+- Faz 15.2 (Edge dahili profilleri): bayt haritası doğrulanmadığı ve flash riski olduğu için durduruldu.
+
 ### Faz 9 — Yedek yol: Pico 2 W köprü (isteğe bağlı)
 
 Faz 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse: Pico 2 W firmware'i ile gerçek USB DualSense görünümü; uygulama aynı UI ve profil motoruyla Pico'yu yönetir. Referans: DS5Dongle (MIT).

@@ -150,3 +150,20 @@ Strictly 2 C# jobs + 1 UI job with **disjoint file sets**. `AppCore.cs` and `Emu
 - **Risk — State parser regression corrupting gameplay inputs**: If a `0x31` mic frame reaches `InputParser.ParseState`, sticks/buttons would spike randomly.
   - *Mitigation*: `(report[1] & 0x02) != 0` is checked before CRC and state parsing in `InputParser.TryParse`, guarded by dedicated unit tests.
 - **Rollback**: Setting `settings.emulation.bluetoothMic = false` (the default) completely disables BT mic control reports, decoding, and `"mic.led"` overrides; EP 0x82 falls back to Phase 5b silence packets with zero impact on HID, haptics, or speaker.
+
+---
+
+## 9. Review decisions (binding; they override the text above)
+
+Line numbers above predate 1.6.0 (base version 1.6.0): locate code by symbol. The whole feature is off by default and labelled experimental in the UI until it passes the hardware checklist.
+
+- M1. **Closing.** Every way out (recording stops, setting off, primary swap, disconnect, pad stopped, app exit, `DualSenseController.Dispose`) sends the mic-off control: `WriteMicControl(false)`, or `MicEnabled = false` on the running `HapticStreamer`. The main report without mic bits goes first and the off control is the last mic-related report; a failed off is retried by the bridge worker while the controller stays connected. `Dispose` clears `_micStream` and closes the mic before the neutral report. A failed write never throws out of the closing path.
+- M2. **Events.** `MicActiveChanged` is raised inside try/catch. Its handler only records the wanted state and signals; opening, closing and HID writes run on `BluetoothMicBridge`'s own worker (or the core tick in tests), never on a USB/IP or HID reader thread and never with `_opLock`, `_stateLock`, `_gate` or the USB/IP write lock held.
+- M3. **Mute button.** While the virtual mic is ready or active, a rising edge of the physical mic button on the raw primary input always toggles the controller mute, whatever the mapping, layer, pause or on-screen keyboard does. A `micMute` mapping still runs as well. Silence wins: muted when the button toggle, the report bit or the Windows mute says so. The toggle is cleared when the mic session ends.
+- M4. **Virtual endpoint.** `AudioIn` always drains the reader and clears the packet when muted, so no stale burst follows an unmute. It applies `MicVolume` as `AudioOut` applies the speaker volume. Mute and volume reads are thread-safe. No `MicMutedChanged` event: the bridge reads `MicMuted` on its tick.
+- M5. **Controller service.** `ControllerService.SetMicStream(bool)` and `event PrimaryMicFrame` exist; frames come only from the current primary and are dropped for any other controller. `HapticReport.MicEnabled` is volatile. Stopping a haptic stream while the mic is wanted sends the standalone mic-on control again. A DualShock 4 or a USB link is refused.
+- M6. **Parser safety.** `0x31` is taken as a mic frame only while that controller's mic stream is on; otherwise the bit is ignored and the report goes through the CRC as before, so the feature cannot change input handling when it is off. The frame layout is unverified on hardware; `docs/protocol.md` says so.
+- M7. **Privacy of samples.** `Clear` and `Dispose` zero the ring and reset the primed state under the ring lock; reads after `Dispose` return silence. Every recording session uses a new decoder. Nothing is written to disk or logged.
+- M8. **LED and status.** `mic.led` outranks `game`, `mapping.mic` and `live.micLed` while muted or active, and survives `ClearOverrides`. `EmulationStatus.SameState` includes `Mic`. Secondary slots always run with `BluetoothMic = false`. `IntegrationLayers.cs` and `EmulationSlots.cs` belong to Job A.
+- M9. **UI.** The toggle is shown only while the audio interface is on; `Toggle` gets no new prop. Job C may not touch `ui.tsx`. The label carries "(experimental)" / "(deneysel)".
+- M10. **Job A may edit Job B files** for the fixes above, because Job B is finished.

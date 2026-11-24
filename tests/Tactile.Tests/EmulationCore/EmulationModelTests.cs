@@ -188,4 +188,28 @@ public class EmulationAppCoreTests
         using var throwing = new ControllerService(autoConnect: false, _ => throw new InvalidOperationException());
         Assert.False(throwing.IsVirtual("x"));
     }
+
+    [Fact]
+    public void Bluetooth_mic_defaults_false_and_roundtrips_with_legacy_json()
+    {
+        Assert.False(new EmulationSettings().BluetoothMic);
+        foreach (string json in new[] { "{}", """{"emulation":null}""", """{"emulation":{"audio":false,"hapticBuffer":80}}""" })
+        {
+            AppSettings old = Validation.Normalize(JsonSerializer.Deserialize<AppSettings>(json, TactileJson.Options)!);
+            Assert.False(old.Emulation.BluetoothMic);
+        }
+
+        AppSettings legacy = Validation.Normalize(JsonSerializer.Deserialize<AppSettings>("""{"emulation":{"audio":false,"hapticBuffer":80}}""", TactileJson.Options)!);
+        Assert.False(legacy.Emulation.Audio);
+        Assert.Equal(80, legacy.Emulation.HapticBuffer);
+
+        AppSettings on = Validation.Normalize(JsonSerializer.Deserialize<AppSettings>("""{"emulation":{"bluetoothMic":true}}""", TactileJson.Options)!);
+        Assert.True(on.Emulation.BluetoothMic);
+        string saved = JsonSerializer.Serialize(on, TactileJson.Compact);
+        Assert.Contains("\"bluetoothMic\":true", saved);
+        AppSettings back = Validation.Normalize(JsonSerializer.Deserialize<AppSettings>(saved, TactileJson.Options)!);
+        Assert.True(back.Emulation.BluetoothMic);
+        Assert.Equal(on.Emulation, back.Emulation);
+        Assert.NotEqual(on.Emulation, on.Emulation with { BluetoothMic = false });
+    }
 }

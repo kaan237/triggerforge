@@ -1,7 +1,8 @@
 namespace Tactile.Device.DualSense;
 
 /// <param name="AudioStream">Bluetooth haptics/audio stream is open: route to the speaker path and enable audio fields.</param>
-public readonly record struct OutputOptions(bool FirstReport = false, bool RumbleV2 = true, bool Rumble = true, bool AudioStream = false)
+public readonly record struct OutputOptions(bool FirstReport = false, bool RumbleV2 = true, bool Rumble = true, bool AudioStream = false,
+    bool MicStream = false, byte MicGain = 0x40, bool MicMuted = false)
 {
     // `new()` on a record struct ignores the primary constructor defaults, so spell them out.
     public static OutputOptions Default { get; } = new(FirstReport: false);
@@ -38,10 +39,13 @@ public static class OutputReport
     private const byte LeftTriggerEffect = 0x08;
     private const byte HeadphoneVolumeEnable = 0x10;
     private const byte SpeakerVolumeEnable = 0x20;
+    private const byte MicVolumeEnable = 0x40;
     private const byte AudioControlEnable = 0x80;
     // Flags B (offset 1)
     private const byte MicLedEnable = 0x01;
+    private const byte PowerSaveEnable = 0x02;
     private const byte LightbarEnable = 0x04;
+    private const byte MicMuteBit = 0x10;
     private const byte PlayerLedsEnable = 0x10;
     private const byte AudioControl2Enable = 0x80;
     // Flags C (offset 38)
@@ -83,6 +87,14 @@ public static class OutputReport
             block[4] = 0x3F;        // headphone volume
             block[7] = 0x30;        // output path: speaker
             block[37] = 0x02;       // speaker preamp gain
+        }
+
+        if (o.MicStream)
+        {
+            block[0] |= MicVolumeEnable;
+            block[1] |= PowerSaveEnable;
+            block[6] = Math.Min(o.MicGain, (byte)0x40);
+            block[9] = o.MicMuted ? MicMuteBit : (byte)0;
         }
 
         s.RightTrigger.Bytes.CopyTo(block[10..]);

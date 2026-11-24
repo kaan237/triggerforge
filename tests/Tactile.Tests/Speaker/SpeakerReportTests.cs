@@ -76,4 +76,67 @@ public sealed class SpeakerReportTests
         builder.BuildPrime(OutputState.Default, OutputOptions.Default);
         Assert.Equal(0, builder.BuildSpeaker(haptics, opus)[10]);
     }
+
+    [Fact]
+    public void Mic_flag_sets_bit0_on_0x32_0x36_0x39_and_standalone_mic_control_has_valid_crc()
+    {
+        var builder = new HapticReport();
+        var haptics = new sbyte[64];
+        byte[] opus = new byte[200];
+        Assert.Equal(0x66, builder.Build(haptics)[4]);
+        Assert.Equal(0xFE, builder.BuildSpeaker(haptics, opus)[4]);
+        Assert.Equal(0x7E, builder.BuildSpeakerDouble(haptics, haptics, opus, opus)[4]);
+
+        builder.MicEnabled = true;
+        Assert.Equal(0x67, builder.Build(haptics)[4]);
+        Assert.Equal(0xFF, builder.BuildSpeaker(haptics, opus)[4]);
+        Assert.Equal(0x7F, builder.BuildSpeakerDouble(haptics, haptics, opus, opus)[4]);
+
+        foreach (bool enable in new[] { true, false })
+        {
+            byte[] control = builder.BuildMicControl(enable);
+            Assert.Equal(142, control.Length);
+            Assert.Equal(0x32, control[0]);
+            Assert.Equal(new byte[] { 0x91, 0x07, enable ? (byte)0xFF : (byte)0xFE }, control[2..5]);
+            Assert.True(Crc32.Verify(Crc32.OutputSeed, control));
+        }
+
+        var block = new byte[OutputReport.StateLength];
+        OutputReport.WriteState(OutputState.Default, block, new OutputOptions(MicStream: true, MicGain: 0x80, MicMuted: true));
+        Assert.Equal(0x40, block[0] & 0x40);
+        Assert.Equal(0x02, block[1] & 0x02);
+        Assert.Equal(0x40, block[6]);
+        Assert.Equal(0x10, block[9]);
+
+        var plain = new byte[OutputReport.StateLength];
+        OutputReport.WriteState(OutputState.Default, plain);
+        Assert.Equal(0, plain[0] & 0x40);
+        Assert.Equal(0, plain[1] & 0x02);
+        Assert.Equal(0, plain[6]);
+        Assert.Equal(0, plain[9]);
+    }
+
+    [Fact]
+    public void Main_bluetooth_report_carries_the_mic_bits_only_while_the_stream_is_on()
+    {
+        // The 0x31 report: 3 header bytes, then the state block (so state offset n is report offset n + 3).
+        byte[] on = OutputReport.BuildBluetooth(OutputState.Default, 3, new OutputOptions(MicStream: true, MicGain: 0x30, MicMuted: true));
+        Assert.Equal(0x31, on[0]);
+        Assert.Equal(0x40, on[3] & 0x40);
+        Assert.Equal(0x02, on[4] & 0x02);
+        Assert.Equal(0x30, on[9]);
+        Assert.Equal(0x10, on[12]);
+        Assert.True(Crc32.Verify(Crc32.OutputSeed, on));
+
+        byte[] unmuted = OutputReport.BuildBluetooth(OutputState.Default, 3, new OutputOptions(MicStream: true));
+        Assert.Equal(0x40, unmuted[9]);
+        Assert.Equal(0, unmuted[12]);
+
+        byte[] off = OutputReport.BuildBluetooth(OutputState.Default, 4, new OutputOptions(MicStream: false, MicGain: 0x30, MicMuted: true));
+        Assert.Equal(0, off[3] & 0x40);
+        Assert.Equal(0, off[4] & 0x02);
+        Assert.Equal(0, off[9]);
+        Assert.Equal(0, off[12]);
+        Assert.True(Crc32.Verify(Crc32.OutputSeed, off));
+    }
 }

@@ -112,3 +112,90 @@ public sealed partial class OpusEncoder : IDisposable
     [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory)]
     private static partial void Destroy(nint encoder);
 }
+
+/// <summary>Decodes the controller's mono 48 kHz 10 ms Opus frames.</summary>
+public sealed partial class OpusDecoder : IMicDecoder
+{
+    public const int SampleRate = 48000, Channels = 1, FrameSamples = 480;
+
+    private readonly DecoderHandle _decoder;
+
+    public OpusDecoder()
+    {
+        var decoder = new DecoderHandle();
+        try
+        {
+            decoder.Initialize(Create(SampleRate, Channels, out int error));
+            if (error < 0 || decoder.IsInvalid)
+            {
+                throw new AudioUnavailableException(new LocalizedMessage($"Could not start the Opus decoder ({error}).", $"Opus çözücü başlatılamadı ({error})."));
+            }
+
+            _decoder = decoder;
+        }
+        catch (Exception e) when (e is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
+        {
+            decoder.Dispose();
+            throw new AudioUnavailableException(new LocalizedMessage("Could not load opus.dll for the controller microphone.", "Kontrolcü mikrofonu için opus.dll yüklenemedi."), e);
+        }
+        catch
+        {
+            decoder.Dispose();
+            throw;
+        }
+    }
+
+    /// <returns>Decoded samples per channel, or a negative Opus error code.</returns>
+    public unsafe int Decode(ReadOnlySpan<byte> packet, Span<short> mono480)
+    {
+        if (mono480.Length < FrameSamples || packet.IsEmpty)
+        {
+            return -1;
+        }
+
+        fixed (byte* data = packet)
+        fixed (short* pcm = mono480)
+        {
+            return Decode(_decoder, data, packet.Length, pcm, FrameSamples, 0);
+        }
+    }
+
+    /// <summary>Packet loss concealment for one lost frame.</summary>
+    public unsafe int DecodePlc(Span<short> mono480)
+    {
+        if (mono480.Length < FrameSamples)
+        {
+            return -1;
+        }
+
+        fixed (short* pcm = mono480)
+        {
+            return Decode(_decoder, null, 0, pcm, FrameSamples, 0);
+        }
+    }
+
+    public void Dispose() => _decoder.Dispose();
+
+    private sealed class DecoderHandle() : SafeHandleZeroOrMinusOneIsInvalid(true)
+    {
+        public void Initialize(nint value) => SetHandle(value);
+
+        protected override bool ReleaseHandle()
+        {
+            Destroy(handle);
+            return true;
+        }
+    }
+
+    [LibraryImport("opus", EntryPoint = "opus_decoder_create")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory)]
+    private static partial nint Create(int rate, int channels, out int error);
+
+    [LibraryImport("opus", EntryPoint = "opus_decode")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory)]
+    private static unsafe partial int Decode(DecoderHandle decoder, byte* data, int length, short* pcm, int frameSize, int fec);
+
+    [LibraryImport("opus", EntryPoint = "opus_decoder_destroy")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory)]
+    private static partial void Destroy(nint decoder);
+}

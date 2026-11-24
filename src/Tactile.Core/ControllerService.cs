@@ -2,6 +2,9 @@ using Tactile.Device.DualSense;
 
 namespace Tactile.Core;
 
+/// <summary>One Bluetooth microphone frame of the primary controller; the span is valid only during the call.</summary>
+public delegate void PrimaryMicFrameHandler(byte sequence, ReadOnlySpan<byte> opus71);
+
 public sealed record ControllerSlot(int Index, DualSenseController Controller)
 {
     public string? Mac => Controller.Details.MacAddress;
@@ -39,6 +42,10 @@ public sealed class ControllerService : IDisposable
     /// <summary>True while one of our virtual pads is, or may be, attached.</summary>
     internal Func<bool>? VirtualPadMayBeActive { get; set; }
     private volatile OutputState _output = OutputState.Default;
+    // The controller whose microphone stream this service opened; guarded by _lock.
+    private DualSenseController? _micController;
+    // A controller whose mic-off is not confirmed yet (a failed write, or a primary swap); guarded by _lock, read lock-free.
+    private volatile DualSenseController? _micOffController;
 
     public ControllerService()
         : this(autoConnect: true)
@@ -81,6 +88,9 @@ public sealed class ControllerService : IDisposable
     public event Action<InputState>? Input;
     public event Action<ControllerSlot, InputState>? PrimaryInput;
 
+    /// <summary>Frames of the current primary only; a frame from any other controller is dropped.</summary>
+    public event PrimaryMicFrameHandler? PrimaryMicFrame;
+
     public event Action<ControllerSlot>? SlotConnected;
     public event Action<int>? SlotDisconnected;
     public event Action<int, InputState>? SlotInput;
@@ -114,6 +124,189 @@ public sealed class ControllerService : IDisposable
             ControllerSlot? slot = PrimarySlot;
             slot?.Controller.SendIfCurrent(_output, () => IsCurrent(slot));
         }
+    }
+
+    /// <summary>
+    /// Opens or closes the primary's microphone stream. Bluetooth DualSense and Edge only; a DualShock 4
+    /// or a USB link is refused. Closing works on whichever controller holds the stream, or still owes its off.
+    /// </summary>
+    /// <returns>True when the stream is open (for true) or closed and confirmed (for false).</returns>
+    internal bool SetMicStream(bool enabled)
+    {
+        lock (_lock)
+        {
+            if (!enabled)
+            {
+                return CloseMicLocked();
+            }
+
+            if (_disposed || _controller is not { Connected: true, Details: { Link: Link.Bluetooth, Model: not ControllerModel.DualShock4 } } c)
+            {
+                return false;
+            }
+
+            if (_micController is not null && !ReferenceEquals(_micController, c))
+            {
+                CloseMicOn(_micController);
+                _micController = null;
+            }
+
+            // A new open replaces an unconfirmed off of the same pad; another pad still gets its off.
+            if (_micOffController is { } stale)
+            {
+                if (ReferenceEquals(stale, c))
+                {
+                    _micOffController = null;
+                }
+                else
+                {
+                    CloseMicOn(stale);
+                }
+            }
+
+            _micController = c;
+            bool main = c.SetMicStream(true);
+            bool carried;
+            if (_haptics is { Running: true } streamer && ReferenceEquals(streamer.Controller, c))
+            {
+                // The running stream carries the flag in every report.
+                streamer.MicEnabled = true;
+                carried = true;
+            }
+            else
+            {
+                carried = c.WriteMicControl(true);
+            }
+
+            if (main && carried && c.MicStreamActive)
+            {
+                return true;
+            }
+
+            // Not really open: leave it closed, so the caller can back off and try again.
+            CloseMicLocked();
+            return false;
+        }
+    }
+
+    /// <summary>True while a controller still owes a confirmed mic-off; the bridge worker retries it.</summary>
+    internal bool MicOffPending => _micOffController is not null;
+
+    /// <summary>Writes an unconfirmed off of a controller that is no longer the mic's owner (the bridge worker retries it).</summary>
+    /// <returns>True when nothing is owed any more.</returns>
+    internal bool ConfirmMicOff()
+    {
+        lock (_lock)
+        {
+            return _micOffController is not { } stale || ReferenceEquals(stale, _micController) || CloseMicOn(stale);
+        }
+    }
+
+    private bool CloseMicLocked()
+    {
+        DualSenseController? current = _micController;
+        DualSenseController? stale = _micOffController;
+        _micController = null;
+        bool done = true;
+        if (stale is not null && !ReferenceEquals(stale, current))
+        {
+            done &= CloseMicOn(stale);
+        }
+
+        if (current is not null)
+        {
+            done &= CloseMicOn(current);
+        }
+
+        return done;
+    }
+
+    private bool CloseMicOn(DualSenseController c)
+    {
+        bool confirmed;
+        try
+        {
+            if (!c.Connected)
+            {
+                // Nothing can be written to a pad that is gone; only the flags are cleared.
+                DropMic(c);
+                return true;
+            }
+
+            // The stream that serves this controller (it may no longer be the primary) stops carrying mic-on first.
+            if (_haptics is { } streamer && ReferenceEquals(streamer.Controller, c))
+            {
+                streamer.DisableMic();
+            }
+
+            // The main report goes out without microphone bits, then the off control is the last mic report.
+            confirmed = c.ConfirmMicOff();
+        }
+        catch (Exception)
+        {
+            // Closing never throws.
+            confirmed = false;
+        }
+
+        if (confirmed)
+        {
+            if (ReferenceEquals(_micOffController, c))
+            {
+                _micOffController = null;
+            }
+        }
+        else
+        {
+            _micOffController = c;
+        }
+
+        return confirmed;
+    }
+
+    /// <summary>Forgets the mic of a controller without any HID write or wait. Needs _lock.</summary>
+    private void DropMic(DualSenseController c)
+    {
+        if (ReferenceEquals(_micController, c))
+        {
+            _micController = null;
+        }
+
+        if (ReferenceEquals(_micOffController, c))
+        {
+            _micOffController = null;
+        }
+
+        if (_haptics is { } streamer && ReferenceEquals(streamer.Controller, c))
+        {
+            streamer.MicEnabled = false;
+        }
+
+        c.ClearMicFlags(forget: true);
+    }
+
+    /// <summary>A primary swap: only the flags go; the bridge worker writes the off and waits for the stream.</summary>
+    private void DetachMicLocked()
+    {
+        DualSenseController? c = _micController;
+        _micController = null;
+        if (c is null)
+        {
+            return;
+        }
+
+        if (!c.Connected)
+        {
+            DropMic(c);
+            return;
+        }
+
+        if (_haptics is { } streamer && ReferenceEquals(streamer.Controller, c))
+        {
+            streamer.MicEnabled = false;
+        }
+
+        c.ClearMicFlags(forget: false);
+        _micOffController = c;
     }
 
     internal bool SetHapticSource(HapticBlockSource? source, byte bufferLength, SpeakerPacket speakerPacket)
@@ -201,6 +394,7 @@ public sealed class ControllerService : IDisposable
 
         lock (_lock)
         {
+            CloseMicLocked();
             ClearToneLocked();
             _hapticSource = null;
             StopHapticsLocked();
@@ -276,8 +470,18 @@ public sealed class ControllerService : IDisposable
 
     private void StopHapticsLocked()
     {
-        _haptics?.Dispose();
+        if (_haptics is null)
+        {
+            return;
+        }
+
+        _haptics.Dispose();
         _haptics = null;
+        // The stream carried the microphone flag; without it the controller needs the standalone report again.
+        if (!_disposed && _micController is { Connected: true } mic && ReferenceEquals(mic, _controller))
+        {
+            mic.WriteMicControl(true);
+        }
     }
 
     internal void ScanIfIdle()
@@ -423,6 +627,7 @@ public sealed class ControllerService : IDisposable
 
             controller.InputReceived += OnInput;
             controller.Disconnected += OnDisconnected;
+            controller.MicFrameReceived += OnMicFrame;
             after = ReplaceSlots(next.Append(new ControllerSlot(index, controller)));
         }
 
@@ -552,6 +757,11 @@ public sealed class ControllerService : IDisposable
                 return;
             }
 
+            if (_micController is not null && !ReferenceEquals(_micController, slot?.Controller))
+            {
+                DetachMicLocked();
+            }
+
             ClearToneLocked();
             StopHapticsLocked();
         }
@@ -644,8 +854,25 @@ public sealed class ControllerService : IDisposable
         }
     }
 
+    private void OnMicFrame(DualSenseController controller, byte sequence, ReadOnlySpan<byte> opus71)
+    {
+        if (PrimarySlot is { } slot && ReferenceEquals(slot.Controller, controller) && IsCurrent(slot))
+        {
+            PrimaryMicFrame?.Invoke(sequence, opus71);
+        }
+    }
+
     private void OnDisconnected(DualSenseController c)
     {
+        // This runs on the pad's reader thread: its mic is forgotten without a write or a wait.
+        lock (_lock)
+        {
+            if (ReferenceEquals(_micController, c) || ReferenceEquals(_micOffController, c))
+            {
+                DropMic(c);
+            }
+        }
+
         IReadOnlyList<ControllerSlot> before, after;
         lock (_topologyLock)
         {
@@ -673,5 +900,6 @@ public sealed class ControllerService : IDisposable
     {
         controller.InputReceived -= OnInput;
         controller.Disconnected -= OnDisconnected;
+        controller.MicFrameReceived -= OnMicFrame;
     }
 }

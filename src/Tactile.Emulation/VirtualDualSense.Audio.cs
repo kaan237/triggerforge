@@ -33,7 +33,7 @@ internal partial class VirtualDualSense
         """);
 
     internal sealed class WithAudio(UsbIpServer server, int busNum, DualSenseIdentity? identity)
-        : VirtualDualSense(server, busNum, identity, audio: true), IVirtualAudio
+        : VirtualDualSense(server, busNum, identity, audio: true), IVirtualAudio, IVirtualMic
     {
         private const int Speaker = 1;
         private const int Mic = 2;
@@ -42,9 +42,18 @@ internal partial class VirtualDualSense
         private readonly byte[] _mute = new byte[2];
         private readonly ushort[] _volume = [0x0000, 0x3000];
         private volatile int _alternates;
+        private volatile MicAudioReader? _micReader;
+        private int _micState;
 
         public bool SpeakerActive => Alternate(Speaker) == 1;
         public event GameAudioHandler? Audio;
+
+        public bool MicActive => Alternate(Mic) == 1;
+        public bool MicMuted => Volatile.Read(ref _mute[1]) != 0;
+        public ushort MicVolume => Volatile.Read(ref _volume[1]);
+        public event Action<bool>? MicActiveChanged;
+
+        public void SetMicReader(MicAudioReader? reader) => _micReader = reader;
 
         public static int IsoPacketSize(uint endpoint, uint direction) => (endpoint, direction) switch
         {
@@ -65,7 +74,7 @@ internal partial class VirtualDualSense
             Span<short> samples = stackalloc short[data.Length / bytesPerFrame * 4];
             // The device advertises hardware volume, so Windows leaves the PCM untouched and the
             // feature unit's mute/volume must be applied here (1/256 dB, -100..0 dB).
-            float gain = _mute[0] != 0 ? 0f : MathF.Pow(10f, (short)_volume[0] / 256f / 20f);
+            float gain = Volatile.Read(ref _mute[0]) != 0 ? 0f : MathF.Pow(10f, (short)Volatile.Read(ref _volume[0]) / 256f / 20f);
             for (int i = 0; i < samples.Length; i++)
             {
                 short raw = BinaryPrimitives.ReadInt16LittleEndian(data[(i * sizeof(short))..]);
@@ -77,19 +86,89 @@ internal partial class VirtualDualSense
 
         public int AudioIn(Span<byte> data)
         {
-            if (Alternate(Mic) == 0)
+            if (!MicActive)
             {
                 return 0;
             }
 
             int length = Math.Min(data.Length, MicPacketSize);
-            data[..length].Clear();
+            Span<byte> packet = data[..length];
+            packet.Clear();
+            // The reader always runs, muted or not, so the buffer behind it never piles up stale audio for the unmute.
+            MicAudioReader? reader = _micReader;
+            if (reader is null)
+            {
+                return length;
+            }
+
+            try
+            {
+                reader(packet);
+            }
+            catch (Exception)
+            {
+                packet.Clear();
+            }
+
+            if (MicMuted)
+            {
+                packet.Clear();
+            }
+            else
+            {
+                ApplyMicVolume(packet, MicVolume);
+            }
+
             return length;
+        }
+
+        /// <summary>
+        /// The volume is a signed 1/256 dB value with 0x3000 as the unity top: 0x8000 is silence, every step below
+        /// the top (a negative value included) attenuates, and the top or anything above it leaves the samples alone.
+        /// The microphone is never amplified.
+        /// </summary>
+        internal static void ApplyMicVolume(Span<byte> packet, ushort volume)
+        {
+            short level = (short)volume;
+            if (level == short.MinValue)
+            {
+                packet.Clear();
+                return;
+            }
+
+            if (level >= 0x3000)
+            {
+                return;
+            }
+
+            float gain = MathF.Pow(10f, (level - 0x3000) / 256f / 20f);
+            for (int i = 0; i + 1 < packet.Length; i += sizeof(short))
+            {
+                short raw = BinaryPrimitives.ReadInt16LittleEndian(packet[i..]);
+                BinaryPrimitives.WriteInt16LittleEndian(packet[i..], (short)(raw * gain));
+            }
         }
 
         private byte Alternate(int index) => (byte)((_alternates >> index) & 1);
 
-        protected override void ResetAlternates() => _alternates = 0;
+        protected override void ResetAlternates() => SetAlternates(0);
+
+        private void SetAlternates(int value)
+        {
+            _alternates = value;
+            bool active = MicActive;
+            if (Interlocked.Exchange(ref _micState, active ? 1 : 0) != (active ? 1 : 0))
+            {
+                try
+                {
+                    MicActiveChanged?.Invoke(active);
+                }
+                catch (Exception)
+                {
+                    // A faulty listener must not break the USB request that raised this.
+                }
+            }
+        }
 
         protected override ControlResult Standard(SetupPacket s)
         {
@@ -107,7 +186,7 @@ internal partial class VirtualDualSense
                     }
 
                     int mask = 1 << s.Index;
-                    _alternates = (_alternates & ~mask) | (s.Value << s.Index);
+                    SetAlternates((_alternates & ~mask) | (s.Value << s.Index));
                     return ControlResult.Ok();
                 case 0x09 when s.RequestType != 0x00 || s.Value > 1:
                     return ControlResult.Stall;
@@ -145,12 +224,12 @@ internal partial class VirtualDualSense
             {
                 if (s.RequestType == 0x21 && s.Request == 0x01 && data.Length == 1)
                 {
-                    _mute[slot] = data[0];
+                    Volatile.Write(ref _mute[slot], data[0]);
                     return ControlResult.Ok();
                 }
 
                 return s.RequestType == 0xA1 && s.Request == 0x81
-                    ? ControlResult.Ok([_mute[slot]])
+                    ? ControlResult.Ok([Volatile.Read(ref _mute[slot])])
                     : ControlResult.Stall;
             }
 
@@ -161,7 +240,7 @@ internal partial class VirtualDualSense
 
             if (s.RequestType == 0x21 && s.Request == 0x01 && data.Length == sizeof(ushort))
             {
-                _volume[slot] = BinaryPrimitives.ReadUInt16LittleEndian(data);
+                Volatile.Write(ref _volume[slot], BinaryPrimitives.ReadUInt16LittleEndian(data));
                 return ControlResult.Ok();
             }
 
@@ -172,7 +251,7 @@ internal partial class VirtualDualSense
 
             ushort value = s.Request switch
             {
-                0x81 => _volume[slot],
+                0x81 => Volatile.Read(ref _volume[slot]),
                 0x82 => unit == 2 ? (ushort)0x9C00 : (ushort)0,
                 0x83 => unit == 2 ? (ushort)0 : (ushort)0x3000,
                 _ => unit == 2 ? (ushort)0x0100 : (ushort)0x007A,

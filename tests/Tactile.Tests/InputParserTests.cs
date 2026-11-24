@@ -110,4 +110,61 @@ public class InputParserTests
         Assert.Equal("Jul  4 2025", fw.BuildDate);
         Assert.Equal("10:10:32", fw.BuildTime);
     }
+
+    [Fact]
+    public void Captured_state_reports_never_carry_the_mic_flag()
+    {
+        foreach (CaptureRecord r in Records.Where(r => r.Kind == CaptureKind.Input && r.Data.Length >= 78 && r.Data[0] == 0x31))
+        {
+            Assert.Equal(0, r.Data[1] & 0x02);
+        }
+    }
+
+    [Fact]
+    public void Bluetooth_mic_report_is_classified_before_crc_and_never_parsed_as_state()
+    {
+        foreach (byte flags in new byte[] { 0x02, 0x32 })
+        {
+            byte[] mic = new byte[78];
+            mic[0] = 0x31;
+            mic[1] = flags;
+            mic[2] = 0x5A;
+            for (int i = 0; i < 71; i++)
+            {
+                mic[3 + i] = (byte)(i + 1);
+            }
+
+            mic[74] = mic[75] = mic[76] = mic[77] = 0xEE;
+            Assert.Equal(ParseResult.MicAudio, InputParser.TryParse(mic, Link.Bluetooth, out InputState? state, micStream: true));
+            Assert.Null(state);
+            Assert.True(InputParser.TryParseMic(mic, out byte seq, out ReadOnlySpan<byte> opus));
+            Assert.Equal(0x5A, seq);
+            Assert.True(mic.AsSpan(3, 71).SequenceEqual(opus));
+        }
+
+        byte[] normal = Input(0).ToArray();
+        Assert.False(InputParser.TryParseMic(normal, out _, out _));
+        Assert.Equal(ParseResult.Ok, InputParser.TryParse(normal, Link.Bluetooth, out _));
+        normal[20] ^= 0xFF;
+        Assert.Equal(ParseResult.BadCrc, InputParser.TryParse(normal, Link.Bluetooth, out _));
+    }
+
+    [Fact]
+    public void Mic_bit_is_ignored_while_the_mic_stream_is_off_and_the_crc_path_is_unchanged()
+    {
+        byte[] mic = new byte[78];
+        mic[0] = 0x31;
+        mic[1] = 0x02;
+        mic[2] = 0x5A;
+        Assert.Equal(ParseResult.BadCrc, InputParser.TryParse(mic, Link.Bluetooth, out InputState? state));
+        Assert.Null(state);
+
+        // A valid state report that happens to carry the bit goes through the CRC as before.
+        byte[] flagged = Input(0).ToArray();
+        flagged[1] |= 0x02;
+        Crc32.Stamp(Crc32.InputSeed, flagged);
+        Assert.Equal(ParseResult.Ok, InputParser.TryParse(flagged, Link.Bluetooth, out state));
+        Assert.NotNull(state);
+        Assert.Equal(ParseResult.MicAudio, InputParser.TryParse(flagged, Link.Bluetooth, out _, micStream: true));
+    }
 }

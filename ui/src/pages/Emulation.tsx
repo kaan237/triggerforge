@@ -28,6 +28,10 @@ const overrideModes = (): { id: Exclude<EmulationMode, "auto">; label: string }[
   { id: "dualShock4", label: "DualShock 4" },
   { id: "off", label: L("Off", "Kapalı") },
 ];
+const micLabel: Record<NonNullable<EmulationStatus["mic"]>, string> = {
+  get off() { return L("Off", "Kapalı"); }, get ready() { return L("Ready", "Hazır"); },
+  get active() { return L("Active", "Etkin"); }, get muted() { return L("Muted", "Sessiz"); },
+};
 const audioLabel: Record<EmulationStatus["audio"], string> = { get off() { return L("Off", "Kapalı"); }, get ready() { return L("Ready", "Hazır"); }, get playing() { return L("Playing", "Oynatılıyor"); } };
 
 export function DriverCard({ driver }: { driver: DriverStatus }) {
@@ -61,7 +65,8 @@ export function DriverCard({ driver }: { driver: DriverStatus }) {
   );
 }
 
-function LiveStatus({ e }: { e: EmulationStatus }) {
+function LiveStatus({ e, showMic }: { e: EmulationStatus; showMic: boolean }) {
+  const mic = e.mic ?? "off";
   const latency = e.latency.samples > 0 ? `${e.latency.p50Ms.toFixed(1).replace(".", L(".", ","))} / ${e.latency.p95Ms.toFixed(1).replace(".", L(".", ","))} ms` : "—";
   return (
     <dl className="kv emu-kv">
@@ -79,6 +84,14 @@ function LiveStatus({ e }: { e: EmulationStatus }) {
       <dd>{e.hidden ? L("hidden from games", "oyunlardan gizli") : L("visible", "görünür")}</dd>
       <dt>{L("Audio interface", "Ses arayüzü")}</dt>
       <dd>{audioLabel[e.audio]}</dd>
+      {showMic && (
+        <>
+          <dt>{L("Microphone", "Mikrofon")}</dt>
+          <dd>
+            <span className={mic === "active" ? "dot live" : "dot"} aria-hidden /> {micLabel[mic]}
+          </dd>
+        </>
+      )}
       <dt>{L("Latency", "Gecikme")}</dt>
       <dd className="num" title={L("Time for game vibration and light updates to reach the controller, p50 / p95", "Oyunun gönderdiği titreşim ve ışığın kontrolcüye yazılması, p50 / p95")}>
         {latency}
@@ -193,7 +206,7 @@ function SystemPanel() {
   return (
     <div className="emu-side">
       <Section title={L("Status", "Durum")}>
-        {emulation ? <LiveStatus e={emulation} /> : <p className="hint">{L("Waiting…", "Bekleniyor…")}</p>}
+        {emulation ? <LiveStatus e={emulation} showMic={!ds4 && settings.emulation.audio} /> : <p className="hint">{L("Waiting…", "Bekleniyor…")}</p>}
         {emulation && emulation.slots.length > 1 && (
           <>
             <dl className="kv emu-kv">
@@ -256,6 +269,14 @@ function SystemPanel() {
           checked={s.keepAudioDefaults}
           onChange={(keepAudioDefaults) => save({ keepAudioDefaults })}
         />
+        {s.audio && (
+          <Toggle
+            label={L("Bluetooth microphone (experimental)", "Bluetooth mikrofonu (deneysel)")}
+            hint={L("Streams the primary Bluetooth DualSense microphone to Windows only while an app is recording. Off by default; nothing is saved to disk.", "Birincil Bluetooth DualSense mikrofonunu yalnız bir uygulama kayıt yaparken Windows'a aktarır. Varsayılan kapalıdır; diske hiçbir şey yazılmaz.")}
+            checked={s.bluetoothMic}
+            onChange={(bluetoothMic) => save({ bluetoothMic })}
+          />
+        )}
         <Slider label={L("Haptics buffer", "Haptik tamponu")} min={16} max={128} value={s.hapticBuffer} onChange={(hapticBuffer) => save({ hapticBuffer })} />
         <p className="hint">{L("For haptics only. Smaller buffers reduce delay and larger buffers prevent dropouts.", "Yalnız haptik akışında küçük tampon gecikmeyi, büyük tampon kesintileri azaltır.")}</p>
       </Section>}

@@ -202,7 +202,7 @@ export function defaultSettings(defaultProfileId = ""): AppSettings {
     updates: { autoCheck: true },
     osd: { enabled: false, corner: "topRight", durationSeconds: 2, size: "medium", opacity: 85 },
     firstRunDone: false,
-    emulation: { enabled: true, hideController: true, audio: true, keepAudioDefaults: true, hapticBuffer: 64, speakerPacket: "single36", gameModes: {} },
+    emulation: { enabled: true, hideController: true, audio: true, keepAudioDefaults: true, bluetoothMic: false, hapticBuffer: 64, speakerPacket: "single36", gameModes: {} },
     integration: {
       udpEnabled: false, udpPort: 6969, dsx: true, dsxPortFile: true,
       releaseAfterSeconds: 0, forzaEnabled: false, forzaPort: 5555,
@@ -614,6 +614,7 @@ function normalizeOsd(o: Partial<AppSettings["osd"]> | undefined, d: AppSettings
 export function normalizeSettings(s: Partial<AppSettings>): AppSettings {
   const d = defaultSettings();
   const emulation = { ...d.emulation, ...s.emulation, gameModes: normalizeGameModes(s.emulation?.gameModes) };
+  emulation.bluetoothMic = s.emulation?.bluetoothMic === true;
   if (emulation.speakerPacket !== "single36") emulation.speakerPacket = d.emulation.speakerPacket;
   const dsuPort = typeof s.integration?.dsuPort === "number" && Number.isFinite(s.integration.dsuPort) && s.integration.dsuPort > 0
     ? Math.min(65535, Math.max(1024, Math.trunc(s.integration.dsuPort))) : d.integration.dsuPort;

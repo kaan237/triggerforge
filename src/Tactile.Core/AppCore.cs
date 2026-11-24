@@ -88,6 +88,7 @@ public sealed class AppCore : IDisposable
     private TimeSpan? _confirmUntil;
 
     private readonly EmulationService? _emulation;
+    private readonly BluetoothMicBridge _micBridge;
     private readonly UdpApiServer _udpApi;
     private readonly TelemetryListener _telemetry;
     private readonly DsuServer _dsu;
@@ -112,7 +113,8 @@ public sealed class AppCore : IDisposable
     /// </param>
     internal AppCore(string? dataDir, IForegroundSource? foreground, ControllerService controllers, TimeProvider time, bool runTimer,
         InputPlatform? platform = null, DriverPlatform? drivers = null, IUsbIpServer? server = null, Func<bool>? steamRunning = null,
-        IAudioSystem? audio = null, IAudioDefaults? audioDefaults = null, bool portable = false, bool scanControllers = false)
+        IAudioSystem? audio = null, IAudioDefaults? audioDefaults = null, bool portable = false, bool scanControllers = false,
+        Func<IVirtualMic?>? virtualMic = null, Func<IMicDecoder>? micDecoder = null)
     {
         _time = time;
         _platform = platform ?? InputPlatform.None;
@@ -187,6 +189,11 @@ public sealed class AppCore : IDisposable
         Controllers.ConnectionChanged += OnConnection;
         ConfigureControllers();
         ConfigureIntegration();
+        _micBridge = new BluetoothMicBridge(Controllers, () => Settings.Current.Emulation, virtualMic ?? (() => _emulation?.VirtualMic),
+            SetOutputLayerNow, _outbox.Enqueue, () => _emulation?.NotifyMicChanged(), micDecoder, threaded: runTimer);
+        _emulation?.MicStatusSource = () => _micBridge.Status;
+        // The virtual pad appearing or going away is an input of the bridge as well.
+        _emulation?.PadChanged += _micBridge.Poke;
 
         if (runTimer)
         {
@@ -263,6 +270,8 @@ public sealed class AppCore : IDisposable
 
     /// <summary>Null when the driver layer could not start.</summary>
     public EmulationService? Emulation => _emulation;
+
+    internal EmulationMicStatus MicBridgeStatus => _micBridge.Status;
 
     /// <summary>
     /// Stops emulation for good: the master switch goes off, our pad is removed and everything
@@ -614,7 +623,7 @@ public sealed class AppCore : IDisposable
     {
         lock (_lock)
         {
-            _overrides.RemoveAll(kv => kv.Key is not (IntegrationLayers.Udp or IntegrationLayers.Telemetry));
+            _overrides.RemoveAll(kv => kv.Key is not (IntegrationLayers.Udp or IntegrationLayers.Telemetry or IntegrationLayers.MicLed));
             _speakerVolume = null;
         }
 
@@ -666,6 +675,9 @@ public sealed class AppCore : IDisposable
 
         // Stop receiving integration commands while output still works.
         Settings.Changed -= OnSettingsChanged;
+        // Closes the microphone stream while output still works.
+        _emulation?.PadChanged -= _micBridge.Poke;
+        _micBridge.Dispose();
         _udpApi.Dispose();
         _telemetry.Dispose();
         _dsu.Dispose();
@@ -827,7 +839,12 @@ public sealed class AppCore : IDisposable
 
         if (sleepMac is not null)
         {
-            _ = Task.Run(() => BluetoothLink.Disconnect(sleepMac));
+            _ = Task.Run(() =>
+            {
+                // The microphone stream is closed while the link still exists.
+                _micBridge?.Release(sleepMac);
+                BluetoothLink.Disconnect(sleepMac);
+            });
         }
 
         bool radialWasOpen = _radial.IsOpen;
@@ -839,6 +856,7 @@ public sealed class AppCore : IDisposable
 
         ApplyKeyboardRequest();
         DrainKeyboardEvents();
+        _micBridge?.Pump();
         Flush();
     }
 
@@ -1051,6 +1069,7 @@ public sealed class AppCore : IDisposable
         Vector3 gyro;
         Vector3 accel;
         EdgeShortcut? shortcut;
+        bool micPressed;
         lock (_lock)
         {
             if (_disposed || !ReferenceEquals(slot, Controllers.PrimarySlot))
@@ -1059,6 +1078,8 @@ public sealed class AppCore : IDisposable
             }
 
             firstInput = _latestInput is null;
+            // The raw button, before mapping, layers, pause or the keyboard see it.
+            micPressed = (s.Buttons & Buttons.Mic) != 0 && _latestInput is { } before && (before.Buttons & Buttons.Mic) == 0;
             shortcut = Settings.Current.EdgeShortcuts && slot is not null && _latestInput is { } previous
                 ? EdgeShortcuts.Read(slot.Controller.Details.Model, previous.Buttons, s.Buttons) : null;
             _latestInput = s;
@@ -1084,6 +1105,11 @@ public sealed class AppCore : IDisposable
         if (!ReferenceEquals(slot, Controllers.PrimarySlot))
         {
             return false;
+        }
+
+        if (micPressed)
+        {
+            _micBridge?.OnMicButton();
         }
 
         // While the keyboard is open it owns the controller: mapping, the virtual pad and motion output see a neutral one.
@@ -1285,6 +1311,7 @@ public sealed class AppCore : IDisposable
         Text.Current = Settings.Current.Language;
         _osk.SetLanguage(Settings.Current.Language);
         DrainKeyboardEvents();
+        _micBridge?.Poke();
         ConfigureControllers();
         ConfigureIntegration();
         Refresh();
@@ -1539,6 +1566,7 @@ public sealed class AppCore : IDisposable
 
     internal void OnConnection(DualSenseController? controller)
     {
+        _micBridge?.Poke();
         lock (_primaryInputLock)
         {
             ControllerSlot? slot = Controllers.PrimarySlot;

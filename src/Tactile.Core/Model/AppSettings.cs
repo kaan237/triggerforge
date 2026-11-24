@@ -84,6 +84,8 @@ public sealed record EmulationSettings
     public bool HideController { get; init; } = true;
     public bool Audio { get; init; } = true;
     public bool KeepAudioDefaults { get; init; } = true;
+    /// <summary>Experimental: forward the primary Bluetooth DualSense microphone to the virtual pad's microphone. Off by default.</summary>
+    public bool BluetoothMic { get; init; }
     public int HapticBuffer { get; init; } = 64;
     // 0x39 gave no sound on our controller in the 2026-11-19 hardware test; it stays an experimental option.
     public SpeakerPacket SpeakerPacket { get; init; } = SpeakerPacket.Single36;
@@ -94,11 +96,11 @@ public sealed record EmulationSettings
     // Compared by content, so equal settings stay equal across separately built dictionaries.
     public bool Equals(EmulationSettings? other) =>
         other is not null && Enabled == other.Enabled && HideController == other.HideController && Audio == other.Audio &&
-        KeepAudioDefaults == other.KeepAudioDefaults && HapticBuffer == other.HapticBuffer &&
+        KeepAudioDefaults == other.KeepAudioDefaults && BluetoothMic == other.BluetoothMic && HapticBuffer == other.HapticBuffer &&
         SpeakerPacket == other.SpeakerPacket && SameModes(GameModes, other.GameModes);
 
     public override int GetHashCode() =>
-        HashCode.Combine(Enabled, HideController, Audio, KeepAudioDefaults, HapticBuffer, SpeakerPacket, GameModes?.Count ?? 0);
+        HashCode.Combine(Enabled, HideController, Audio, KeepAudioDefaults, BluetoothMic, HapticBuffer, SpeakerPacket, GameModes?.Count ?? 0);
 
     private static bool SameModes(IReadOnlyDictionary<string, EmulationMode>? a, IReadOnlyDictionary<string, EmulationMode>? b)
     {

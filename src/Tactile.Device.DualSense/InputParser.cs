@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 
 namespace Tactile.Device.DualSense;
 
-public enum ParseResult { Ok, ReducedReport, BadCrc, Unknown }
+public enum ParseResult { Ok, ReducedReport, BadCrc, Unknown, MicAudio }
 
 /// <summary>Turns raw input reports into <see cref="InputState"/>. Layout: docs/protocol.md.</summary>
 public static class InputParser
@@ -16,7 +16,8 @@ public static class InputParser
         Buttons.Down, Buttons.Down | Buttons.Left, Buttons.Left, Buttons.Up | Buttons.Left,
     ];
 
-    public static ParseResult TryParse(ReadOnlySpan<byte> report, Link link, out InputState? state)
+    /// <param name="micStream">The controller's microphone stream is on; only then may a 0x31 report with bit 1 set be a microphone frame.</param>
+    public static ParseResult TryParse(ReadOnlySpan<byte> report, Link link, out InputState? state, bool micStream = false)
     {
         state = null;
         ReadOnlySpan<byte> block;
@@ -41,6 +42,13 @@ public static class InputParser
                 return ParseResult.Unknown;
             }
 
+            // Microphone frames replace the state block and carry no valid CRC: split them off first.
+            // With the stream off the bit is ignored, so input handling is exactly what it was before the feature.
+            if (micStream && (report[1] & 0x02) != 0)
+            {
+                return ParseResult.MicAudio;
+            }
+
             if (!Crc32.Verify(Crc32.InputSeed, report[..DualSenseIds.BluetoothInputReportLength]))
             {
                 return ParseResult.BadCrc;
@@ -51,6 +59,23 @@ public static class InputParser
 
         state = ParseState(block);
         return ParseResult.Ok;
+    }
+
+    public const int MicPacketLength = 71;
+
+    /// <summary>Extracts the 8-bit sequence counter and the 71-byte Opus frame of a Bluetooth microphone report.</summary>
+    public static bool TryParseMic(ReadOnlySpan<byte> report, out byte sequence, out ReadOnlySpan<byte> opus71)
+    {
+        sequence = 0;
+        opus71 = default;
+        if (report.Length < DualSenseIds.BluetoothInputReportLength || report[0] != 0x31 || (report[1] & 0x02) == 0)
+        {
+            return false;
+        }
+
+        sequence = report[2];
+        opus71 = report.Slice(3, MicPacketLength);
+        return true;
     }
 
     public static InputState ParseState(ReadOnlySpan<byte> s)
