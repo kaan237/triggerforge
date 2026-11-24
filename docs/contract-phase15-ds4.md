@@ -207,3 +207,5 @@ Two C# jobs + one UI job with **strictly disjoint file sets**. Job C runs in par
 - D11. **Dongle release.** The first unpaired report after input publishes one neutral state; every re-pair restarts the clock and re-reads calibration.
 - D12. **Bluetooth MAC.** Read from the HID serial string, with the path as fallback.
 - D13. `IDeviceTree.IsVirtual` throws when the device cannot be looked up.
+- D14. Implausible calibration falls back per axis, not per sensor: the remaining axes keep their calibrated values.
+- D15. A dongle opened without a paired pad has no MAC address for that session; the slot keeps the address it was accepted with.

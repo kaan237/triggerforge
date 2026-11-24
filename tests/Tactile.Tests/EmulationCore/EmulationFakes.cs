@@ -163,8 +163,14 @@ internal sealed class FakeVhci(List<string> log) : IVhci
 {
     public bool Fail { get; set; }
 
+    /// <summary>Runs inside Attach / Detach, so a test can look at the service while the call is in flight.</summary>
+    public Action? DuringAttach { get; set; }
+
+    public Action? DuringDetach { get; set; }
+
     public int Attach(int tcpPort, string busId)
     {
+        DuringAttach?.Invoke();
         if (Fail)
         {
             log.Add($"attach failed {busId}");
@@ -175,7 +181,11 @@ internal sealed class FakeVhci(List<string> log) : IVhci
         return 3;
     }
 
-    public void Detach(int hubPort) => log.Add($"detach {hubPort}");
+    public void Detach(int hubPort)
+    {
+        DuringDetach?.Invoke();
+        log.Add($"detach {hubPort}");
+    }
 }
 
 internal sealed class FakeHider(List<string> log) : IDeviceHider

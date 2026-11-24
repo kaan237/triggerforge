@@ -44,7 +44,7 @@ public sealed class DualSenseController : IDisposable
     {
         _device = device;
         DevicePath = device.Info.Path;
-        Details = details;
+        _details = details;
         Features = features;
         _dongle = dongle;
         _writeBuffer = new byte[Math.Max(device.Info.OutputReportLength, HapticReport.SpeakerDoubleLength)];
@@ -54,13 +54,19 @@ public sealed class DualSenseController : IDisposable
     internal DualSenseController(string path, ControllerDetails details, Action<OutputState> observeOutput)
     {
         DevicePath = path;
-        Details = details;
+        _details = details;
         Features = new(null, null, null);
         _observeOutput = observeOutput;
         _writeBuffer = [];
     }
 
-    public ControllerDetails Details { get; private set; }
+    private volatile ControllerDetails _details;
+
+    public ControllerDetails Details
+    {
+        get => _details;
+        private set => _details = value;
+    }
 
     /// <summary>Feature reports read at open, in USB form (what a virtual DualSense answers with).</summary>
     public UsbFeatureReports Features { get; }
@@ -411,8 +417,16 @@ public sealed class DualSenseController : IDisposable
                     if (step == DongleStep.Resume)
                     {
                         // A different controller may have paired: restart the clock and read its calibration.
-                        clock = default;
-                        ReloadDongleCalibration(device);
+                        // The clock keeps counting up (DSU timestamps must not jump back); only the old sample is forgotten.
+                        clock.Restart();
+                        // Pad B must never use pad A's values while its own calibration is not readable yet.
+                        Details = Details with { Calibration = ImuCalibration.DualShock4Nominal };
+                    }
+
+                    if (step is DongleStep.Resume or DongleStep.Pass && pairing.ShouldReadCalibration() &&
+                        ReloadDongleCalibration(device))
+                    {
+                        pairing.CalibrationRead();
                     }
                 }
 
@@ -441,7 +455,7 @@ public sealed class DualSenseController : IDisposable
         PublishDisconnect();
     }
 
-    private void ReloadDongleCalibration(HidDevice device)
+    private bool ReloadDongleCalibration(HidDevice device)
     {
         try
         {
@@ -449,11 +463,14 @@ public sealed class DualSenseController : IDisposable
             if (feature is not null && !ImuCalibration.IsBlank(feature))
             {
                 Details = Details with { Calibration = ImuCalibration.ParseDualShock4(feature, grouped: true) };
+                return true;
             }
         }
         catch (Exception e) when (e is IOException or ObjectDisposedException)
         {
         }
+
+        return false;
     }
 
     internal void PublishInput(InputState state)

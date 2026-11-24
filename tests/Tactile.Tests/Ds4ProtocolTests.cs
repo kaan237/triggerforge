@@ -245,8 +245,11 @@ public class Ds4ProtocolTests
             PlayerLeds = 3,
             MicLed = MicLed.On,
             SpeakerVolume = 1,
-            LeftTrigger = TriggerEffect.Off,
+            LeftTrigger = TriggerEffect.Feedback(2, 5),
+            RightTrigger = TriggerEffect.Vibration(1, 3, 40),
         }));
+        Assert.NotEqual(TriggerEffect.Off, TriggerEffect.Feedback(2, 5));
+        Assert.NotEqual(TriggerEffect.Off, TriggerEffect.Vibration(1, 3, 40));
         Assert.False(Ds4OutputReport.SameEffect(state, state with { RumbleLeft = 8 }));
         Assert.False(Ds4OutputReport.SameEffect(state, null));
     }
@@ -339,6 +342,193 @@ public class Ds4ProtocolTests
         var fresh = new DonglePairing();
         Assert.Equal(DongleStep.Drop, fresh.Next(true));
         Assert.Equal(DongleStep.Resume, fresh.Next(false));
+    }
+
+    private static byte[] BtWith(byte[] usb, byte id, byte flags)
+    {
+        byte[] r = BtReport(usb);
+        r[0] = id;
+        r[1] = flags;
+        Crc32.Stamp(Crc32.InputSeed, r);
+        return r;
+    }
+
+    [Fact]
+    public void Bluetooth_report_ids_flag_and_rejected_reports_leave_the_clock_alone()
+    {
+        byte[] usb = UsbReport();
+        foreach (byte id in new byte[] { 0x11, 0x12, 0x19 })
+        {
+            var clock = default(Ds4Timestamp);
+            Assert.Equal(ParseResult.Ok, Ds4InputParser.TryParse(BtWith(usb, id, 0xC0), Link.Bluetooth, ref clock, out _));
+        }
+
+        BinaryPrimitives.WriteUInt16LittleEndian(usb.AsSpan(10), 0x2000);
+        var rejectedClock = default(Ds4Timestamp);
+        byte[][] rejected =
+        [
+            BtWith(usb, 0x10, 0xC0),
+            BtWith(usb, 0x1A, 0xC0),
+            BtWith(usb, 0x11, 0x40),
+            BtWith(usb, 0x11, 0x00),
+        ];
+        foreach (byte[] report in rejected)
+        {
+            Assert.Equal(ParseResult.Unknown, Ds4InputParser.TryParse(report, Link.Bluetooth, ref rejectedClock, out InputState? none));
+            Assert.Null(none);
+        }
+
+        byte[] badCrc = BtWith(usb, 0x11, 0xC0);
+        badCrc[10] ^= 0xFF;
+        Assert.Equal(ParseResult.BadCrc, Ds4InputParser.TryParse(badCrc, Link.Bluetooth, ref rejectedClock, out _));
+        Assert.Equal(ParseResult.ReducedReport, Ds4InputParser.TryParse(new byte[] { 1, 0, 0, 0 }, Link.Bluetooth, ref rejectedClock, out _));
+        usb[31] |= 0x04;
+        Assert.Equal(ParseResult.Unknown, Ds4InputParser.TryParse(usb, Link.Usb, ref rejectedClock, out _, dongle: true));
+
+        // None of the above started the clock: the first accepted report still reads its raw value.
+        Assert.Equal(ParseResult.Ok, Ds4InputParser.TryParse(UsbReport(), Link.Usb, ref rejectedClock, out InputState? accepted));
+        Assert.Equal(0x1234u << 4, accepted!.SensorTimestamp);
+    }
+
+    [Fact]
+    public void Second_finger_is_read_and_the_newest_of_four_bluetooth_touch_packets_wins()
+    {
+        byte[] usb = UsbReport();
+        WriteTouch(usb.AsSpan(34 + 9 + 5), active: true, id: 3, x: 100, y: 200);
+        var clock = default(Ds4Timestamp);
+        Ds4InputParser.TryParse(usb, Link.Usb, ref clock, out InputState? u);
+        Assert.Equal(new TouchPoint(true, 2, 1900, 940), u!.Touch1);
+        Assert.Equal(new TouchPoint(true, 3, 100, 200), u.Touch2);
+
+        foreach (byte count in new byte[] { 4, 9 })
+        {
+            byte[] bt = BtReport(UsbReport());
+            bt[35] = count;
+            for (int k = 0; k < 4; k++)
+            {
+                WriteTouch(bt.AsSpan(37 + k * 9), active: true, id: 10 + k, x: 100 * (k + 1), y: 50 * (k + 1));
+                WriteTouch(bt.AsSpan(41 + k * 9), active: true, id: 20 + k, x: 7 * (k + 1), y: 9 * (k + 1));
+            }
+
+            Crc32.Stamp(Crc32.InputSeed, bt);
+            var btClock = default(Ds4Timestamp);
+            Assert.Equal(ParseResult.Ok, Ds4InputParser.TryParse(bt, Link.Bluetooth, ref btClock, out InputState? b));
+            Assert.Equal(new TouchPoint(true, 13, 400, 200), b!.Touch1);
+            Assert.Equal(new TouchPoint(true, 23, 28, 36), b.Touch2);
+        }
+    }
+
+    [Fact]
+    public void Implausible_calibration_fields_fall_back_to_nominal_values()
+    {
+        Vector3 gyro = new(160, 160, 160);
+        Vector3 accel = new(8192, 8192, 8192);
+
+        void ExpectNominalGyro(byte[] f)
+        {
+            Vector3 deg = ImuCalibration.ParseDualShock4(f, false).GyroDegPerSec(gyro);
+            Assert.Equal(10f, deg.X, 0.001f);
+            Assert.Equal(10f, deg.Y, 0.001f);
+            Assert.Equal(10f, deg.Z, 0.001f);
+        }
+
+        void Set(byte[] f, int offset, short value) => BinaryPrimitives.WriteInt16LittleEndian(f.AsSpan(offset), value);
+
+        // Control: the plain feature report is accepted (scale 1080/16000, not nominal).
+        Assert.Equal(160f * 0.0675f, ImuCalibration.ParseDualShock4(Feature(0x02, 37, false, false), false).GyroDegPerSec(gyro).X, 0.01f);
+
+        byte[] bias = Feature(0x02, 37, false, false);
+        for (int axis = 0; axis < 3; axis++)
+        {
+            Set(bias, 1 + axis * 2, 1025);
+        }
+
+        ExpectNominalGyro(bias);
+
+        byte[] wide = Feature(0x02, 37, false, false);
+        Set(wide, 19, 2000);
+        Set(wide, 21, 2000);
+        ExpectNominalGyro(wide);
+
+        byte[] narrow = Feature(0x02, 37, false, false);
+        Set(narrow, 19, 200);
+        Set(narrow, 21, 200);
+        ExpectNominalGyro(narrow);
+
+        byte[] noSpeed = Feature(0x02, 37, false, false);
+        Set(noSpeed, 19, 0);
+        Set(noSpeed, 21, -5);
+        ExpectNominalGyro(noSpeed);
+
+        // Accelerometer: a range far from 16384 counts or a centre beyond +/-1024 keeps the nominal axis.
+        byte[] tight = Feature(0x02, 37, false, false);
+        Set(tight, 23, 100);
+        Set(tight, 25, -100);
+        Assert.Equal(1f, ImuCalibration.ParseDualShock4(tight, false).AccelG(accel).X, 0.001f);
+
+        byte[] off = Feature(0x02, 37, false, false);
+        Set(off, 27, 10192);
+        Set(off, 29, -6192);
+        Assert.Equal(1f, ImuCalibration.ParseDualShock4(off, false).AccelG(accel).Y, 0.001f);
+
+        byte[] centred = Feature(0x02, 37, false, false);
+        Set(centred, 31, 8292);
+        Set(centred, 33, -8092);
+        Assert.Equal((8192 - 100) / 8192f, ImuCalibration.ParseDualShock4(centred, false).AccelG(accel).Z, 0.001f);
+    }
+
+    [Fact]
+    public void Dongle_calibration_is_retried_a_limited_number_of_times_per_pairing()
+    {
+        var p = new DonglePairing();
+        Assert.False(p.ShouldReadCalibration());
+        Assert.Equal(DongleStep.Resume, p.Next(false));
+
+        var readAt = new List<int>();
+        for (int call = 1; call <= 20_000; call++)
+        {
+            if (p.ShouldReadCalibration())
+            {
+                readAt.Add(call);
+            }
+
+            Assert.Equal(DongleStep.Pass, p.Next(false));
+        }
+
+        Assert.Equal(DonglePairing.CalibrationMaxRounds, readAt.Count);
+        Assert.Equal(1, readAt[0]);
+        for (int i = 1; i < readAt.Count; i++)
+        {
+            Assert.Equal(DonglePairing.CalibrationRetryReports, readAt[i] - readAt[i - 1]);
+        }
+
+        // Success stops the retries.
+        var q = new DonglePairing();
+        q.Next(false);
+        Assert.True(q.ShouldReadCalibration());
+        q.CalibrationRead();
+        for (int i = 0; i < 2000; i++)
+        {
+            q.Next(false);
+            Assert.False(q.ShouldReadCalibration());
+        }
+
+        // A new pairing starts over, right away.
+        q.Next(true);
+        Assert.Equal(DongleStep.Resume, q.Next(false));
+        Assert.True(q.ShouldReadCalibration());
+    }
+
+    [Fact]
+    public void Restarting_the_sensor_clock_keeps_the_accumulated_time_monotonic()
+    {
+        var clock = default(Ds4Timestamp);
+        uint first = clock.Next(0xFFF0);
+        uint second = clock.Next(0x0010);
+        clock.Restart();
+        Assert.Equal(second, clock.Next(0x0100));
+        Assert.Equal(second + 0x20 * 16, clock.Next(0x0120));
+        Assert.True(second > first);
     }
 
     [Fact]

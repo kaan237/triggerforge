@@ -6,6 +6,7 @@ namespace Tactile.Device.DualSense;
 public struct Ds4Timestamp
 {
     private bool _started;
+    private bool _hasPrevious;
     private ushort _previous;
     private uint _accumulated;
 
@@ -16,14 +17,18 @@ public struct Ds4Timestamp
             _started = true;
             _accumulated = (uint)raw << 4;
         }
-        else
+        else if (_hasPrevious)
         {
             _accumulated = unchecked(_accumulated + ((uint)(ushort)(raw - _previous) << 4));
         }
 
         _previous = raw;
+        _hasPrevious = true;
         return _accumulated;
     }
+
+    /// <summary>Forgets only the previous 16-bit sample (a new sensor clock follows); the accumulated clock keeps counting up.</summary>
+    public void Restart() => _hasPrevious = false;
 }
 
 /// <summary>What the reader does with one wireless adaptor report.</summary>
@@ -47,6 +52,14 @@ public struct DonglePairing
 {
     private bool _awaitingPair;
     private bool _gotInput;
+    private bool _calibrationPending;
+    private int _calibrationRounds;
+    private int _reportsSinceTry;
+
+    /// <summary>Reports between two calibration reads after a pairing.</summary>
+    public const int CalibrationRetryReports = 250;
+    /// <summary>Most calibration reads per pairing.</summary>
+    public const int CalibrationMaxRounds = 8;
 
     public DonglePairing()
     {
@@ -64,10 +77,46 @@ public struct DonglePairing
         }
 
         bool resume = _awaitingPair;
+        if (resume)
+        {
+            _calibrationPending = true;
+            _calibrationRounds = 0;
+            _reportsSinceTry = 0;
+        }
+
         _awaitingPair = false;
         _gotInput = true;
         return resume ? DongleStep.Resume : DongleStep.Pass;
     }
+
+    /// <summary>
+    /// Call once per accepted report: true when calibration should be read now (right at the pairing, then about
+    /// every <see cref="CalibrationRetryReports"/> reports, at most <see cref="CalibrationMaxRounds"/> times) until
+    /// <see cref="CalibrationRead"/> reports success.
+    /// </summary>
+    public bool ShouldReadCalibration()
+    {
+        if (!_calibrationPending)
+        {
+            return false;
+        }
+
+        if (_calibrationRounds > 0 && ++_reportsSinceTry < CalibrationRetryReports)
+        {
+            return false;
+        }
+
+        _reportsSinceTry = 0;
+        if (++_calibrationRounds >= CalibrationMaxRounds)
+        {
+            _calibrationPending = false;
+        }
+
+        return true;
+    }
+
+    /// <summary>A read found real calibration: stop retrying.</summary>
+    public void CalibrationRead() => _calibrationPending = false;
 }
 
 /// <summary>Turns DualShock 4 input reports (USB 0x01, Bluetooth 0x11..0x19) into <see cref="InputState"/>.</summary>

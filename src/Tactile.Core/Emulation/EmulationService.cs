@@ -113,7 +113,10 @@ public sealed partial class EmulationService : IDisposable
     private int _hubPort;
     private string? _padPath;
     private volatile string? _hiddenId;
-    private string? _hiddenPath;
+    private volatile string? _hiddenPath;
+    // Attach/detach in progress (any thread may read); and when the last detach ended, so MayHavePad stays true a moment.
+    private int _transitions;
+    private long _lastDetachTicks = -1;
     private volatile LocalizedMessage? _hideError;
     private bool _hideTried;
     private bool _unhideFailNoticed;
@@ -196,7 +199,7 @@ public sealed partial class EmulationService : IDisposable
         {
             lock (_stateLock)
             {
-                if (_pad is not null || _hiddenPath is not null ||
+                if (_pad is not null || _hiddenPath is not null || Volatile.Read(ref _transitions) > 0 || DetachedRecently() ||
                     _wanted is { Settings.Enabled: true, ConfiguredMode: not EmulationMode.Off })
                 {
                     return true;
@@ -205,6 +208,12 @@ public sealed partial class EmulationService : IDisposable
 
             return SecondarySlots().Any(slot => slot.MayHavePad);
         }
+    }
+
+    private bool DetachedRecently()
+    {
+        long last = Interlocked.Read(ref _lastDetachTicks);
+        return last >= 0 && _clock().Ticks - last < DetachGrace.Ticks;
     }
 
     internal IVirtualAudio? VirtualAudio => _route is { IsCurrent: true } route && ReferenceEquals(route.Pad, _pad)
@@ -590,7 +599,22 @@ public sealed partial class EmulationService : IDisposable
         };
     }
 
+    private static readonly TimeSpan DetachGrace = TimeSpan.FromSeconds(3);
+
     private void Start(VirtualKind kind, Wanted w, RealController controller)
+    {
+        Interlocked.Increment(ref _transitions);
+        try
+        {
+            StartCore(kind, w, controller);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _transitions);
+        }
+    }
+
+    private void StartCore(VirtualKind kind, Wanted w, RealController controller)
     {
         Func<bool>? primaryCurrent = null;
         if (_slotIndex == 0 && _controllers is { } controllers)
@@ -813,6 +837,26 @@ public sealed partial class EmulationService : IDisposable
 
     /// <summary>Unhide, detach, remove. True when every step worked (or nothing was attached).</summary>
     private bool StopLocked()
+    {
+        Interlocked.Increment(ref _transitions);
+        try
+        {
+            bool hadPad = _pad is not null;
+            bool clean = StopCore();
+            if (hadPad)
+            {
+                Interlocked.Exchange(ref _lastDetachTicks, _clock().Ticks);
+            }
+
+            return clean;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _transitions);
+        }
+    }
+
+    private bool StopCore()
     {
         _audioDefaultsToRestore = null;
         _hideError = null;

@@ -498,6 +498,14 @@ Yol haritası `docs/yol-haritasi.md` (Faz 10-15), dayanağı `docs/rakip-analizi
 - Denetim: ilk incelemede 15 bulgu, hepsi düzeltildi; tekrar denetimi yapıldı.
 - Denenmeyenler (KH listesi `docs/contract-phase14.md` §7B): gerçek masaüstünde OSD ve klavye pencereleri, oyun üstünde görünürlük, canlı katalogdan içe aktarma.
 
+### Faz 15.3 — Fiziksel DualShock 4 → 1.6.0 (2026-11-24)
+
+**Faz 15.3 sonucu**
+- Sözleşme `docs/contract-phase15-ds4.md` (bölüm 9 kararları D1-D15). DS4 v1, v2 ve Sony USB adaptörü ikinci kontrolcü ailesi: giriş, gyro, dokunmatik, ışık, titreşim, atama, sanal pad, HidHide, DSU, çoklu kontrolcü.
+- DS4'te olmayanlar (uyarlanabilir tetik, haptik, hoparlör, oyuncu ve mikrofon LED'leri) çıkışta atlanıyor, arayüzde gizli; profil değerleri değişmiyor.
+- Denetim: incelemede 8, bağımsız denetimde 15 bulgu (çoğu ortak). En önemlileri: Bluetooth DS4 rapor boyu 547 olduğu için hiç bulunmuyordu; gyro sapması iki kez uygulanıyordu; adaptörde kontrolcü kapanınca tuşlar takılı kalıyordu; sanal DS4 koruması hata durumunda çalışmıyordu. Hepsi düzeltildi; iki madde bilerek bırakıldı (D14, D15).
+- Donanımda denenmedi (KH listesi sözleşme §7; DS4 gerekir).
+
 ### Faz 9 — Yedek yol: Pico 2 W köprü (isteğe bağlı)
 
 Faz 5b gecikmesi kabul edilemezse veya anti-cheat yazılım yolunu engellerse: Pico 2 W firmware'i ile gerçek USB DualSense görünümü; uygulama aynı UI ve profil motoruyla Pico'yu yönetir. Referans: DS5Dongle (MIT).

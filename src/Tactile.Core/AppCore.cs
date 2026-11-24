@@ -777,8 +777,9 @@ public sealed class AppCore : IDisposable
         {
             if (!_disposed)
             {
-                Link? link = Controllers.Controller is { Connected: true } connected ? connected.Details.Link : null;
-                bool supported = Controllers.Controller?.Details.Model != ControllerModel.DualShock4;
+                var current = Controllers.Controller;
+                Link? link = current is { Connected: true } connected ? connected.Details.Link : null;
+                bool supported = current?.Details.Model != ControllerModel.DualShock4;
                 _haptics.Configure(ActiveProfile.Haptics, link, _emulation?.VirtualAudio, supported);
             }
         }

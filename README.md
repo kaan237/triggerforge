@@ -18,7 +18,7 @@ available in English and Turkish, with English selected for new installations.
 ### Requirements
 
 - Windows 10 version 1809 or later, or Windows 11, on an x64 PC.
-- A DualSense controller connected by Bluetooth or USB. Bluetooth is required for Bluetooth audio features.
+- A DualSense, DualSense Edge or DualShock 4 connected by Bluetooth or USB. Bluetooth is required for Bluetooth audio features. Adaptive triggers, haptics and player LEDs need a DualSense. DualShock 4 support has not been tested on hardware yet.
 - [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
 - Virtual controller mode requires usbip-win2 and HidHide. Install them from the app when needed.
 
@@ -79,7 +79,7 @@ ve Türkçe kullanılabilir. Yeni kurulumlar İngilizce başlar.
 ### Gereksinimler
 
 - x64 bilgisayarda Windows 10 sürüm 1809 veya üzeri ya da Windows 11.
-- Bluetooth veya USB ile bağlı bir DualSense. Bluetooth ses özellikleri için Bluetooth bağlantısı gerekir.
+- Bluetooth veya USB ile bağlı bir DualSense, DualSense Edge ya da DualShock 4. Bluetooth ses özellikleri için Bluetooth bağlantısı gerekir. Uyarlanabilir tetikler, haptik ve oyuncu LED'leri DualSense ister. DualShock 4 desteği henüz donanımda denenmedi.
 - [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
 - Sanal kontrolcü modu usbip-win2 ve HidHide gerektirir. Gerektiğinde sürücüleri uygulama içinden kurun.
 
