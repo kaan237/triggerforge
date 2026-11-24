@@ -10,9 +10,11 @@ internal sealed class DeviceTree : IDeviceTree
 
     public bool IsVirtual(string hidDevicePath)
     {
-        string? id = InstanceId(hidDevicePath);
-        if (id is null || Native.CM_Locate_DevNode(out uint node, id, Native.CmLocateDevnodeNormal) != Native.CrSuccess)
-            return false;
+        // A failed query says nothing about the device, so it must not read as "not virtual".
+        string id = InstanceId(hidDevicePath)
+            ?? throw new InvalidOperationException("The device instance id of the HID path is unknown.");
+        if (Native.CM_Locate_DevNode(out uint node, id, Native.CmLocateDevnodeNormal) != Native.CrSuccess)
+            throw new InvalidOperationException("The device node of the HID path was not found.");
         for (int depth = 0; depth < 32 && Native.CM_Get_Parent(out uint parent, node, 0) == Native.CrSuccess; depth++)
         {
             node = parent;

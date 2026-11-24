@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using Tactile.Device.DualSense;
+using Tactile.Emulation;
 
 namespace Tactile.Tests;
 
@@ -132,7 +133,9 @@ public class Ds4ProtocolTests
         Assert.Equal(new Battery(45, ChargeState.Charging), Read(0x14));
         Assert.Equal(new Battery(100, ChargeState.Charging), Read(0x1A));
         Assert.Equal(new Battery(100, ChargeState.Full), Read(0x1B));
-        Assert.Equal(new Battery(0, ChargeState.Discharging), Read(0x1D));
+        Assert.Equal(new Battery(0, ChargeState.Error), Read(0x1C));
+        Assert.Equal(new Battery(0, ChargeState.Error), Read(0x1D));
+        Assert.Equal(new Battery(0, ChargeState.Error), Read(0x1F));
         Assert.Equal(new Battery(100, ChargeState.Discharging), Read(0x0B));
     }
 
@@ -195,19 +198,19 @@ public class Ds4ProtocolTests
 
         byte[] bad = Feature(0x05, 41, true, true);
         bad[10] ^= 0x01;
-        Assert.Same(ImuCalibration.Identity, ImuCalibration.ParseDualShock4(bad, true));
-        Assert.Same(ImuCalibration.Identity, ImuCalibration.ParseDualShock4(new byte[10], false));
+        Assert.Same(ImuCalibration.DualShock4Nominal, ImuCalibration.ParseDualShock4(bad, true));
+        Assert.Same(ImuCalibration.DualShock4Nominal, ImuCalibration.ParseDualShock4(new byte[10], false));
     }
 
     [Fact]
-    public void Implausible_axis_falls_back_to_identity_values()
+    public void Implausible_axis_falls_back_to_nominal_values()
     {
         byte[] f = Feature(0x02, 37, false, false);
         BinaryPrimitives.WriteInt16LittleEndian(f.AsSpan(11), 0);
         BinaryPrimitives.WriteInt16LittleEndian(f.AsSpan(13), 0);
         ImuCalibration cal = ImuCalibration.ParseDualShock4(f, false);
         Assert.Equal(540f, cal.GyroDegPerSec(new Vector3(8000, 0, 0)).X, 0.5f);
-        Assert.Equal(1f / 1024f * 100, cal.GyroDegPerSec(new Vector3(0, 100, 0)).Y, 0.001f);
+        Assert.Equal(100f / 16f, cal.GyroDegPerSec(new Vector3(0, 100, 0)).Y, 0.001f);
         Assert.True(ImuCalibration.IsBlank(new byte[37]));
     }
 
@@ -253,6 +256,137 @@ public class Ds4ProtocolTests
     {
         Assert.True(DualSenseIds.IsDualShock4(ControllerModel.DualShock4));
         Assert.False(DualSenseIds.IsDualShock4(ControllerModel.DualSense));
+    }
+
+    [Theory]
+    [InlineData(DualSenseIds.DualSenseProductId, 64, ControllerModel.DualSense, Link.Usb)]
+    [InlineData(DualSenseIds.DualSenseProductId, 78, ControllerModel.DualSense, Link.Bluetooth)]
+    [InlineData(DualSenseIds.DualSenseEdgeProductId, 78, ControllerModel.DualSenseEdge, Link.Bluetooth)]
+    [InlineData(DualSenseIds.DualShock4V1ProductId, 64, ControllerModel.DualShock4, Link.Usb)]
+    [InlineData(DualSenseIds.DualShock4V2ProductId, 78, ControllerModel.DualShock4, Link.Bluetooth)]
+    [InlineData(DualSenseIds.DualShock4V2ProductId, 547, ControllerModel.DualShock4, Link.Bluetooth)]
+    [InlineData(DualSenseIds.DualShock4DongleProductId, 64, ControllerModel.DualShock4, Link.Usb)]
+    public void Classifies_model_and_link_from_product_id_and_report_length(ushort productId, int length, ControllerModel model, Link link)
+    {
+        Assert.Equal((model, link), DualSenseIds.Classify(productId, length));
+    }
+
+    [Theory]
+    [InlineData(DualSenseIds.DualSenseProductId, 547)]
+    [InlineData(DualSenseIds.DualSenseProductId, 65)]
+    [InlineData(DualSenseIds.DualSenseEdgeProductId, 547)]
+    [InlineData(DualSenseIds.DualShock4V1ProductId, 77)]
+    [InlineData(DualSenseIds.DualShock4V2ProductId, 0)]
+    [InlineData(DualSenseIds.DualShock4DongleProductId, 78)]
+    [InlineData(DualSenseIds.DualShock4DongleProductId, 547)]
+    [InlineData((ushort)0x1234, 64)]
+    public void Rejects_unknown_products_and_lengths(ushort productId, int length)
+    {
+        Assert.Null(DualSenseIds.Classify(productId, length));
+    }
+
+    [Fact]
+    public void Bluetooth_ds4_report_read_into_a_547_byte_buffer_parses()
+    {
+        byte[] padded = new byte[547];
+        BtReport(UsbReport()).CopyTo(padded, 0);
+        var clock = default(Ds4Timestamp);
+        Assert.Equal(ParseResult.Ok, Ds4InputParser.TryParse(padded.AsSpan(0, 547), Link.Bluetooth, ref clock, out InputState? s));
+        Check(s!);
+    }
+
+    [Fact]
+    public void Gyro_bias_is_not_subtracted_but_still_centres_the_span()
+    {
+        byte[] f = Feature(0x02, 37, false, false);
+        BinaryPrimitives.WriteInt16LittleEndian(f.AsSpan(1), 100);
+        ImuCalibration cal = ImuCalibration.ParseDualShock4(f, false);
+        Assert.Equal(0f, cal.GyroDegPerSec(new Vector3(0, 0, 0)).X, 0.001f);
+        Assert.Equal(540f, cal.GyroDegPerSec(new Vector3(8000, 0, 0)).X, 0.5f);
+
+        // A bias beyond +/-1024 is rejected; the axis keeps the nominal scale.
+        BinaryPrimitives.WriteInt16LittleEndian(f.AsSpan(1), 2000);
+        Assert.Equal(160f / 16f, ImuCalibration.ParseDualShock4(f, false).GyroDegPerSec(new Vector3(160, 0, 0)).X, 0.001f);
+    }
+
+    [Fact]
+    public void Missing_ds4_calibration_uses_ds4_scales_and_identity_is_unchanged()
+    {
+        var raw = new Vector3(160, 160, 160);
+        Assert.Equal(10f, ImuCalibration.DualShock4Nominal.GyroDegPerSec(raw).Y, 0.001f);
+        Assert.Equal(1f, ImuCalibration.DualShock4Nominal.AccelG(new Vector3(8192, 0, 0)).X, 0.001f);
+        Assert.Same(ImuCalibration.DualShock4Nominal, ImuCalibration.ParseDualShock4(default, false));
+
+        byte[] shortUsb = Feature(0x02, 37, false, false)[..30];
+        Assert.Same(ImuCalibration.DualShock4Nominal, ImuCalibration.ParseDualShock4(shortUsb, false));
+        Assert.Equal(160f / 1024f, ImuCalibration.Identity.GyroDegPerSec(raw).Y, 0.001f);
+    }
+
+    [Fact]
+    public void Dongle_pairing_resumes_on_every_pair_and_releases_once_on_unpair()
+    {
+        var p = new DonglePairing();
+        Assert.Equal(DongleStep.Resume, p.Next(false));
+        Assert.Equal(DongleStep.Pass, p.Next(false));
+        Assert.Equal(DongleStep.DropAndRelease, p.Next(true));
+        Assert.Equal(DongleStep.Drop, p.Next(true));
+        Assert.Equal(DongleStep.Drop, p.Next(true));
+        Assert.Equal(DongleStep.Resume, p.Next(false));
+        Assert.Equal(DongleStep.Pass, p.Next(false));
+        Assert.Equal(DongleStep.DropAndRelease, p.Next(true));
+
+        // Unpaired from the start: nothing was held, so nothing to release.
+        var fresh = new DonglePairing();
+        Assert.Equal(DongleStep.Drop, fresh.Next(true));
+        Assert.Equal(DongleStep.Resume, fresh.Next(false));
+    }
+
+    [Fact]
+    public void Neutral_state_centres_sticks_releases_everything_and_keeps_battery()
+    {
+        var clock = default(Ds4Timestamp);
+        Ds4InputParser.TryParse(UsbReport(), Link.Usb, ref clock, out InputState? held);
+        InputState neutral = Ds4InputParser.Neutral(held);
+        Assert.Equal(Buttons.None, neutral.Buttons);
+        Assert.Equal(new Stick(128, 128), neutral.Left);
+        Assert.Equal(new Stick(128, 128), neutral.Right);
+        Assert.Equal((byte)0, neutral.L2);
+        Assert.Equal((byte)0, neutral.R2);
+        Assert.False(neutral.Touch1.Active);
+        Assert.False(neutral.Touch2.Active);
+        Assert.Equal(held!.Battery, neutral.Battery);
+        Assert.Equal(held.SensorTimestamp, neutral.SensorTimestamp);
+        Assert.Equal(ChargeState.Discharging, Ds4InputParser.Neutral(null).Battery.Charge);
+    }
+
+    [Theory]
+    [InlineData("AA:BB:CC:DD:EE:FF", "AA:BB:CC:DD:EE:FF")]
+    [InlineData("aa-bb-cc-dd-ee-ff", "AA:BB:CC:DD:EE:FF")]
+    [InlineData("a0b1c2d3e4f5", "A0:B1:C2:D3:E4:F5")]
+    [InlineData(" 00:11:22:33:44:55 ", "00:11:22:33:44:55")]
+    [InlineData("000000000000", null)]
+    [InlineData("00:00:00:00:00:00", null)]
+    [InlineData("AA:BB:CC:DD:EE", null)]
+    [InlineData("AA:BB:CC:DD:EE:GG", null)]
+    [InlineData("AABBCCDDEEFF00", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void Parses_the_bluetooth_address_from_the_hid_serial(string? serial, string? expected)
+    {
+        Assert.Equal(expected, DualSenseController.MacFromSerial(serial));
+    }
+
+    [Fact]
+    public void Battery_error_is_passed_on_to_the_virtual_ds4_as_a_level_above_eleven()
+    {
+        var clock = default(Ds4Timestamp);
+        byte[] usb = UsbReport();
+        usb[30] = 0x1D;
+        Ds4InputParser.TryParse(usb, Link.Usb, ref clock, out InputState? s);
+        byte[] report = new byte[64];
+        VirtualDualShock4.WriteInput(s!, 0, report);
+        Assert.Equal(0x0F, report[30] & 0x0F);
+        Assert.Equal(0x10, report[30] & 0x10);
     }
 
     [Fact]

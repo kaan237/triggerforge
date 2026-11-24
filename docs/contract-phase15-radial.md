@@ -137,3 +137,18 @@ Job C runs in parallel with Jobs A and B; Job B runs after Job A.
 - **Risk — Frame-0 stick leak on opening frame into `DsuServer` or `EmulationService`**: mitigated by neutralizing the claimed stick immediately on open inside `Mapper.OnInput` and before `EmulationService.OnInput` / `DsuServer.PublishInput` in `AppCore.ProcessPrimaryInput`. (Note: if `DsuServer.PublishInput` stays at `AppCore.cs:977` before `Mapper.OnInput`, frame 0 is un-neutralized for 1 report (~2–4 ms); moving the DSU publish call after post-mapper neutralization eliminates even that 1-frame leak.)
 - **Risk — Exclusive fullscreen visibility**: DWM layered overlays may not appear over true exclusive fullscreen games (same documented limitation as `docs/contract-phase14.md:77`).
 - **Rollback**: remove `SpecialAction.RadialMenu` dispatch in `ActionDispatcher` and hide the `"Radial menus"` tab; existing `version: 1` profiles remain valid with zero migration impact.
+
+---
+
+## 9. Review decisions (binding; they override the text above)
+
+Line numbers above predate 1.5.0: locate code by symbol.
+
+- R1. **Ownership and locks.** `AppCore` owns the `RadialMenuController` the way it owns the on-screen keyboard. State changes are queued and raised through the same ordered-event drain as the keyboard, never while `Mapper._gate`, `_mappingLock` or `_primaryInputLock` is held. A cancel that comes from the mapping side never takes `_primaryInputLock`: it sets an atomic flag, and the next primary input frame applies the button hold mask. If the pad disconnects first, the flag is cleared with the rest of the input state.
+- R2. **Where `radialMenu` is allowed.** Only as the plain press action of a button binding (base layer or shift layer). Everywhere else (stick ring and stick directions, swipes, touch zones, trigger stages, hold/double/triple, chords, cycle steps, slices, Edge shortcuts) validation replaces it with `None` and reports it. Validation also turns off turbo and toggle on a binding whose press is `radialMenu`, and removes hold/double/triple there, so press never becomes a delayed tap. `ActionDispatcher.Tap` ignores `radialMenu`. `Down` returns `null` when the id is unknown or another menu is open, so that button's `Up` can never close or fire the open menu.
+- R3. **Stick release.** Opening cancels a running flick/sweep and stick-held keys of that stick; the flick stick gets the neutral stick too. After the menu closes (commit or cancel, closing frame included) that stick stays neutral for mapping, flick, emulation and DSU until it returns to the centre (`r < 0.25`) once. Disconnect clears it.
+- R4. **DSU order.** `PublishDsu` moves after `_mapper.OnInput` and the neutralization, so the opening frame is neutral too. The keyboard's DSU behaviour stays as it is.
+- R5. **Files.** Job C may also edit `ui/src/pages/MappingTabs.tsx`; `normalizeBinding` in `ui/src/model.ts` drops references to deleted menus. Job B covers `TactileApp.Exit` and `DisposeOverlays`.
+- R6. **Window.** `CreateEllipticRgn`, the same fixed alpha as the on-screen keyboard window. A slice with an empty label shows its number (1-8); an unassigned slice is dimmed and does nothing.
+- R7. **Slices tap.** A macro set to repeat while held runs as a tap (30 ms); the editor hint says that slices are taps.
+- R8. `ActionDispatcher.SetTime(now)` is called after `Mapper` has resolved its own clock.

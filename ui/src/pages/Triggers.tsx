@@ -1,4 +1,4 @@
-import { L } from "../i18n";
+import { L, isDs4 } from "../i18n";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { CurvePlot } from "../CurvePlot";
 import { send, type TriggerConfig, type TriggerMode, type TriggerResponse } from "../host";
@@ -248,10 +248,12 @@ function ResponseEditor({ value, onChange, raw }: { value: TriggerResponse; onCh
 }
 
 export function Triggers() {
-  const { draft, edit } = useApp();
+  const { draft, edit, status } = useApp();
   const input = useInput();
   const [side, setSide] = useState<Side>("right");
-  const [trying, setTrying] = useState(false);
+  const [tryingRaw, setTrying] = useState(false);
+  const ds4 = isDs4(status);
+  const trying = tryingRaw && !ds4;
 
   const cfg = draft?.triggers[side];
 
@@ -283,21 +285,29 @@ export function Triggers() {
               {(["left", "right"] as Side[]).map((s) => (
                 <button key={s} role="tab" aria-selected={side === s} className={side === s ? "on" : ""} onClick={() => setSide(s)}>
                   <span className="side-name">{s === "left" ? "L2" : "R2"}</span>
-                  <span className="side-mode">{modeDef(draft.triggers[s].mode).label}</span>
+                  {!ds4 && <span className="side-mode">{modeDef(draft.triggers[s].mode).label}</span>}
                 </button>
               ))}
             </div>
-            <TriggerModeSelect config={cfg} onChange={setCfg} />
-            <span className="spacer" />
-            <button className={trying ? "button try on" : "button try"} aria-pressed={trying} onClick={() => setTrying(!trying)}>
-              <span className="try-dot" aria-hidden />
-              {trying ? L("Testing", "Deneniyor") : L("Test", "Dene")}
-            </button>
+            {!ds4 && (
+              <>
+                <TriggerModeSelect config={cfg} onChange={setCfg} />
+                <span className="spacer" />
+                <button className={trying ? "button try on" : "button try"} aria-pressed={trying} onClick={() => setTrying(!trying)}>
+                  <span className="try-dot" aria-hidden />
+                  {trying ? L("Testing", "Deneniyor") : L("Test", "Dene")}
+                </button>
+              </>
+            )}
           </div>
 
-          <section className="panel graph-panel">
-            <TriggerEffectEditor config={cfg} onChange={setCfg} raw={raw} />
-          </section>
+          {ds4 ? (
+            <p className="hint">{L("Adaptive trigger effects are DualSense-only. The analog response below still applies to this DualShock 4.", "Uyarlanabilir tetik efektleri yalnız DualSense'te vardır. Aşağıdaki analog tepki bu DualShock 4 için de geçerlidir.")}</p>
+          ) : (
+            <section className="panel graph-panel">
+              <TriggerEffectEditor config={cfg} onChange={setCfg} raw={raw} />
+            </section>
+          )}
 
           <section className="panel">
             <div className="panel-head">
@@ -308,7 +318,7 @@ export function Triggers() {
           </section>
         </div>
 
-        <aside className="presets">
+        {!ds4 && <aside className="presets">
           <h2>{L("Presets", "Hazır ayarlar")}</h2>
           <ul>
             {presets.map((pr) => {
@@ -329,7 +339,7 @@ export function Triggers() {
               {L("Reset zones", "Bölgeleri sıfırla")}
             </button>
           )}
-        </aside>
+        </aside>}
       </div>
     </div>
   );

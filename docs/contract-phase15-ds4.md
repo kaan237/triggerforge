@@ -201,3 +201,9 @@ Two C# jobs + one UI job with **strictly disjoint file sets**. Job C runs in par
 - D5. **Bluetooth activation.** Read feature `0x05`; also send one `0x11` output report (`0xC0`, flags `0x07`) at open.
 - D6. `VirtualDualShock4` already uses the paired USB order since 1.4.0.
 - D7. Profiles keep all DualSense-only values; nothing is rewritten because a DS4 is connected.
+- D8. **Bluetooth length.** Windows reports the largest input report (547 bytes) for a Bluetooth DS4, so any length of 78 or more is Bluetooth for `05C4`/`09CC`.
+- D9. **Gyro bias.** The firmware applies the bias; the field only centres the range (`span = |plus-bias| + |minus-bias|`, sample bias 0). This replaces the bias subtraction implied above.
+- D10. **Fallback scale.** Missing or implausible calibration uses the DS4 nominal scale (1/16 deg/s, 1/8192 g per count), not `Identity`.
+- D11. **Dongle release.** The first unpaired report after input publishes one neutral state; every re-pair restarts the clock and re-reads calibration.
+- D12. **Bluetooth MAC.** Read from the HID serial string, with the path as fallback.
+- D13. `IDeviceTree.IsVirtual` throws when the device cannot be looked up.

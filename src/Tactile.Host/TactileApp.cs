@@ -439,7 +439,7 @@ internal sealed partial class TactileApp : ApplicationContext
     {
         DualSenseController? c = _core.Controllers.Controller;
         string? name = c is null ? null : $"{ModelName(c.Details.Model)} · {c.Details.Link}";
-        _tray.SetStatus(name, _battery?.Percent, _battery is { Charge: not ChargeState.Discharging },
+        _tray.SetStatus(name, _battery?.Percent, _battery is { Charge: ChargeState.Charging or ChargeState.Full },
             _core.Mapping.Paused, _core.UserMappingPaused);
     }
 

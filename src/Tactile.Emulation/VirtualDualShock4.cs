@@ -120,7 +120,13 @@ internal sealed class VirtualDualShock4 : VirtualUsbDevice
         VirtualDualSense.WriteVector(report[13..], s.GyroRaw);
         VirtualDualSense.WriteVector(report[19..], s.AccelRaw);
 
-        int level = s.Battery.Charge == ChargeState.Full ? 11 : Math.Clamp(s.Battery.Percent / 10, 0, 10);
+        // With the cable bit a level of 12..15 is the DualShock 4's own error indication.
+        int level = s.Battery.Charge switch
+        {
+            ChargeState.Full => 11,
+            ChargeState.Error => 15,
+            _ => Math.Clamp(s.Battery.Percent / 10, 0, 10),
+        };
         report[30] = (byte)(level | 0x10 | (s.HeadphoneConnected ? 0x20 : 0) | (s.MicConnected ? 0x40 : 0));
         report[33] = 1;
         WriteSequence(report, sequence);

@@ -77,6 +77,20 @@ public sealed class HidDevice : IDisposable
     /// <summary>Reads a feature report; <paramref name="buffer"/>[0] must hold the report id.</summary>
     public bool TryGetFeature(byte[] buffer) => Native.HidD_GetFeature(_writeHandle, buffer, buffer.Length);
 
+    /// <summary>The device's serial number string (a Bluetooth DualShock 4 reports its address here), or null.</summary>
+    public string? TryGetSerial()
+    {
+        byte[] buffer = new byte[256];
+        if (!Native.HidD_GetSerialNumberString(_writeHandle, buffer, buffer.Length))
+        {
+            return null;
+        }
+
+        string text = System.Text.Encoding.Unicode.GetString(buffer);
+        int end = text.IndexOf('\0');
+        return end < 0 ? text : text[..end];
+    }
+
     public void Dispose()
     {
         _writer.Dispose();

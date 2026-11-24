@@ -176,6 +176,14 @@ public class DriverPureTests
     }
 
     [Fact]
+    public void Virtual_check_throws_when_the_device_cannot_be_looked_up()
+    {
+        var tree = new DeviceTree();
+        Assert.Throws<InvalidOperationException>(() => tree.IsVirtual(""));
+        Assert.Throws<InvalidOperationException>(() => tree.IsVirtual(@"\\?\HID#VID_FFFF&PID_FFFF#9&nosuchdevice&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}"));
+    }
+
+    [Fact]
     public void Vhci_node_matches_by_instance_prefix_or_hardware_id()
     {
         Assert.True(DeviceTree.IsVhciNode(@"ROOT\USB\0000", [@"ROOT\USBIP_WIN2\UDE"]));

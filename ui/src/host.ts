@@ -490,7 +490,7 @@ export type ExportShare = { type: "exportShare"; id: string; fileName: string; j
 export type ControllerStatus = {
   index: number;
   mac: string | null;
-  model: "DualSense" | "DualSenseEdge";
+  model: "DualSense" | "DualSenseEdge" | "DualShock4";
   link: "Bluetooth" | "Usb";
   battery: number | null;
   charging: boolean;

@@ -19,5 +19,11 @@ export function L(en: string, tr: string): string {
 
 /** Display name for a controller model id from the host ("DualSenseEdge" → "DualSense Edge"). */
 export function modelName(model: string | null | undefined): string {
+  if (model === "DualShock4") return "DualShock 4";
   return model === "DualSenseEdge" ? "DualSense Edge" : model ?? "DualSense";
+}
+
+/** True when the connected primary controller is a DualShock 4 (no adaptive trigger effects, haptics, player/mic LEDs). */
+export function isDs4(status: { connected: boolean; model?: string } | null | undefined): boolean {
+  return !!status?.connected && status.model === "DualShock4";
 }

@@ -931,7 +931,7 @@ internal sealed class Bridge : IDisposable
             accel = new[] { accel.X, accel.Y, accel.Z },
             touch = new[] { s.Touch1, s.Touch2 }.Where(p => p.Active).Select(p => new { id = p.Id, x = p.X, y = p.Y }),
             battery = s.Battery.Percent,
-            charging = s.Battery.Charge != ChargeState.Discharging,
+            charging = s.Battery.Charge is ChargeState.Charging or ChargeState.Full,
             headphones = s.HeadphoneConnected,
             reports = stats.Reports,
             badCrc = stats.BadCrc,

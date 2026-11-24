@@ -1,4 +1,4 @@
-import { L, locale, modelName } from "../i18n";
+import { L, isDs4, locale, modelName } from "../i18n";
 import { ControllerDrawing } from "../ControllerDrawing";
 import { send, type ControllerStatus, type Profile } from "../host";
 import { EdgeButtons } from "../Live";
@@ -49,6 +49,7 @@ export function Overview() {
   const controllers = status?.controllers ?? [];
   const primaryMissing = !connected && controllers.length > 0;
   const edge = connected && status?.model === "DualSenseEdge";
+  const ds4 = isDs4(status);
   const active = profiles.find((p) => p.id === activeId);
 
   return (
@@ -132,18 +133,22 @@ export function Overview() {
                   {effectLabel(active.lightbar.effect)}
                   <span className="faint"> · {brightnessLabel[active.lightbar.brightness].toLowerCase()}</span>
                 </dd>
-                <dt>L2</dt>
-                <dd>{triggerSummary(active.triggers.left)}</dd>
-                <dt>R2</dt>
-                <dd>{triggerSummary(active.triggers.right)}</dd>
-                <dt>{L("Player", "Oyuncu")}</dt>
-                <dd>
-                  <span className="mini-leds">
-                    {[0, 1, 2, 3, 4].map((i) => (
-                      <span key={i} className={(ledMask(active.playerLeds) >> i) & 1 ? "on" : ""} />
-                    ))}
-                  </span>
-                </dd>
+                {!ds4 && (
+                  <>
+                    <dt>L2</dt>
+                    <dd>{triggerSummary(active.triggers.left)}</dd>
+                    <dt>R2</dt>
+                    <dd>{triggerSummary(active.triggers.right)}</dd>
+                    <dt>{L("Player", "Oyuncu")}</dt>
+                    <dd>
+                      <span className="mini-leds">
+                        {[0, 1, 2, 3, 4].map((i) => (
+                          <span key={i} className={(ledMask(active.playerLeds) >> i) & 1 ? "on" : ""} />
+                        ))}
+                      </span>
+                    </dd>
+                  </>
+                )}
                 <dt>{L("Stick", "Analog")}</dt>
                 <dd className="num">
                   {(() => {

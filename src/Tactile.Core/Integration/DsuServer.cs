@@ -539,6 +539,7 @@ internal sealed class DsuServer(Func<TimeSpan> now, Action<Notice> report) : IDi
     {
         ChargeState.Full => 0xEF,
         ChargeState.Charging => 0xEE,
+        ChargeState.Error => 0,
         _ => (byte)Math.Clamp(1 + battery.Percent * 4 / 100, 1, 5),
     };
 

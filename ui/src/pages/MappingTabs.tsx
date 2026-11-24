@@ -1,4 +1,4 @@
-import { L } from "../i18n";
+import { L, isDs4 } from "../i18n";
 import { useState } from "react";
 import type { Binding, ButtonName, Direction, FlickStickConfig, GyroMouse, Profile, StickMapping, TouchpadMapping } from "../host";
 import { ActionEditor, BindingEditor, KeyField } from "../MappingEditors";
@@ -19,7 +19,8 @@ const zoneNames = { get halves() { return [L("Left half", "Sol yarı"), L("Right
 
 function PadDiagram({ tp, selected, onSelect }: { tp: TouchpadMapping; selected: number; onSelect: (i: number) => void }) {
   const input = useInput();
-  const { profiles, draft } = useApp();
+  const { profiles, draft, status } = useApp();
+  const padHeight = isDs4(status) ? 942 : 1080;
   const W = 192;
   const H = 108;
   const quad = tp.zoneLayout === "quadrants";
@@ -44,7 +45,7 @@ function PadDiagram({ tp, selected, onSelect }: { tp: TouchpadMapping; selected:
           </text>
         </g>
       ))}
-      {input?.touch.map((t) => <circle key={t.id} cx={(t.x / 1920) * W} cy={(t.y / 1080) * H} r="3.5" className="finger" />)}
+      {input?.touch.map((t) => <circle key={t.id} cx={(t.x / 1920) * W} cy={(t.y / padHeight) * H} r="3.5" className="finger" />)}
     </svg>
   );
 }

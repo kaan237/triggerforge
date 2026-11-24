@@ -69,7 +69,7 @@ export function EdgeButtons({ input }: { input: Input | null }) {
   );
 }
 
-export function Live({ input, edge = false }: { input: Input | null; edge?: boolean }) {
+export function Live({ input, edge = false, ds4 = false }: { input: Input | null; edge?: boolean; ds4?: boolean }) {
   if (!input) {
     return <div className="panel live muted-text">{L("Waiting for input…", "Veri bekleniyor…")}</div>;
   }
@@ -103,9 +103,9 @@ export function Live({ input, edge = false }: { input: Input | null; edge?: bool
       </div>
 
       <div className="chips">
-        {strip.map((b) => (
+        {strip.filter((b) => !(ds4 && b === "Mic")).map((b) => (
           <span key={b} className={down.has(b) ? "chip on" : "chip"}>
-            {b}
+            {ds4 && b === "Create" ? "Share" : b}
           </span>
         ))}
       </div>
@@ -115,7 +115,7 @@ export function Live({ input, edge = false }: { input: Input | null; edge?: bool
       <div className="live-row bottom">
         <div className="touchpad" aria-label={L("Touchpad", "Dokunmatik yüzey")}>
           {input.touch.map((t) => (
-            <span key={t.id} className="finger" style={{ left: `${(t.x / 1920) * 100}%`, top: `${(t.y / 1080) * 100}%` }} />
+            <span key={t.id} className="finger" style={{ left: `${(t.x / 1920) * 100}%`, top: `${(t.y / (ds4 ? 942 : 1080)) * 100}%` }} />
           ))}
         </div>
 

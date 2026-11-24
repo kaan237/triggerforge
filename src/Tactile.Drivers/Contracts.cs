@@ -76,7 +76,10 @@ public interface IRecovery
 /// <summary>Device tree helpers (SetupAPI / cfgmgr32).</summary>
 public interface IDeviceTree
 {
-    /// <summary>True if the HID device path belongs to a device under the usbip-win2 VHCI.</summary>
+    /// <summary>
+    /// True if the HID device path belongs to a device under the usbip-win2 VHCI.
+    /// Throws <see cref="InvalidOperationException"/> when the device cannot be looked up.
+    /// </summary>
     bool IsVirtual(string hidDevicePath);
 
     /// <summary>Device instance id for a HID device path (what HidHide's blacklist takes), or null.</summary>

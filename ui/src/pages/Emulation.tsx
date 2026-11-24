@@ -1,4 +1,4 @@
-import { L } from "../i18n";
+import { L, isDs4 } from "../i18n";
 import { Fragment, useEffect, useState } from "react";
 import { send, type ButtonName, type DriverKind, type DriverState, type DriverStatus, type EmulationConfig, type EmulationMode, type EmulationStatus, type GyroStickConfig } from "../host";
 import { buttonDefs, buttonLabel, gyroModes } from "../mapping";
@@ -182,8 +182,9 @@ function GameOverrides() {
 }
 
 function SystemPanel() {
-  const { emulation, settings } = useApp();
+  const { emulation, settings, status } = useApp();
   if (!settings) return null;
+  const ds4 = isDs4(status);
   const s = settings.emulation;
   const save = (patch: Partial<typeof s>) => send({ type: "settings.save", settings: { ...settings, emulation: { ...s, ...patch } } });
   const unavailable = emulation?.available === false;
@@ -242,7 +243,7 @@ function SystemPanel() {
         </div>
       </Section>
 
-      <Section title={L("Audio and haptics", "Ses ve haptik akışı")}>
+      {!ds4 && <Section title={L("Audio and haptics", "Ses ve haptik akışı")}>
         <Toggle
           label={L("Audio interface (game haptics and speaker)", "Ses arayüzü (oyun haptiği ve hoparlörü)")}
           hint={L("Changing this reconnects the virtual DualSense.", "Bu ayar değiştiğinde sanal DualSense çıkarılıp yeniden takılır.")}
@@ -257,7 +258,7 @@ function SystemPanel() {
         />
         <Slider label={L("Haptics buffer", "Haptik tamponu")} min={16} max={128} value={s.hapticBuffer} onChange={(hapticBuffer) => save({ hapticBuffer })} />
         <p className="hint">{L("For haptics only. Smaller buffers reduce delay and larger buffers prevent dropouts.", "Yalnız haptik akışında küçük tampon gecikmeyi, büyük tampon kesintileri azaltır.")}</p>
-      </Section>
+      </Section>}
 
       <GameOverrides />
 
@@ -350,7 +351,9 @@ function ProfilePanel() {
   const setGyro = (patch: Partial<GyroStickConfig>) => set({ gyroStick: { ...g, ...patch } });
   const needsButton = g.mode === "whileHeld" || g.mode === "whileReleased" || g.mode === "toggle";
   const times = (v: number) => `${fixed(1)(v)}×`;
-  const usb = status?.connected && status.link === "Usb";
+  const ds4 = isDs4(status);
+  // A wired DualShock 4 is not seen as a DualSense by games, so DualSense mode stays available over USB.
+  const usb = status?.connected && status.link === "Usb" && !ds4;
 
   return (
     <div className="emu-main">
@@ -375,6 +378,9 @@ function ProfilePanel() {
         </div>
         {usb && (
           <p className="hint emu-note">{L("Games already see your USB controller as a wired DualSense. DualSense mode requires Bluetooth. Xbox 360 and DualShock 4 modes work over either connection.", "Kontrolcü USB ile bağlı; oyunlar onu zaten kablolu DualSense olarak görür. DualSense kipi yalnız Bluetooth'ta çalışır, Xbox 360 ve DualShock 4 kipleri her iki bağlantıda da çalışır.")}</p>
+        )}
+        {ds4 && status?.link === "Usb" && (
+          <p className="hint emu-note">{L("Your wired DualShock 4 can appear as any virtual controller type. DualSense mode is HID-only: no audio, haptics, or adaptive triggers.", "Kablolu DualShock 4 her sanal kontrolcü türü olarak görünebilir. DualSense kipi yalnız HID'dir: ses, haptik ve uyarlanabilir tetik yoktur.")}</p>
         )}
         {c.mode === "auto" && (
           <p className="hint emu-note">

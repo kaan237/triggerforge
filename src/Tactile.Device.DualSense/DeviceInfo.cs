@@ -14,11 +14,14 @@ public sealed class ImuCalibration
 
     public static ImuCalibration Identity { get; } = new();
 
-    private ImuCalibration()
+    /// <summary>DualShock 4 values without a calibration report: 1/16 deg/s and 1/8192 g per count.</summary>
+    public static ImuCalibration DualShock4Nominal { get; } = new(Ds4GyroNominal);
+
+    private ImuCalibration(float gyroScale = 1f / GyroResolution)
     {
         for (int i = 0; i < 3; i++)
         {
-            _gyro[i] = (0, 1f / GyroResolution);
+            _gyro[i] = (0, gyroScale);
             _accel[i] = (0, 1f / AccelResolution);
         }
     }
@@ -86,37 +89,37 @@ public sealed class ImuCalibration
     /// DualShock 4 calibration: feature 0x02 (USB, 37 bytes, no CRC) or 0x05 (Bluetooth, 41 bytes, CRC).
     /// <paramref name="grouped"/> selects the gyro range layout: pitch+, yaw+, roll+, pitch-, yaw-, roll-
     /// (Bluetooth and the wireless adaptor) instead of pitch+, pitch-, yaw+, yaw-, roll+, roll-.
-    /// Bad input gives <see cref="Identity"/>; an implausible axis falls back to identity values alone.
+    /// Bad input gives <see cref="DualShock4Nominal"/>; an implausible axis falls back to the nominal values alone.
     /// </summary>
     public static ImuCalibration ParseDualShock4(ReadOnlySpan<byte> feature, bool grouped)
     {
         if (feature.IsEmpty)
         {
-            return Identity;
+            return DualShock4Nominal;
         }
 
         if (feature[0] == 0x02)
         {
             if (feature.Length < 37)
             {
-                return Identity;
+                return DualShock4Nominal;
             }
         }
         else if (feature[0] == 0x05)
         {
             if (feature.Length < 41 || !Crc32.Verify(Crc32.FeatureSeed, feature[..41]))
             {
-                return Identity;
+                return DualShock4Nominal;
             }
         }
         else
         {
-            return Identity;
+            return DualShock4Nominal;
         }
 
         byte[] data = feature.ToArray();
         short R(int offset) => BinaryPrimitives.ReadInt16LittleEndian(data.AsSpan(offset));
-        var c = new ImuCalibration();
+        var c = new ImuCalibration(Ds4GyroNominal);
 
         (int Plus, int Minus)[] gyroRange = grouped
             ? [(R(7), R(13)), (R(9), R(15)), (R(11), R(17))]
@@ -125,7 +128,8 @@ public sealed class ImuCalibration
         for (int i = 0; i < 3; i++)
         {
             int bias = R(1 + i * 2);
-            int span = Math.Abs(gyroRange[i].Plus - gyroRange[i].Minus);
+            // Firmware applies the gyro bias itself; the bias field only centres the range.
+            int span = Math.Abs(gyroRange[i].Plus - bias) + Math.Abs(gyroRange[i].Minus - bias);
             if (span == 0 || speed2x <= 0 || Math.Abs(bias) > 1024)
             {
                 continue;
@@ -137,7 +141,7 @@ public sealed class ImuCalibration
                 continue;
             }
 
-            c._gyro[i] = (bias, scale);
+            c._gyro[i] = (0, scale);
         }
 
         (int Plus, int Minus)[] accelRange = [(R(23), R(25)), (R(27), R(29)), (R(31), R(33))];

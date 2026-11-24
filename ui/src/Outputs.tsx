@@ -138,7 +138,7 @@ function TriggerEditor({ side }: { side: "left" | "right" }) {
   );
 }
 
-export function Outputs({ output, link }: { output: Output | null; link?: string }) {
+export function Outputs({ output, link, ds4 = false }: { output: Output | null; link?: string; ds4?: boolean }) {
   const [haptic, setHaptic] = useState({ frequency: 160, amplitude: 70 });
   if (!output) return null;
 
@@ -164,7 +164,7 @@ export function Outputs({ output, link }: { output: Output | null; link?: string
             ))}
           </div>
         </div>
-        <div className="light-row">
+        {!ds4 && <div className="light-row">
           <span className="label">{L("Player", "Oyuncu")}</span>
           <div className="player-leds">
             {leds.map((i) => {
@@ -188,7 +188,7 @@ export function Outputs({ output, link }: { output: Output | null; link?: string
               </button>
             ))}
           </div>
-        </div>
+        </div>}
       </section>
 
       <section className="panel">
@@ -197,15 +197,15 @@ export function Outputs({ output, link }: { output: Output | null; link?: string
         <Slider label={L("Right (light)", "Sağ (hafif)")} min={0} max={255} value={output.rumbleRight} onChange={(v) => send({ type: "rumble", left: output.rumbleLeft, right: v })} />
       </section>
 
-      <section className="panel triggers">
+      {!ds4 && <section className="panel triggers">
         <h2>{L("Triggers", "Tetikler")}</h2>
         <div className="two">
           <TriggerEditor side="left" />
           <TriggerEditor side="right" />
         </div>
-      </section>
+      </section>}
 
-      <section className="panel">
+      {!ds4 && <section className="panel">
         <h2>{L("Haptics test", "Haptik test")}</h2>
         {link === "Usb" ? (
           <p className="muted-text">{L("USB haptics use the audio channel. This test requires Bluetooth.", "USB'de haptik ses kanalından gider; bu test Bluetooth içindir.")}</p>
@@ -230,7 +230,7 @@ export function Outputs({ output, link }: { output: Output | null; link?: string
             </div>
           </>
         )}
-      </section>
+      </section>}
 
       <button className="button ghost" onClick={() => send({ type: "reset" })}>
         {L("Reset all", "Hepsini sıfırla")}

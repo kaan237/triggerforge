@@ -186,7 +186,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
   const devices = [
     { mac: "A0:AB:51:12:34:56", model: "DualSense", link: "Bluetooth", battery: 85, charging: false },
     { mac: "A0:AB:51:12:34:57", model: "DualSenseEdge", link: "Usb", battery: 63, charging: true },
-    { mac: "A0:AB:51:12:34:58", model: "DualSense", link: "Bluetooth", battery: 48, charging: false },
+    { mac: "A0:AB:51:12:34:58", model: "DualShock4", link: "Bluetooth", battery: 48, charging: false },
   ] satisfies Omit<ControllerStatus, "index" | "primary" | "profileId" | "profileName">[];
   const slots: (typeof devices[number] | undefined)[] = [devices[0], devices[1], undefined, undefined];
   const sessionProfiles = new Map<string, string>();
@@ -696,7 +696,7 @@ export function createSimulator(emit: (m: HostMessage) => void) {
       r2: Math.max(0, Math.round(wave(0.5, 3) * 255)),
       gyro: [wave(2) * 40, wave(1.5) * 20, wave(1) * 10],
       accel: [wave(0.3) * 0.2, 0.98, wave(0.4) * 0.15],
-      touch: wave(0.4) > 0.3 ? [{ id: 1, x: 960 + Math.round(wave(1.2) * 700), y: 540 + Math.round(wave(0.9) * 400) }] : [],
+      touch: wave(0.4) > 0.3 ? [{ id: 1, x: 960 + Math.round(wave(1.2) * 700), y: (primary?.model === "DualShock4" ? 471 : 540) + Math.round(wave(0.9) * (primary?.model === "DualShock4" ? 350 : 400)) }] : [],
       battery: primary.battery,
       charging: primary.charging,
       headphones: false,

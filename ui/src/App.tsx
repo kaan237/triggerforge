@@ -1,4 +1,4 @@
-import { L, modelName } from "./i18n";
+import { L, isDs4, modelName } from "./i18n";
 import { useEffect, useState } from "react";
 import logo from "./assets/logo-64.png";
 import { inHost, type Profile, type Status } from "./host";
@@ -91,6 +91,11 @@ function Shell() {
     document.documentElement.style.setProperty("--accent", color && color.toUpperCase() !== "#000000" ? lift(color) : "#9a9ca1");
   }, [output, status]);
 
+  const ds4 = isDs4(status);
+  useEffect(() => {
+    if (ds4 && section === "haptics") setSection("controller");
+  }, [ds4, section]);
+
   if (!settings) return null;
   if (!settings.firstRunDone) return <><SetupWizard settings={settings} /><Notices /></>;
 
@@ -103,7 +108,7 @@ function Shell() {
           TriggerForge
         </div>
         <ul>
-          {sections.map((s) => (
+          {sections.filter((s) => !(ds4 && s.id === "haptics")).map((s) => (
             <li key={s.id}>
               <button className={section === s.id ? "active" : ""} onClick={() => setSection(s.id)}>
                 {s.label}

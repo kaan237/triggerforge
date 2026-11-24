@@ -26,6 +26,50 @@ public struct Ds4Timestamp
     }
 }
 
+/// <summary>What the reader does with one wireless adaptor report.</summary>
+public enum DongleStep
+{
+    /// <summary>Parse and publish it.</summary>
+    Pass,
+    /// <summary>The controller was just paired again: restart the clock, re-read calibration, then parse it.</summary>
+    Resume,
+    /// <summary>Drop it; no controller is paired.</summary>
+    Drop,
+    /// <summary>Drop it, but publish one neutral state first so nothing stays held.</summary>
+    DropAndRelease,
+}
+
+/// <summary>
+/// Follows the "no controller paired" flag of a wireless adaptor. A fresh tracker asks for a
+/// <see cref="DongleStep.Resume"/> on the first paired report, so calibration is read once more there.
+/// </summary>
+public struct DonglePairing
+{
+    private bool _awaitingPair;
+    private bool _gotInput;
+
+    public DonglePairing()
+    {
+        _awaitingPair = true;
+    }
+
+    public DongleStep Next(bool unpaired)
+    {
+        if (unpaired)
+        {
+            bool release = _gotInput;
+            _gotInput = false;
+            _awaitingPair = true;
+            return release ? DongleStep.DropAndRelease : DongleStep.Drop;
+        }
+
+        bool resume = _awaitingPair;
+        _awaitingPair = false;
+        _gotInput = true;
+        return resume ? DongleStep.Resume : DongleStep.Pass;
+    }
+}
+
 /// <summary>Turns DualShock 4 input reports (USB 0x01, Bluetooth 0x11..0x19) into <see cref="InputState"/>.</summary>
 public static class Ds4InputParser
 {
@@ -41,6 +85,23 @@ public static class Ds4InputParser
 
     /// <summary>The wireless adaptor flags "no controller paired" in a USB report.</summary>
     public static bool DongleUnpaired(ReadOnlySpan<byte> report) => report.Length > 31 && (report[31] & 0x04) != 0;
+
+    /// <summary>Everything released and centred; keeps the last battery and sensor clock.</summary>
+    public static InputState Neutral(InputState? last) => new(
+        Buttons.None,
+        new Stick(128, 128),
+        new Stick(128, 128),
+        0,
+        0,
+        default,
+        default,
+        last?.SensorTimestamp ?? 0,
+        default,
+        default,
+        last?.Battery ?? new Battery(0, ChargeState.Discharging),
+        false,
+        false,
+        false);
 
     /// <param name="timestamp">Per-controller clock state; only advanced by accepted reports.</param>
     /// <param name="dongle">Report comes from the wireless adaptor: unpaired reports are dropped.</param>
@@ -144,7 +205,7 @@ public static class Ds4InputParser
                 < 10 => new Battery(level * 10 + 5, ChargeState.Charging),
                 10 => new Battery(100, ChargeState.Charging),
                 11 => new Battery(100, ChargeState.Full),
-                _ => new Battery(0, ChargeState.Discharging),
+                _ => new Battery(0, ChargeState.Error),
             };
         }
 

@@ -1,4 +1,4 @@
-import { L } from "../i18n";
+import { L, isDs4 } from "../i18n";
 import { useEffect, useState } from "react";
 import { inHost, send, subscribe, type AppSettings } from "../host";
 import { isKey, modifierKeys } from "../keys";
@@ -43,8 +43,8 @@ function DevTools() {
     <div className="dev-tools">
       <p className="hint">{L("These test controls temporarily override the profile. Select Reset all to restore it.", "Faz 1 test ekranı. Buradaki komutlar profilin üstüne geçici olarak yazılır; “Hepsini sıfırla” profile döner.")}</p>
       <div className="controller-page">
-        <Live input={input} edge={status?.model === "DualSenseEdge"} />
-        <Outputs output={output} link={status?.link} />
+        <Live input={input} edge={status?.model === "DualSenseEdge"} ds4={isDs4(status)} />
+        <Outputs output={output} link={status?.link} ds4={isDs4(status)} />
       </div>
       {!inHost && (
         <div className="setting-row">

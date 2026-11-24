@@ -22,36 +22,48 @@ public static class DualSenseIds
 
     public static bool IsDualShock4(ControllerModel model) => model == ControllerModel.DualShock4;
 
+    /// <summary>
+    /// Model and link from the product id and the HID input report length, or null for anything else.
+    /// Windows exposes the gamepad as one collection, so the length tells the link apart. A Bluetooth
+    /// DualShock 4 reports its largest input report (0x19, 547 bytes), not the 78 bytes of report 0x11.
+    /// </summary>
+    public static (ControllerModel Model, Link Link)? Classify(ushort productId, int inputReportLength)
+    {
+        switch (productId)
+        {
+            case DualSenseProductId:
+            case DualSenseEdgeProductId:
+                ControllerModel model = productId == DualSenseProductId ? ControllerModel.DualSense : ControllerModel.DualSenseEdge;
+                return inputReportLength switch
+                {
+                    UsbInputReportLength => (model, Link.Usb),
+                    BluetoothInputReportLength => (model, Link.Bluetooth),
+                    _ => null,
+                };
+            case DualShock4V1ProductId:
+            case DualShock4V2ProductId:
+                if (inputReportLength == UsbInputReportLength)
+                {
+                    return (ControllerModel.DualShock4, Link.Usb);
+                }
+
+                return inputReportLength >= BluetoothInputReportLength ? (ControllerModel.DualShock4, Link.Bluetooth) : null;
+            case DualShock4DongleProductId:
+                // The wireless adaptor only exposes the USB report layout.
+                return inputReportLength == UsbInputReportLength ? (ControllerModel.DualShock4, Link.Usb) : null;
+            default:
+                return null;
+        }
+    }
+
     public static List<ControllerInfo> FindControllers()
     {
         var found = new List<ControllerInfo>();
         foreach (HidDeviceInfo hid in HidDevice.Enumerate(SonyVendorId))
         {
-            ControllerModel? model = hid.ProductId switch
+            if (Classify(hid.ProductId, hid.InputReportLength) is { } kind)
             {
-                DualSenseProductId => ControllerModel.DualSense,
-                DualSenseEdgeProductId => ControllerModel.DualSenseEdge,
-                DualShock4V1ProductId or DualShock4V2ProductId or DualShock4DongleProductId => ControllerModel.DualShock4,
-                _ => null,
-            };
-
-            // Windows exposes the gamepad as one collection; the input report length tells the link apart.
-            Link? link = hid.InputReportLength switch
-            {
-                UsbInputReportLength => Link.Usb,
-                BluetoothInputReportLength => Link.Bluetooth,
-                _ => null,
-            };
-
-            // The wireless adaptor only exposes the USB report layout.
-            if (hid.ProductId == DualShock4DongleProductId && link != Link.Usb)
-            {
-                link = null;
-            }
-
-            if (model is not null && link is not null)
-            {
-                found.Add(new ControllerInfo(hid, model.Value, link.Value));
+                found.Add(new ControllerInfo(hid, kind.Model, kind.Link));
             }
         }
 

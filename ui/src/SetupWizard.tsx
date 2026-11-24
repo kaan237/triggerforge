@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import logo from "./assets/logo-256.png";
 import { send, type AppSettings } from "./host";
-import { L, modelName } from "./i18n";
+import { L, isDs4, modelName } from "./i18n";
 import { Live } from "./Live";
 import { linkLabel } from "./model";
 import { DriverCard } from "./pages/Emulation";
@@ -58,7 +58,7 @@ function TestStep() {
 
   return (
     <>
-      <Live input={input} edge={status?.model === "DualSenseEdge"} />
+      <Live input={input} edge={status?.model === "DualSenseEdge"} ds4={isDs4(status)} />
       <div className="button-row setup-actions">
         <button className="button" disabled={disabled} onClick={() => {
           tested.current = true;

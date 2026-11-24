@@ -1,4 +1,4 @@
-import { L } from "../i18n";
+import { L, isDs4 } from "../i18n";
 import { useEffect, useRef } from "react";
 import type { Brightness, Lightbar, MicLed, Profile } from "../host";
 import { brightnessFactor, effectColor, effects, ledMask } from "../model";
@@ -56,8 +56,9 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
 }
 
 export function Light() {
-  const { draft, edit } = useApp();
+  const { draft, edit, status } = useApp();
   const input = useInput();
+  const ds4 = isDs4(status);
   if (!draft) return <div className="page"><PageHead title={L("Light", "Işık")} /></div>;
 
   const l = draft.lightbar;
@@ -109,7 +110,7 @@ export function Light() {
             </div>
           </Section>
 
-          <Section title={L("Player LEDs", "Oyuncu LED'leri")}>
+          {!ds4 && <Section title={L("Player LEDs", "Oyuncu LED'leri")}>
             <div className="row-field">
               <Segmented
                 label={L("Player LED mode", "Oyuncu LED modu")}
@@ -147,9 +148,9 @@ export function Light() {
               })}
               <span className="faint small">{draft.playerLeds.mode === "custom" ? L("Click the LEDs", "LED'lere tıkla") : ""}</span>
             </div>
-          </Section>
+          </Section>}
 
-          <Section title={L("Microphone LED", "Mikrofon LED'i")}>
+          {!ds4 && <Section title={L("Microphone LED", "Mikrofon LED'i")}>
             <Segmented<MicLed>
               label={L("Microphone LED", "Mikrofon LED")}
               value={draft.micLed}
@@ -160,7 +161,7 @@ export function Light() {
                 { id: "pulse", label: L("Pulse", "Nabız") },
               ]}
             />
-          </Section>
+          </Section>}
         </div>
       </div>
     </div>

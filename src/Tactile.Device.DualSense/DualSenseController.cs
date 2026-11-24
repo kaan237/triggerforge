@@ -39,7 +39,6 @@ public sealed class DualSenseController : IDisposable
     private bool _sentFirst;
     private volatile bool _hapticsActive;
     private readonly bool _dongle;
-    private bool _calibrationPending;
 
     private DualSenseController(HidDevice device, ControllerDetails details, UsbFeatureReports features, bool dongle = false)
     {
@@ -126,18 +125,15 @@ public sealed class DualSenseController : IDisposable
             // On Bluetooth the 0x05 read also switches the controller from reduced to full reports.
             byte[]? calibration = ReadDs4Calibration(device, info.Link, dongle);
             bool ready = calibration is not null && !ImuCalibration.IsBlank(calibration);
-            string? mac = info.Link == Link.Usb ? ReadDs4UsbMac(device) : MacFromPath(info.Hid.Path);
+            string? mac = info.Link == Link.Usb ? ReadDs4UsbMac(device) : ReadDs4BluetoothMac(device, info.Hid.Path);
 
             var details = new ControllerDetails(
                 info.Model,
                 info.Link,
                 mac,
                 null,
-                ready ? ImuCalibration.ParseDualShock4(calibration, grouped) : ImuCalibration.Identity);
-            var controller = new DualSenseController(device, details, UsbFeatureReports.None, dongle)
-            {
-                _calibrationPending = dongle && !ready,
-            };
+                ready ? ImuCalibration.ParseDualShock4(calibration, grouped) : ImuCalibration.DualShock4Nominal);
+            var controller = new DualSenseController(device, details, UsbFeatureReports.None, dongle);
             if (info.Link == Link.Bluetooth)
             {
                 controller.WriteRaw(Ds4OutputReport.BuildBluetooth(OutputState.Default));
@@ -190,10 +186,35 @@ public sealed class DualSenseController : IDisposable
     private static string? MacFromPath(string path)
     {
         Match m = BluetoothAddressInPath.Match(path);
-        return m.Success
-            ? string.Join(':', Enumerable.Range(0, 6).Select(i => m.Groups[1].Value.Substring(i * 2, 2).ToUpperInvariant()))
-            : null;
+        return m.Success ? FormatMac(m.Groups[1].Value) : null;
     }
+
+    /// <summary>
+    /// The address from a HID serial string: 12 hex digits, with or without ':' or '-' separators.
+    /// All zero or anything else gives null.
+    /// </summary>
+    internal static string? MacFromSerial(string? serial)
+    {
+        if (serial is null)
+        {
+            return null;
+        }
+
+        string digits = serial.Trim().Replace(":", "").Replace("-", "");
+        if (digits.Length != 12 || !digits.All(char.IsAsciiHexDigit) || digits.All(c => c == '0'))
+        {
+            return null;
+        }
+
+        return FormatMac(digits);
+    }
+
+    private static string FormatMac(string twelveHexDigits) =>
+        string.Join(':', Enumerable.Range(0, 6).Select(i => twelveHexDigits.Substring(i * 2, 2).ToUpperInvariant()));
+
+    /// <summary>On Bluetooth the HID child path has no address; the serial string does.</summary>
+    private static string? ReadDs4BluetoothMac(HidDevice device, string path) =>
+        MacFromSerial(device.TryGetSerial()) ?? MacFromPath(path);
 
     private static readonly Regex BluetoothAddressInPath = new("_([0-9a-fA-F]{12})(?=[&#_]|$)", RegexOptions.Compiled);
 
@@ -201,13 +222,8 @@ public sealed class DualSenseController : IDisposable
     {
         if (info.Model == ControllerModel.DualShock4)
         {
-            if (info.Link == Link.Bluetooth)
-            {
-                return MacFromPath(info.Hid.Path);
-            }
-
-            using HidDevice usb = HidDevice.Open(info.Hid);
-            return ReadDs4UsbMac(usb);
+            using HidDevice ds4 = HidDevice.Open(info.Hid);
+            return info.Link == Link.Bluetooth ? ReadDs4BluetoothMac(ds4, info.Hid.Path) : ReadDs4UsbMac(ds4);
         }
 
         using HidDevice device = HidDevice.Open(info.Hid);
@@ -355,8 +371,7 @@ public sealed class DualSenseController : IDisposable
         byte[] buffer = new byte[device.Info.InputReportLength];
         bool ds4 = Details.Model == ControllerModel.DualShock4;
         var clock = default(Ds4Timestamp);
-        bool wasUnpaired = false;
-        bool calibrationAttempt = _calibrationPending;
+        var pairing = new DonglePairing();
         while (_running)
         {
             int read;
@@ -381,22 +396,22 @@ public sealed class DualSenseController : IDisposable
                 ReadOnlySpan<byte> report = buffer.AsSpan(0, read);
                 if (_dongle)
                 {
-                    if (Ds4InputParser.DongleUnpaired(report))
+                    DongleStep step = pairing.Next(Ds4InputParser.DongleUnpaired(report));
+                    if (step == DongleStep.DropAndRelease)
                     {
-                        wasUnpaired = true;
+                        // Nothing may stay held while the controller is gone.
+                        PublishInput(Ds4InputParser.Neutral(_latest));
+                    }
+
+                    if (step is DongleStep.Drop or DongleStep.DropAndRelease)
+                    {
                         continue;
                     }
 
-                    if (wasUnpaired)
+                    if (step == DongleStep.Resume)
                     {
-                        wasUnpaired = false;
+                        // A different controller may have paired: restart the clock and read its calibration.
                         clock = default;
-                        calibrationAttempt = _calibrationPending;
-                    }
-
-                    if (calibrationAttempt)
-                    {
-                        calibrationAttempt = false;
                         ReloadDongleCalibration(device);
                     }
                 }
@@ -434,7 +449,6 @@ public sealed class DualSenseController : IDisposable
             if (feature is not null && !ImuCalibration.IsBlank(feature))
             {
                 Details = Details with { Calibration = ImuCalibration.ParseDualShock4(feature, grouped: true) };
-                _calibrationPending = false;
             }
         }
         catch (Exception e) when (e is IOException or ObjectDisposedException)
